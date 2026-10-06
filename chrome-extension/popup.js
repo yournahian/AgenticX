@@ -8,10 +8,15 @@ const DEFAULT_BACKEND_URL = 'http://localhost:5000';
 let state = {
   credits: 0,
   isAborted: false,
-  selectedTone: 'Natural & Concise',
-  selectedTonePrompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise.',
-  selectedToneId: 'natural',
+  selectedTone: 'Bullish (5-10 words)',
+  selectedTonePrompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no dashes, no preamble, no exclamation marks (!).',
+  selectedToneId: 'bullish-short',
   defaultTones: [
+    {
+      id: 'bullish-short',
+      name: 'Bullish (5-10 words)',
+      prompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no dashes, no preamble, no exclamation marks (!).'
+    },
     { id: 'natural', name: 'Natural & Concise', prompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise.' },
     { id: 'professional', name: 'Professional', prompt: 'Sound authoritative, sharp, and executive-level in 1-2 sentences.' },
     { id: 'question', name: 'Engaging Question', prompt: 'Offer an astute observation and conclude with an insightful question.' },
@@ -98,7 +103,11 @@ function extractTweetLinks(rawText) {
 }
 
 function filterTweetLinks(extractedLinks, options = {}) {
-  const engagedSet = new Set((options.engagedTweetIds || state.engagedTweetIds || []).map(String));
+  const ignoreEngaged = options.ignoreEngagedHistory ||
+    document.getElementById('tgIgnoreEngagedFilter')?.checked ||
+    false;
+
+  const engagedSet = ignoreEngaged ? new Set() : new Set((options.engagedTweetIds || state.engagedTweetIds || []).map(String));
   const seenInBatch = new Set();
   const freshTweets = [];
   const duplicateLinks = [];
@@ -190,56 +199,73 @@ async function initToneSystem() {
 
 function renderTonePills() {
   const container = document.getElementById('tonePills');
-  if (!container) return;
-  container.innerHTML = '';
+  const tgContainer = document.getElementById('tgTonePillsRow');
+  const tgActiveToneLabel = document.getElementById('tgActiveToneName');
 
-  // Render default system tones
-  state.defaultTones.forEach(t => {
-    const btn = document.createElement('button');
-    const isAct = state.selectedToneId === t.id || (!state.selectedToneId && state.selectedTone === t.name);
-    btn.className = `tone-pill ${isAct ? 'active' : ''}`;
-    btn.dataset.id = t.id;
-    btn.dataset.tone = t.name;
-    btn.textContent = t.name.split(' ')[0];
-    btn.title = `${t.name}: ${t.prompt}`;
-    btn.onclick = () => selectTone(t.id, t.name, t.prompt);
-    container.appendChild(btn);
-  });
+  if (tgActiveToneLabel) {
+    tgActiveToneLabel.textContent = state.selectedTone || 'Bullish (5-10 words)';
+  }
 
-  // Render custom tones (Free users: max 2 by default, configurable by admin)
-  state.customTones.forEach(ct => {
-    const pillWrap = document.createElement('div');
-    pillWrap.style.display = 'inline-flex';
-    pillWrap.style.alignItems = 'center';
-    pillWrap.style.gap = '2px';
+  const renderButtonsTo = (targetEl, isMini = false) => {
+    if (!targetEl) return;
+    targetEl.innerHTML = '';
 
-    const btn = document.createElement('button');
-    const isAct = state.selectedToneId === ct.id || state.selectedTone === ct.name;
-    btn.className = `tone-pill ${isAct ? 'active' : ''}`;
-    btn.dataset.id = ct.id;
-    btn.dataset.tone = ct.name;
-    btn.textContent = `⭐ ${ct.name}`;
-    btn.title = `Custom: ${ct.prompt}`;
-    btn.onclick = () => selectTone(ct.id, ct.name, ct.prompt);
+    // Render default system tones
+    state.defaultTones.forEach(t => {
+      const btn = document.createElement('button');
+      const isAct = state.selectedToneId === t.id || (!state.selectedToneId && state.selectedTone === t.name);
+      btn.className = `tone-pill ${isAct ? 'active' : ''}`;
+      if (isMini) btn.style.fontSize = '10px';
+      btn.dataset.id = t.id;
+      btn.dataset.tone = t.name;
+      btn.textContent = isMini ? t.name.split(' ')[0] : t.name.split(' ')[0];
+      btn.title = `${t.name}: ${t.prompt}`;
+      btn.onclick = () => selectTone(t.id, t.name, t.prompt);
+      targetEl.appendChild(btn);
+    });
 
-    const delBtn = document.createElement('button');
-    delBtn.innerHTML = '✕';
-    delBtn.style.background = 'none';
-    delBtn.style.border = 'none';
-    delBtn.style.cursor = 'pointer';
-    delBtn.style.fontSize = '10px';
-    delBtn.style.color = 'var(--text-muted)';
-    delBtn.style.padding = '2px 4px';
-    delBtn.title = 'Delete custom style';
-    delBtn.onclick = (e) => {
-      e.stopPropagation();
-      deleteCustomTone(ct.id);
-    };
+    // Render custom tones
+    state.customTones.forEach(ct => {
+      const pillWrap = document.createElement('div');
+      pillWrap.style.display = 'inline-flex';
+      pillWrap.style.alignItems = 'center';
+      pillWrap.style.gap = '2px';
 
-    pillWrap.appendChild(btn);
-    pillWrap.appendChild(delBtn);
-    container.appendChild(pillWrap);
-  });
+      const btn = document.createElement('button');
+      const isAct = state.selectedToneId === ct.id || state.selectedTone === ct.name;
+      btn.className = `tone-pill ${isAct ? 'active' : ''}`;
+      if (isMini) btn.style.fontSize = '10px';
+      btn.dataset.id = ct.id;
+      btn.dataset.tone = ct.name;
+      btn.textContent = `⭐ ${ct.name}`;
+      btn.title = `Custom: ${ct.prompt}`;
+      btn.onclick = () => selectTone(ct.id, ct.name, ct.prompt);
+
+      pillWrap.appendChild(btn);
+
+      if (!isMini) {
+        const delBtn = document.createElement('button');
+        delBtn.innerHTML = '✕';
+        delBtn.style.background = 'none';
+        delBtn.style.border = 'none';
+        delBtn.style.cursor = 'pointer';
+        delBtn.style.fontSize = '10px';
+        delBtn.style.color = 'var(--text-muted)';
+        delBtn.style.padding = '2px 4px';
+        delBtn.title = 'Delete custom style';
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          deleteCustomTone(ct.id);
+        };
+        pillWrap.appendChild(delBtn);
+      }
+
+      targetEl.appendChild(pillWrap);
+    });
+  };
+
+  renderButtonsTo(container, false);
+  renderButtonsTo(tgContainer, true);
 
   // Update limit display in drawer
   const limitEl = document.getElementById('customLimitCount');
@@ -517,6 +543,30 @@ function initAgentListeners() {
     tgInput.addEventListener('input', updateTgParseSummaryUI);
     tgInput.addEventListener('paste', () => setTimeout(updateTgParseSummaryUI, 50));
   }
+
+  // Clean Telegram Input Button (Strip bot tags, emojis, timestamps)
+  document.getElementById('cleanTgInputBtn')?.addEventListener('click', handleCleanTgInput);
+
+  // 2nd Twitter Account Support: Clear Engaged History / Reset
+  document.getElementById('clearEngagedHistoryBtn')?.addEventListener('click', async () => {
+    state.engagedTweetIds = [];
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({ engagedTweetIds: [] });
+    }
+    const backendUrl = await getBackendUrl();
+    fetch(`${backendUrl}/api/tweets/clear-engaged`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 1 })
+    }).catch(() => null);
+    updateTgParseSummaryUI();
+    alert('✓ Engaged history cache cleared for 2nd ID!\nAll previously skipped posts are now marked fresh and ready for your 2nd Twitter account.');
+  });
+
+  // Checkbox: Allow engaging with 2nd ID (ignore previous ID history)
+  document.getElementById('tgIgnoreEngagedFilter')?.addEventListener('change', () => {
+    updateTgParseSummaryUI();
+  });
 
   // Action Checkbox Preset Buttons
   document.getElementById('actionSelectAllBtn')?.addEventListener('click', () => {

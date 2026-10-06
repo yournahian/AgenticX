@@ -262,15 +262,29 @@
                     <span>📜 Smooth Scroll & Hydrate Tweet</span>
                   </label>
                 </div>
+              <!-- Tone & Style Selector for Telegram Agent -->
+              <div style="margin: 6px 0; padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 4px;">
+                  <span style="font-weight: 700; color: var(--text-primary);">AI Comment Style:</span>
+                  <span id="tgActiveToneName" style="color: var(--blue-primary); font-weight: 700;">Bullish (5-10 words)</span>
+                </div>
+                <div id="tgTonePillsRow" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;"></div>
               </div>
 
               <!-- Link Parser & Filter Live Feedback Card -->
               <div id="tgParseSummary" style="display:none; margin:8px 0; padding:8px 10px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
-                <div style="display:flex; justify-content:space-between; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
                   <span>Link Analysis Breakdown</span>
-                  <span id="tgFreshCountBadge" style="color:var(--status-success); font-weight:800;">0 Fresh</span>
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span id="tgFreshCountBadge" style="color:var(--status-success); font-weight:800;">0 Fresh</span>
+                    <button type="button" id="clearEngagedHistoryBtn" style="font-size:9.5px; padding:2px 6px; background:rgba(239,68,68,0.1); color:#DC2626; border:1px solid rgba(239,68,68,0.25); border-radius:4px; cursor:pointer;" title="Clear engaged history when switching Twitter accounts">Reset For 2nd ID</button>
+                  </div>
                 </div>
                 <div id="tgBreakdownText" style="color:var(--text-secondary); line-height:1.4;"></div>
+                <label style="display:flex; align-items:center; gap:5px; margin-top:6px; font-size:10.5px; color:var(--text-secondary); cursor:pointer;">
+                  <input type="checkbox" id="tgIgnoreEngagedFilter">
+                  <span>Allow engaging with 2nd ID (don't skip previous ID's history)</span>
+                </label>
               </div>
 
               <div style="display:flex; gap:6px; margin-top:8px;">
@@ -425,7 +439,8 @@
             <button type="button" id="openCustomToneBtn" style="font-size:11px; color:var(--blue-primary); background:none; border:none; cursor:pointer; font-weight:700; padding:0;">+ Custom Style</button>
           </div>
           <div class="tone-pills" id="tonePills" style="display:flex; flex-wrap:wrap; gap:6px;">
-            <button class="tone-pill active" data-tone="Natural & Concise" data-id="natural">Natural</button>
+            <button class="tone-pill active" data-tone="Bullish (5-10 words)" data-id="bullish-short">🚀 Bullish</button>
+            <button class="tone-pill" data-tone="Natural & Concise" data-id="natural">Natural</button>
             <button class="tone-pill" data-tone="Professional" data-id="professional">Pro</button>
             <button class="tone-pill" data-tone="Engaging Question" data-id="question">Question</button>
             <button class="tone-pill" data-tone="Witty" data-id="witty">Witty</button>

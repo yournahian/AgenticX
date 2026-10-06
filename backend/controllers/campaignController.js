@@ -89,3 +89,11 @@ exports.markTweetsEngaged = (req, res) => {
     count: Array.isArray(tweets) ? tweets.length : 1
   });
 };
+
+// Clear engaged tweets cache (useful when switching Twitter IDs)
+exports.clearEngagedTweets = (req, res) => {
+  const userId = Number(req.headers['x-user-id'] || 1);
+  db.clearEngagedTweets(userId);
+  res.json({ message: 'Engaged tweets cache cleared successfully' });
+};
+

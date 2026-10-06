@@ -313,5 +313,9 @@ module.exports = {
         t.actionType || t.action_type || 'REPLY'
       );
     }
+  },
+
+  clearEngagedTweets(userId = 1) {
+    db.prepare('DELETE FROM engaged_tweets WHERE user_id = ?').run(userId);
   }
 };

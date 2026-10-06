@@ -402,12 +402,69 @@ async function generateWithProvider({
         }
       }
     } catch (err) {
-      console.warn(`[MultiProvider] Live call to ${prov} failed: ${err.message}. Using synthesis engine.`);
+      console.warn(`[MultiProvider] Live call to ${prov} failed: ${err.message}.`);
     }
   }
 
-  // Graceful intelligent template engine when key is missing or quota exhausted
-  const fallback = createSynthesizedReply(tweetText, tweetAuthor, style);
+  // FAILOVER CASCADE: If primary model/provider failed, attempt secondary working live provider
+  const fallbackAttempts = [
+    { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct' },
+    { provider: 'groq', model: 'allam-2-7b' },
+    { provider: 'groq', model: 'qwen/qwen3.8-27b' }
+  ];
+
+  for (const fb of fallbackAttempts) {
+    if (fb.provider === prov && fb.model === selectedModel) continue;
+    const fbKey = getProviderKey(fb.provider);
+    if (!fbKey) continue;
+
+    try {
+      let fbEndpoint = fb.provider === 'groq'
+        ? 'https://api.groq.com/openai/v1/chat/completions'
+        : 'https://openrouter.ai/api/v1/chat/completions';
+      
+      let fbHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${fbKey}`
+      };
+      if (fb.provider === 'openrouter') {
+        fbHeaders['HTTP-Referer'] = 'https://atomx.io';
+        fbHeaders['X-Title'] = 'ATOMX ENGAGE';
+      }
+
+      const fbRes = await fetch(fbEndpoint, {
+        method: 'POST',
+        headers: fbHeaders,
+        body: JSON.stringify({
+          model: fb.model,
+          messages: [
+            { role: 'system', content: `${SYSTEM_PROMPT_TEMPLATE}\nTone Style: ${styleInstruction}` },
+            { role: 'user', content: `Target Tweet by ${tweetAuthor}:\n"${tweetText}"\n\nGenerate reply:` }
+          ],
+          max_tokens: maxTokens,
+          temperature: 0.72
+        })
+      });
+
+      if (fbRes.ok) {
+        const data = await fbRes.json();
+        const reply = data.choices?.[0]?.message?.content?.trim();
+        if (reply) {
+          return {
+            reply,
+            provider: `${fb.provider.toUpperCase()} (Failover)`,
+            modelUsed: fb.model,
+            tokensUsed: data.usage?.total_tokens || 50
+          };
+        }
+      }
+    } catch (e) {
+      // Continue to next failover option
+    }
+  }
+
+  // Graceful synthesis engine tailored to the prompt instructions
+  const fallback = createSynthesizedReply(tweetText, tweetAuthor, style, styleInstruction);
   return {
     reply: fallback,
     provider: `${prov.toUpperCase()} (Synthesized)`,
@@ -416,8 +473,23 @@ async function generateWithProvider({
   };
 }
 
-function createSynthesizedReply(tweet, author, style) {
+function createSynthesizedReply(tweet, author, style, styleInstruction = '') {
   const cleanSnippet = tweet.replace(/https?:\/\/\S+/g, '').slice(0, 42).trim();
+  const lowerPrompt = (styleInstruction || '').toLowerCase();
+
+  // If user requested 5-10 words constraint or bullish constraint
+  if (lowerPrompt.includes('5 and 10 words') || lowerPrompt.includes('bullish') || style === 'Bullish (5-10 words)') {
+    const bullishVariations = [
+      'Market momentum is strongly in our favor right now',
+      'The upside potential here is looking better every day',
+      'Strong execution and clear momentum building on this update',
+      'High conviction on this project and the direction forward',
+      'Solid progress and looking very promising for the future',
+      'Really great vision and steady progress on this development'
+    ];
+    const picked = bullishVariations[Math.floor(Math.random() * bullishVariations.length)];
+    return picked;
+  }
 
   switch (style) {
     case 'Professional':
@@ -430,7 +502,7 @@ function createSynthesizedReply(tweet, author, style) {
       return `Simple lessons that take founders a decade to figure out: "${cleanSnippet}...".`;
     case 'Natural & Concise':
     default:
-      return `Compounding focus on "${cleanSnippet}..." is the real unlock here. Solid breakdown.`;
+      return `Focused execution on "${cleanSnippet}..." is what really drives compounding returns.`;
   }
 }
 

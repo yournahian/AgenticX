@@ -36,6 +36,7 @@ router.post('/queue', campaignController.addToQueue);
 router.post('/tweets/parse-and-filter', campaignController.parseAndFilterTweets);
 router.get('/tweets/engaged', campaignController.getEngagedTweets);
 router.post('/tweets/mark-engaged', campaignController.markTweetsEngaged);
+router.post('/tweets/clear-engaged', campaignController.clearEngagedTweets);
 
 // Admin Control Panel
 router.get('/admin/stats', adminController.getStats);
