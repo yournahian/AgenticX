@@ -1062,22 +1062,53 @@ body {
 [data-theme="dark"] .agent-console-card, body.dark .agent-console-card,
 [data-theme="dark"] .back-btn, body.dark .back-btn,
 [data-theme="dark"] .history-item, body.dark .history-item,
-[data-theme="dark"] .stat-pill, body.dark .stat-pill {
-  background: var(--bg-card);
-  border-color: var(--border-subtle);
+[data-theme="dark"] .stat-pill, body.dark .stat-pill,
+[data-theme="dark"] .custom-tone-drawer, body.dark .custom-tone-drawer {
+  background: var(--bg-card) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
 }
 
 [data-theme="dark"] .bento-card:hover, body.dark .bento-card:hover {
-  background: #192030;
-  border-color: #384C7A;
+  background: #192030 !important;
+  border-color: #384C7A !important;
+}
+
+[data-theme="dark"] .tone-pill, body.dark .tone-pill {
+  background: #141824 !important;
+  color: #9DA3AF !important;
+  border: 1px solid #252D40 !important;
+}
+
+[data-theme="dark"] .tone-pill:hover, body.dark .tone-pill:hover {
+  background: #1D2335 !important;
+  color: #FFFFFF !important;
+}
+
+[data-theme="dark"] .tone-pill.active, body.dark .tone-pill.active {
+  background: rgba(49, 87, 230, 0.28) !important;
+  color: #7B9DFF !important;
+  border-color: #4369EE !important;
+  box-shadow: 0 0 10px rgba(67, 105, 238, 0.25) !important;
+}
+
+[data-theme="dark"] .secondary-btn, body.dark .secondary-btn {
+  background: #151A26 !important;
+  color: #E2E8F0 !important;
+  border-color: #263147 !important;
+}
+
+[data-theme="dark"] .secondary-btn:hover, body.dark .secondary-btn:hover {
+  background: #1D2436 !important;
+  color: #FFFFFF !important;
 }
 
 [data-theme="dark"] .ext-textarea, body.dark .ext-textarea,
 [data-theme="dark"] .ext-input, body.dark .ext-input,
 [data-theme="dark"] .ext-select, body.dark .ext-select {
-  background: #0B0E14;
-  color: #F4F5F8;
-  border-color: var(--border-subtle);
+  background: #0B0E14 !important;
+  color: #F4F5F8 !important;
+  border-color: var(--border-subtle) !important;
 }
 
 [data-theme="dark"] .icon-btn, body.dark .icon-btn {
@@ -1096,4 +1127,5 @@ body {
 [data-theme="dark"] .badge-mini.safety, body.dark .badge-mini.safety { background: rgba(2, 132, 199, 0.2); color: #38BDF8; }
 [data-theme="dark"] .badge-mini.ai, body.dark .badge-mini.ai { background: rgba(219, 39, 119, 0.2); color: #F472B6; }
 [data-theme="dark"] .badge-mini.saved, body.dark .badge-mini.saved { background: rgba(180, 83, 9, 0.2); color: #FDE047; }
+
 

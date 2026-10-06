@@ -55,4 +55,8 @@ router.post('/admin/curated-lists', adminController.saveCuratedLists);
 router.get('/admin/active-model', adminController.getActiveModel);
 router.post('/admin/active-model', adminController.saveActiveModel);
 
+// Tone & Style Templates Management
+router.get('/tone-styles', adminController.getToneStyles);
+router.post('/admin/tone-styles', adminController.saveToneStyles);
+
 module.exports = router;

@@ -91,6 +91,18 @@ const AtomXState = {
     { id: 'pro', name: 'PRO', credits: 25000, price: 29, popular: false, features: ['25,000 AI replies', 'Premium AI models', 'Advanced agents', 'Priority generation', 'Advanced analytics'] }
   ],
 
+  // Admin Tone & Style Templates and User Custom Template Quotas
+  toneStylesData: {
+    maxCustomTemplatesPerUser: 2,
+    defaultTones: [
+      { id: 'natural', name: 'Natural & Concise', description: 'Casual, human-sounding 1-2 sentences with high signal', prompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise. Avoid robotic hashtags or buzzwords.' },
+      { id: 'professional', name: 'Professional', description: 'Authoritative, insightful, industry-savvy perspective', prompt: 'Sound authoritative, sharp, and executive-level. Offer a structured perspective in 1-2 sentences.' },
+      { id: 'question', name: 'Engaging Question', description: 'Provocative observation ending with an engaging question', prompt: 'Offer an astute observation on the post and conclude with an insightful, thought-provoking question to invite replies.' },
+      { id: 'witty', name: 'Witty', description: 'Clever, witty banter with sharp intelligence', prompt: 'Deliver a clever, witty, and humorous observation. Keep it light, sharp, and entertaining.' },
+      { id: 'technical', name: 'Technical Alpha', description: 'Deep protocol and architectural insight', prompt: 'Focus on underlying architecture, incentive design, or technical mechanics. Sound like a principal engineer or core researcher.' }
+    ]
+  },
+
   // Admin Curated Lists (Audience Builder & Sorsa Score Targets)
   curatedLists: {
     audienceList1: {
@@ -458,6 +470,7 @@ function navigateToScreen(screenId) {
     case '16': renderAdminPlanManagement(contentArea); break;
     case '17': renderAdminTransactions(contentArea); break;
     case '20': renderAdminCuratedLists(contentArea); break;
+    case '21': renderAdminToneStyles(contentArea); break;
     case '18': renderSuspended(contentArea); break;
     case '19': renderSystemStates(contentArea); break;
     case 'arch': renderSystemArchitecture(contentArea); break;
@@ -2616,6 +2629,193 @@ async function saveCuratedListsToServer() {
 }
 
 // -------------------------------------------------------------
+// SCREEN 21: ADMIN TONE & STYLE PROMPTS & USER QUOTAS
+// -------------------------------------------------------------
+async function fetchAdminToneStyles() {
+  try {
+    const res = await fetch(`${API_BASE}/api/tone-styles`);
+    if (res.ok) {
+      const data = await res.json();
+      AtomXState.toneStylesData = data;
+    }
+  } catch (e) {
+    console.warn('Could not fetch tone styles from server, using state cache', e);
+  }
+}
+
+function renderAdminToneStyles(container) {
+  const data = AtomXState.toneStylesData || {
+    maxCustomTemplatesPerUser: 2,
+    defaultTones: []
+  };
+  const tones = data.defaultTones || [];
+
+  container.innerHTML = `
+    <div class="app-layout">
+      ${renderAdminSidebarHTML('21')}
+      <div class="app-workspace">
+        <div class="workspace-header">
+          <div>
+            <h1 class="page-title">Tone & Style Templates & Quotas</h1>
+            <p class="page-subtitle">Configure default AI tone system prompts, add new styles, and set custom template allowances for free users.</p>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-secondary btn-sm" onclick="promptAddNewToneStyle()">+ Add New Tone</button>
+            <button class="btn btn-primary btn-sm" onclick="saveAdminToneStylesToServer()">Save & Broadcast to Extension</button>
+          </div>
+        </div>
+
+        <div class="workspace-body">
+          <!-- Summary Metrics -->
+          <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom:20px;">
+            <div class="stat-card">
+              <div class="stat-label">DEFAULT SYSTEM TONES</div>
+              <div class="stat-value" style="color:var(--blue-primary);">${tones.length}</div>
+              <div class="stat-trend" style="color:var(--status-success);">Active globally across all agents</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">FREE USER CUSTOM QUOTA</div>
+              <div class="stat-value" style="color:var(--status-success);">${data.maxCustomTemplatesPerUser} Max</div>
+              <div class="stat-trend" style="color:var(--text-secondary);">Custom templates per free user</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">CHROME EXTENSION SYNC</div>
+              <div class="stat-value" style="font-size:20px; color:var(--status-success);">AUTOMATIC</div>
+              <div class="stat-trend" style="color:var(--blue-primary);">Synced via /api/tone-styles</div>
+            </div>
+          </div>
+
+          <!-- Free User Quota Controller Card -->
+          <div class="atomx-card" style="margin-bottom:24px; padding:18px 20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+              <div>
+                <h3 style="font-size:15px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">Free User Custom Template Limit</h3>
+                <p style="font-size:12px; color:var(--text-secondary); margin:0;">Controls how many custom tone prompts free users can create in their Chrome Extension popup.</p>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <label style="font-size:12px; font-weight:600; color:var(--text-secondary);">Max Templates:</label>
+                <input type="number" id="adminCustomQuotaInput" min="1" max="20" value="${data.maxCustomTemplatesPerUser}" style="width:70px; padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle); background:var(--bg-canvas); color:var(--text-primary); font-weight:700; font-size:14px; text-align:center;">
+                <button class="btn btn-primary btn-sm" onclick="handleSaveCustomQuota()">Update Quota</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Default System Tones List -->
+          <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="font-size:16px; font-weight:700; color:var(--text-primary);">Default System Tones & Prompts</h2>
+            <span style="font-size:12px; color:var(--text-secondary);">${tones.length} Prompts Configured</span>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(400px, 1fr)); gap:18px; margin-bottom:24px;">
+            ${tones.map((t, idx) => `
+              <div class="atomx-card" id="tone-card-${t.id}" style="display:flex; flex-direction:column; justify-content:space-between; padding:18px;">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                    <div>
+                      <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="text" id="tone-name-${idx}" value="${t.name}" class="form-input" style="font-size:14px; font-weight:700; padding:4px 8px; width:auto; display:inline-block;" placeholder="Tone Name">
+                        <span class="badge badge-info" style="font-size:10px; font-family:monospace;">${t.id}</span>
+                      </div>
+                      <input type="text" id="tone-desc-${idx}" value="${t.description || ''}" class="form-input" style="font-size:11px; color:var(--text-secondary); margin-top:6px; padding:3px 8px; width:100%;" placeholder="Short description">
+                    </div>
+                    <button class="btn btn-secondary btn-sm" style="padding:4px 8px; color:var(--status-error);" onclick="handleDeleteTone(${idx})" title="Delete tone">✕</button>
+                  </div>
+
+                  <div style="margin-top:10px;">
+                    <label style="font-size:11px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.3px;">System Prompt Instruction:</label>
+                    <textarea id="tone-prompt-${idx}" class="form-input" style="min-height:75px; font-size:12px; font-family:inherit; margin-top:4px; line-height:1.4; resize:vertical;">${t.prompt}</textarea>
+                  </div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+                  <button class="btn btn-secondary btn-sm" onclick="handleSaveSingleTone(${idx})">Save Changes</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function handleSaveCustomQuota() {
+  const input = document.getElementById('adminCustomQuotaInput');
+  const val = Number(input?.value || 2);
+  if (val < 1) {
+    alert('Quota must be at least 1.');
+    return;
+  }
+  if (!AtomXState.toneStylesData) AtomXState.toneStylesData = {};
+  AtomXState.toneStylesData.maxCustomTemplatesPerUser = val;
+  saveAdminToneStylesToServer();
+}
+
+function handleSaveSingleTone(idx) {
+  const name = document.getElementById(`tone-name-${idx}`)?.value.trim();
+  const desc = document.getElementById(`tone-desc-${idx}`)?.value.trim();
+  const prompt = document.getElementById(`tone-prompt-${idx}`)?.value.trim();
+
+  if (!name || !prompt) {
+    alert('Name and System Prompt are required.');
+    return;
+  }
+
+  if (AtomXState.toneStylesData?.defaultTones?.[idx]) {
+    AtomXState.toneStylesData.defaultTones[idx].name = name;
+    AtomXState.toneStylesData.defaultTones[idx].description = desc;
+    AtomXState.toneStylesData.defaultTones[idx].prompt = prompt;
+  }
+  saveAdminToneStylesToServer();
+}
+
+function handleDeleteTone(idx) {
+  if (confirm('Are you sure you want to delete this default tone?')) {
+    AtomXState.toneStylesData.defaultTones.splice(idx, 1);
+    saveAdminToneStylesToServer();
+    renderAdminToneStyles(document.getElementById('mainContentArea'));
+  }
+}
+
+function promptAddNewToneStyle() {
+  const name = prompt('Enter new Tone & Style Name (e.g. "Sarcastic Dev" or "Alpha Insider"):');
+  if (!name) return;
+  const id = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+  const promptText = prompt('Enter AI Prompt Instructions for this tone:', 'Deliver high-signal, sharp perspective. Be concise, punchy, and authentic.');
+  if (!promptText) return;
+
+  if (!AtomXState.toneStylesData) AtomXState.toneStylesData = { maxCustomTemplatesPerUser: 2, defaultTones: [] };
+  AtomXState.toneStylesData.defaultTones.push({
+    id,
+    name,
+    description: 'Custom system calibrated tone',
+    prompt: promptText
+  });
+
+  saveAdminToneStylesToServer();
+  renderAdminToneStyles(document.getElementById('mainContentArea'));
+  showToast(`✓ Added new tone: ${name}`);
+}
+
+async function saveAdminToneStylesToServer() {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/tone-styles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(AtomXState.toneStylesData)
+    });
+    if (res.ok) {
+      showToast('✓ Tone & style prompts successfully updated & broadcasted to all extensions!');
+      return;
+    }
+  } catch (e) {
+    console.warn('Could not post tone styles to backend', e);
+  }
+  showToast('✓ Tone styles updated locally in memory.');
+}
+
+// -------------------------------------------------------------
 // SCREEN 18: ACCOUNT SUSPENDED
 // -------------------------------------------------------------
 function renderSuspended(container) {
@@ -2901,6 +3101,11 @@ function renderAdminSidebarHTML(activeId) {
           <svg viewBox="0 0 24 24" fill="none"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
           <span>Curated Lists</span>
           <span class="badge badge-info" style="margin-left:auto; font-size:10px; padding:1px 5px;">NEW</span>
+        </div>
+        <div class="nav-item ${activeId === '21' ? 'active' : ''}" onclick="navigateToScreen('21')">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span>Tone & Styles</span>
+          <span class="badge badge-info" style="margin-left:auto; font-size:10px; padding:1px 5px;">AI</span>
         </div>
       </nav>
 

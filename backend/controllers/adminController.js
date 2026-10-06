@@ -152,3 +152,54 @@ exports.saveActiveModel = (req, res) => {
     res.status(500).json({ error: 'Failed to save active AI model: ' + err.message });
   }
 };
+
+const toneStylesPath = path.join(__dirname, '../data/toneStyles.json');
+
+exports.getToneStyles = (req, res) => {
+  try {
+    if (fs.existsSync(toneStylesPath)) {
+      const data = JSON.parse(fs.readFileSync(toneStylesPath, 'utf8'));
+      return res.json(data);
+    }
+    const defaultData = {
+      maxCustomTemplatesPerUser: 2,
+      defaultTones: [
+        { id: 'natural', name: 'Natural & Concise', description: 'Casual, human-sounding 1-2 sentences with high signal', prompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise. Avoid robotic hashtags or buzzwords.' },
+        { id: 'professional', name: 'Professional', description: 'Authoritative, insightful, industry-savvy perspective', prompt: 'Sound authoritative, sharp, and executive-level. Offer a structured perspective in 1-2 sentences.' },
+        { id: 'question', name: 'Engaging Question', description: 'Provocative observation ending with an engaging question', prompt: 'Offer an astute observation on the post and conclude with an insightful, thought-provoking question to invite replies.' },
+        { id: 'witty', name: 'Witty', description: 'Clever, witty banter with sharp intelligence', prompt: 'Deliver a clever, witty, and humorous observation. Keep it light, sharp, and entertaining.' }
+      ]
+    };
+    res.json(defaultData);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read tone styles: ' + err.message });
+  }
+};
+
+exports.saveToneStyles = (req, res) => {
+  try {
+    const { maxCustomTemplatesPerUser, defaultTones } = req.body;
+    const current = fs.existsSync(toneStylesPath)
+      ? JSON.parse(fs.readFileSync(toneStylesPath, 'utf8'))
+      : { maxCustomTemplatesPerUser: 2, defaultTones: [] };
+
+    const updated = {
+      maxCustomTemplatesPerUser: typeof maxCustomTemplatesPerUser === 'number'
+        ? Math.max(1, maxCustomTemplatesPerUser)
+        : current.maxCustomTemplatesPerUser || 2,
+      defaultTones: Array.isArray(defaultTones) ? defaultTones : current.defaultTones,
+      lastUpdated: new Date().toISOString(),
+      updatedBy: 'Admin Control Center'
+    };
+
+    fs.mkdirSync(path.dirname(toneStylesPath), { recursive: true });
+    fs.writeFileSync(toneStylesPath, JSON.stringify(updated, null, 2), 'utf8');
+
+    res.json({
+      message: 'Tone and Style settings updated successfully!',
+      settings: updated
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save tone styles: ' + err.message });
+  }
+};

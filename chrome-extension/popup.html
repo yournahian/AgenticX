@@ -389,12 +389,16 @@
       </section>
 
       <!-- ============================================== -->
-      <!-- TAB 2: AI REPLY (ZERO MODEL DROPDOWNS FOR USER)-->
+      <!-- ============================================== -->
+      <!-- TAB 2: AI REPLY (AUTOMATED + MULTI-LINK BATCH) -->
       <!-- ============================================== -->
       <section id="panel-reply" class="tab-panel">
-        <div class="card source-card">
-          <div class="card-header">
-            <span class="label">Target Post</span>
+        <div class="card source-card" style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="label" style="font-weight:700; font-size:12px;">Target Post(s)</span>
+              <span id="replyLinkCountChip" class="badge-mini" style="display:none; background:var(--blue-soft); color:var(--blue-primary); font-size:10px; font-weight:700;">1 Link</span>
+            </div>
             <button class="detect-btn" id="detectActiveTweetBtn">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
               Detect on Page
@@ -404,41 +408,104 @@
             <span class="author-name" id="authorName">Creator</span>
             <span class="author-handle" id="authorHandle">@handle</span>
           </div>
-          <textarea id="targetTweetInput" class="ext-textarea" placeholder="Paste tweet text or tweet URL, or click 'Detect on Page' on Twitter/X..."></textarea>
-        </div>
-
-        <!-- Tone & Style (Clean User Controls Only) -->
-        <div class="controls-row">
-          <div class="control-label">Tone & Style</div>
-          <div class="tone-pills" id="tonePills">
-            <button class="tone-pill active" data-tone="Natural & Concise">Natural</button>
-            <button class="tone-pill" data-tone="Professional">Pro</button>
-            <button class="tone-pill" data-tone="Engaging Question">Question</button>
-            <button class="tone-pill" data-tone="Witty">Witty</button>
+          <textarea id="targetTweetInput" class="ext-textarea" style="min-height:75px;" placeholder="Paste single tweet, tweet text, or MULTIPLE links/batch text (Telegram/X URLs)..."></textarea>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:5px; display:flex; justify-content:space-between; align-items:center;">
+            <span>💡 Multiple links supported — auto filters & dedupes</span>
+            <span id="replyDetectedSummary" style="font-weight:600; color:var(--blue-primary);"></span>
           </div>
         </div>
 
-        <button id="generateBtn" class="primary-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span id="generateBtnText">Generate Reply</span>
-          <span class="cost-tag">1 Credit</span>
-        </button>
+        <!-- Tone & Style (Global Active System) -->
+        <div class="controls-row" style="margin-top:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div class="control-label" style="margin-bottom:0; font-size:11px; font-weight:700;">Tone & Style (Applied Globally)</div>
+            <button type="button" id="openCustomToneBtn" style="font-size:11px; color:var(--blue-primary); background:none; border:none; cursor:pointer; font-weight:700; padding:0;">+ Custom Style</button>
+          </div>
+          <div class="tone-pills" id="tonePills" style="display:flex; flex-wrap:wrap; gap:6px;">
+            <button class="tone-pill active" data-tone="Natural & Concise" data-id="natural">Natural</button>
+            <button class="tone-pill" data-tone="Professional" data-id="professional">Pro</button>
+            <button class="tone-pill" data-tone="Engaging Question" data-id="question">Question</button>
+            <button class="tone-pill" data-tone="Witty" data-id="witty">Witty</button>
+          </div>
+        </div>
 
-        <div class="card result-card" id="resultCard" style="display:none; margin-top:10px;">
-          <div class="card-header">
-            <div class="status-chip success">
+        <!-- Custom Tone Drawer / Form -->
+        <div id="customToneDrawer" style="display:none; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:10px; margin-top:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:11px; font-weight:700; color:var(--text-primary);">Create Custom Style (Max <span id="customLimitCount">2</span> for Free)</span>
+            <button type="button" id="closeCustomToneBtn" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:14px;">✕</button>
+          </div>
+          <input type="text" id="customToneNameInput" class="ext-input" placeholder="Tone Name (e.g. Degen Alpha, Founder)" style="font-size:11px; margin-bottom:6px;">
+          <textarea id="customTonePromptInput" class="ext-textarea" style="min-height:55px; font-size:11px; margin-bottom:6px;" placeholder="Custom instructions (e.g. Reply like a crypto dev with concise technical insights in lowercase)..."></textarea>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span id="customLimitStatus" style="font-size:10px; color:var(--text-muted);">0 / 2 custom used</span>
+            <button type="button" id="saveCustomToneBtn" class="primary-btn mini-btn" style="margin-top:0; font-size:11px; padding:4px 10px;">Save Custom Style</button>
+          </div>
+        </div>
+
+        <!-- Automation Action Checkboxes for Reply -->
+        <div class="card" style="padding:10px 12px; margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="font-size:11px; font-weight:700; margin-bottom:6px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.3px;">Automated Actions (Humanized Pacing)</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11px;">
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="replyActLike" checked>
+              <span>Auto-Like ❤️</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="replyActComment" checked>
+              <span>Human Comment 💬</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="replyActRepost">
+              <span>Auto-Repost 🔁</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+              <input type="checkbox" id="replyActFollow">
+              <span>Auto-Follow ➕</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 1-Click Autonomous Action Buttons -->
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button id="autoReplyEngageBtn" class="primary-btn" style="flex:1.4; background:linear-gradient(135deg, var(--blue-primary), #1B3EB0); font-weight:700;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span id="autoReplyEngageBtnText">🚀 1-Click Auto Reply & Engage</span>
+          </button>
+          <button id="generateBtn" class="secondary-btn" style="flex:1; margin-top:0; padding:10px 8px; font-size:12px; font-weight:600;">
+            <span id="generateBtnText">Preview Only</span>
+            <span class="cost-tag" style="background:rgba(49,87,230,0.12); color:var(--blue-primary); margin-left:2px;">1 C</span>
+          </button>
+        </div>
+
+        <!-- Reply Automation Live Console Output -->
+        <div class="agent-console-card" id="replyConsoleCard" style="display:none; margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div class="console-header" style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-bottom:1px solid var(--border-subtle);">
+            <div style="display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600;">
+              <span class="live-dot"></span>
+              <span id="replyConsoleStatus">Automating Engagement...</span>
+            </div>
+            <span id="replyConsoleBatchProgress" style="font-size:10px; color:var(--blue-primary); font-weight:700;"></span>
+          </div>
+          <div class="console-body" id="replyConsoleOutput" style="padding:8px 10px; font-size:11px; color:var(--text-secondary); max-height:80px; overflow-y:auto;">Ready to automate.</div>
+        </div>
+
+        <!-- Result Card (Preview / Manual Controls) -->
+        <div class="card result-card" id="resultCard" style="display:none; margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div class="status-chip success" style="font-size:11px; font-weight:600; color:var(--status-success);">
               <span class="dot"></span> 98% Resonance
             </div>
-            <div class="char-count" id="charCount">142 chars</div>
+            <div class="char-count" id="charCount" style="font-size:11px; color:var(--text-muted);">142 chars</div>
           </div>
-          <textarea id="replyOutput" class="ext-textarea result-textarea"></textarea>
+          <textarea id="replyOutput" class="ext-textarea result-textarea" style="min-height:60px; font-size:12px;"></textarea>
           
-          <div class="action-buttons-row" style="flex-wrap:wrap; gap:6px;">
+          <div class="action-buttons-row" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
             <button id="insertTweetBtn" class="action-btn primary-action" style="flex:1;">
-              ✓ Insert into X
+              ✍️ Type into X
             </button>
             <button id="autoPostReplyBtn" class="action-btn" style="flex:1.4; background:var(--blue-primary); color:#FFF; font-weight:700;">
-              🚀 Auto Post on X
+              🚀 Post Comment
             </button>
             <button id="copyReplyBtn" class="action-btn secondary-action" style="flex:0.8;">
               Copy
@@ -451,8 +518,8 @@
       <!-- TAB 3: SAFETY & ANTI-BAN CONTROLS -->
       <!-- ============================================== -->
       <section id="panel-safety" class="tab-panel">
-        <div class="card" style="padding:14px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-          <div style="font-weight:700; font-size:14px; margin-bottom:4px;">Anti-Ban Safety Controls</div>
+        <div class="card" style="padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--text-primary);">Anti-Ban Safety Controls</div>
           <p style="font-size:12px; color:var(--text-secondary); margin-bottom:14px;">Humanized pacing prevents Twitter rate-limits, shadowbans, and bot-detection.</p>
 
           <div class="setting-item" style="margin-bottom:14px;">
@@ -475,7 +542,7 @@
 
           <div class="setting-toggle-row" style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid var(--border-subtle);">
             <div>
-              <div style="font-weight:600; font-size:13px;">Background Mode</div>
+              <div style="font-weight:600; font-size:13px; color:var(--text-primary);">Background Mode</div>
               <div style="font-size:11px; color:var(--text-secondary);">Keep automation running while switching tabs</div>
             </div>
             <label class="switch">
@@ -491,15 +558,15 @@
       <!-- ============================================== -->
       <section id="panel-credits" class="tab-panel">
         <!-- Balance Card -->
-        <div class="card" style="padding:14px; background:linear-gradient(135deg, #FFF, #F3F7FF); border:1px solid #D6E3FF; border-radius:var(--radius-md); margin-bottom:12px;">
+        <div class="card" style="padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); margin-bottom:12px;">
           <div style="font-size:11px; font-weight:700; color:var(--blue-primary); text-transform:uppercase;">CURRENT BALANCE</div>
           <div style="font-size:28px; font-weight:800; color:var(--text-primary); margin:2px 0;" id="extCreditsBig">-- C</div>
           <div style="font-size:11px; color:var(--text-secondary);">1 Credit = 1 AI Reply or Action</div>
         </div>
 
         <!-- Invite and Earn -->
-        <div class="card" style="padding:12px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md); margin-bottom:12px;">
-          <div style="font-weight:700; font-size:12px; margin-bottom:2px;">🎁 Invite & Earn Credits</div>
+        <div class="card" style="padding:12px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); margin-bottom:12px;">
+          <div style="font-weight:700; font-size:12px; margin-bottom:2px; color:var(--text-primary);">🎁 Invite & Earn Credits</div>
           <div style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">Share your code; both you & your referral receive bonus credits.</div>
           <div style="display:flex; gap:6px;">
             <input type="text" readonly value="EVAN-X924" id="extInviteCodeInput" class="ext-input" style="font-weight:700; text-align:center; font-size:12px;">
@@ -508,8 +575,8 @@
         </div>
 
         <!-- Buy with Crypto -->
-        <div class="card" style="padding:12px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-          <div style="font-weight:700; font-size:12px; margin-bottom:2px;">💳 Buy Credits with Crypto ($1+)</div>
+        <div class="card" style="padding:12px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="font-weight:700; font-size:12px; margin-bottom:2px; color:var(--text-primary);">💳 Buy Credits with Crypto ($1+)</div>
           <div style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">Pay with USDT, USDC, ETH, BNB, Solana, or GRAM.</div>
 
           <div style="display:flex; gap:6px; margin-bottom:8px;">
@@ -531,7 +598,7 @@
           <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">Deposit Address:</div>
           <input type="text" readonly value="0x892aF71c9201481bAc0129" class="ext-input" style="font-size:11px; font-family:monospace; margin-bottom:8px;">
 
-          <label class="opt-label">Paste Blockchain Transaction Hash (Tx Hash)</label>
+          <label class="opt-label" style="color:var(--text-secondary);">Paste Blockchain Transaction Hash (Tx Hash)</label>
           <input type="text" id="extTxHashInput" class="ext-input" placeholder="0x9f8e2a... or solana signature" style="margin-bottom:6px;">
           <button class="primary-btn mini-btn" id="extVerifyTxBtn">
             ✓ Submit Tx Hash & Add Credits
@@ -543,11 +610,11 @@
       <!-- TAB 5: ACCESS & ACCOUNT -->
       <!-- ============================================== -->
       <section id="panel-access" class="tab-panel">
-        <div class="card" style="padding:14px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-          <div style="font-weight:700; font-size:14px; margin-bottom:4px;">Account & Access Key</div>
+        <div class="card" style="padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--text-primary);">Account & Access Key</div>
           <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">Logged in via verified Access Key authorized by administrator.</p>
 
-          <label class="opt-label">Your Active Access Key</label>
+          <label class="opt-label" style="color:var(--text-secondary);">Your Active Access Key</label>
           <input type="text" id="extAccessKeyInput" class="ext-input" placeholder="Enter Access Key..." value="" style="font-family:monospace; font-size:11px; margin-bottom:8px;">
 
           <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--border-subtle); font-size:12px;">
@@ -568,13 +635,12 @@
 
     </main>
 
-    <!-- Clean User Footer (Zero Admin Links) -->
-    <footer class="ext-footer">
-      <div class="server-status">
+    <!-- Clean User Footer (Zero Admin Links, Zero Network Status String) -->
+    <footer class="ext-footer" style="display:flex; justify-content:space-between; align-items:center; padding:8px 16px; border-top:1px solid var(--border-subtle); background:var(--bg-card);">
+      <div style="display:flex; align-items:center; gap:6px;">
         <span class="pulse-indicator"></span>
-        <span id="backendStatusText">ATOMX Network: Connected</span>
       </div>
-      <span style="font-size:10px; color:var(--text-muted);">v1.0.0</span>
+      <span style="font-size:10px; color:var(--text-muted); font-weight:600; letter-spacing:0.3px;">ATOMX ENGAGE v1.0.0</span>
     </footer>
   </div>
 

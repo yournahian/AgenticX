@@ -89,13 +89,68 @@ function extractTweetData(article) {
   return { text, authorName, authorHandle };
 }
 
-function insertIntoTwitterInput(text) {
+// Human-like typing delay simulator
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Human-like letter-by-letter typing into Twitter/X Draft.js / Lexical comment box.
+ * Types one character at a time with realistic human jitter, natural pauses on punctuation,
+ * and synthetic events so Twitter's React state reflects each typed letter.
+ */
+async function typeTextHumanLike(editor, text) {
+  if (!editor || !text) return;
+
+  editor.focus();
+  // Clear any existing placeholder or content if needed
+  await sleep(150);
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    // Twitter Draft.js/Lexical requires insertText via execCommand to update editor state properly
+    document.execCommand('insertText', false, char);
+
+    // Fire standard input event for full React synthetic compatibility
+    try {
+      editor.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        cancelable: true,
+        data: char,
+        inputType: 'insertText'
+      }));
+    } catch (e) {
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    // Realistic human typing cadence:
+    // Base keystroke delay: 28ms to 65ms
+    let delay = Math.floor(Math.random() * 38) + 28;
+
+    // Natural pauses:
+    if (char === '.' || char === '!' || char === '?') {
+      delay += Math.floor(Math.random() * 120) + 120; // 148ms - 213ms thought pause
+    } else if (char === ',' || char === ';' || char === ':') {
+      delay += Math.floor(Math.random() * 80) + 70;   // 98ms - 175ms breath pause
+    } else if (char === ' ') {
+      delay += Math.floor(Math.random() * 30) + 15;   // minor word boundary jitter
+    } else if (char === '\n') {
+      delay += Math.floor(Math.random() * 150) + 100; // newline pause
+    }
+
+    await sleep(delay);
+  }
+
+  // Final slight pause after sentence completion
+  await sleep(400);
+}
+
+async function insertIntoTwitterInput(text) {
   const editor = document.querySelector('div[data-testid="tweetTextarea_0"]') ||
                  document.querySelector('div[role="textbox"][contenteditable="true"]');
   if (editor) {
-    editor.focus();
-    // Use execCommand to support React synthetic event change detection
-    document.execCommand('insertText', false, text);
+    await typeTextHumanLike(editor, text);
   }
 }
 
@@ -134,9 +189,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+// Wait for element helper with timeout
 
 function waitForElement(selector, timeout = 7000) {
   return new Promise((resolve) => {
@@ -244,10 +297,9 @@ async function executeAutonomousTweetWorkflow(params) {
 
       textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 5000);
       if (textarea) {
-        textarea.focus();
-        document.execCommand('insertText', false, replyText);
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        await sleep(700);
+        // Human-like letter-by-letter typing animation into the reply box
+        await typeTextHumanLike(textarea, replyText);
+        await sleep(500);
 
         // Click Tweet / Reply submit button
         const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
@@ -255,7 +307,7 @@ async function executeAutonomousTweetWorkflow(params) {
         if (submitBtn) {
           submitBtn.removeAttribute('disabled');
           submitBtn.click();
-          performed.push('Commented 💬');
+          performed.push('Human Typed & Commented 💬');
           await sleep(900);
         }
       }

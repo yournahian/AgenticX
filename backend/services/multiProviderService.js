@@ -227,12 +227,32 @@ async function generateWithProvider({
   tweetText,
   tweetAuthor = '@user',
   style = 'Natural & Concise',
+  stylePrompt = null,
   length = 'medium'
 }) {
   const prov = (provider || 'openai').toLowerCase();
   const apiKey = getProviderKey(prov);
   const selectedModel = model || (DEFAULT_MODELS[prov]?.[0]?.id || 'gpt-4o-mini');
-  const styleInstruction = STYLE_GUIDELINES[style] || STYLE_GUIDELINES['Natural & Concise'];
+
+  let styleInstruction = stylePrompt;
+  if (!styleInstruction) {
+    try {
+      const tonePath = path.join(__dirname, '../data/toneStyles.json');
+      if (fs.existsSync(tonePath)) {
+        const toneData = JSON.parse(fs.readFileSync(tonePath, 'utf8'));
+        const found = (toneData.defaultTones || []).find(t =>
+          (t.name && t.name.toLowerCase() === style.toLowerCase()) ||
+          (t.id && t.id.toLowerCase() === style.toLowerCase())
+        );
+        if (found && found.prompt) {
+          styleInstruction = found.prompt;
+        }
+      }
+    } catch (e) {}
+  }
+  if (!styleInstruction) {
+    styleInstruction = STYLE_GUIDELINES[style] || STYLE_GUIDELINES['Natural & Concise'];
+  }
   const maxTokens = length === 'short' ? 45 : length === 'long' ? 140 : 80;
 
   // Real API execution if key exists

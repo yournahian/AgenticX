@@ -34,6 +34,8 @@ exports.generateReply = async (req, res) => {
     tweetText,
     tweetAuthor = '@user',
     style = 'Natural & Concise',
+    stylePrompt = null,
+    customPrompt = null,
     provider = 'openai',
     model = null,
     length = 'medium'
@@ -85,6 +87,7 @@ exports.generateReply = async (req, res) => {
       tweetText,
       tweetAuthor,
       style,
+      stylePrompt: stylePrompt || customPrompt || null,
       length
     });
 

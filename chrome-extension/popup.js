@@ -8,6 +8,16 @@ const DEFAULT_BACKEND_URL = 'http://localhost:5000';
 let state = {
   credits: 0,
   selectedTone: 'Natural & Concise',
+  selectedTonePrompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise.',
+  selectedToneId: 'natural',
+  defaultTones: [
+    { id: 'natural', name: 'Natural & Concise', prompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise.' },
+    { id: 'professional', name: 'Professional', prompt: 'Sound authoritative, sharp, and executive-level in 1-2 sentences.' },
+    { id: 'question', name: 'Engaging Question', prompt: 'Offer an astute observation and conclude with an insightful question.' },
+    { id: 'witty', name: 'Witty', prompt: 'Deliver a clever, witty, and humorous observation.' }
+  ],
+  customTones: [],
+  maxCustomTemplates: 2,
   selectedProvider: 'groq',
   selectedModel: 'llama-3.3-70b-versatile',
   selectedLength: 'medium',
@@ -118,7 +128,7 @@ function filterTweetLinks(extractedLinks, options = {}) {
 document.addEventListener('DOMContentLoaded', async () => {
   initExtTheme();
   initTabs();
-  initTonePills();
+  await initToneSystem();
   initListeners();
   initAgentListeners();
   await loadServerState();
@@ -140,24 +150,215 @@ function switchExtTab(tabKey) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `panel-${tabKey}`));
 }
 
-// Tone pills
-function initTonePills() {
-  const pills = document.querySelectorAll('.tone-pill');
-  pills.forEach(pill => {
-    pill.addEventListener('click', () => {
-      pills.forEach(p => p.classList.remove('active'));
-      pill.classList.add('active');
-      state.selectedTone = pill.dataset.tone;
-    });
+// ==============================================================
+// DYNAMIC TONE & STYLE SYSTEM WITH CUSTOM USER PROMPTS
+// ==============================================================
+async function initToneSystem() {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    const stored = await chrome.storage.local.get(['customTones', 'selectedTone', 'selectedTonePrompt', 'selectedToneId']);
+    if (Array.isArray(stored.customTones)) state.customTones = stored.customTones;
+    if (stored.selectedTone) state.selectedTone = stored.selectedTone;
+    if (stored.selectedTonePrompt) state.selectedTonePrompt = stored.selectedTonePrompt;
+    if (stored.selectedToneId) state.selectedToneId = stored.selectedToneId;
+  }
+
+  // Fetch backend tone styles (admin configurable)
+  try {
+    const backendUrl = await getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/tone-styles`).catch(() => null);
+    if (res && res.ok) {
+      const data = await res.json();
+      if (typeof data.maxCustomTemplatesPerUser === 'number') {
+        state.maxCustomTemplates = data.maxCustomTemplatesPerUser;
+      }
+      if (Array.isArray(data.defaultTones) && data.defaultTones.length > 0) {
+        state.defaultTones = data.defaultTones;
+      }
+    }
+  } catch (e) {}
+
+  renderTonePills();
+  setupCustomToneDrawer();
+}
+
+function renderTonePills() {
+  const container = document.getElementById('tonePills');
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Render default system tones
+  state.defaultTones.forEach(t => {
+    const btn = document.createElement('button');
+    const isAct = state.selectedToneId === t.id || (!state.selectedToneId && state.selectedTone === t.name);
+    btn.className = `tone-pill ${isAct ? 'active' : ''}`;
+    btn.dataset.id = t.id;
+    btn.dataset.tone = t.name;
+    btn.textContent = t.name.split(' ')[0];
+    btn.title = `${t.name}: ${t.prompt}`;
+    btn.onclick = () => selectTone(t.id, t.name, t.prompt);
+    container.appendChild(btn);
   });
+
+  // Render custom tones (Free users: max 2 by default, configurable by admin)
+  state.customTones.forEach(ct => {
+    const pillWrap = document.createElement('div');
+    pillWrap.style.display = 'inline-flex';
+    pillWrap.style.alignItems = 'center';
+    pillWrap.style.gap = '2px';
+
+    const btn = document.createElement('button');
+    const isAct = state.selectedToneId === ct.id || state.selectedTone === ct.name;
+    btn.className = `tone-pill ${isAct ? 'active' : ''}`;
+    btn.dataset.id = ct.id;
+    btn.dataset.tone = ct.name;
+    btn.textContent = `⭐ ${ct.name}`;
+    btn.title = `Custom: ${ct.prompt}`;
+    btn.onclick = () => selectTone(ct.id, ct.name, ct.prompt);
+
+    const delBtn = document.createElement('button');
+    delBtn.innerHTML = '✕';
+    delBtn.style.background = 'none';
+    delBtn.style.border = 'none';
+    delBtn.style.cursor = 'pointer';
+    delBtn.style.fontSize = '10px';
+    delBtn.style.color = 'var(--text-muted)';
+    delBtn.style.padding = '2px 4px';
+    delBtn.title = 'Delete custom style';
+    delBtn.onclick = (e) => {
+      e.stopPropagation();
+      deleteCustomTone(ct.id);
+    };
+
+    pillWrap.appendChild(btn);
+    pillWrap.appendChild(delBtn);
+    container.appendChild(pillWrap);
+  });
+
+  // Update limit display in drawer
+  const limitEl = document.getElementById('customLimitCount');
+  if (limitEl) limitEl.textContent = state.maxCustomTemplates;
+  const statusEl = document.getElementById('customLimitStatus');
+  if (statusEl) statusEl.textContent = `${state.customTones.length} / ${state.maxCustomTemplates} custom used`;
+}
+
+function selectTone(id, name, prompt) {
+  state.selectedToneId = id;
+  state.selectedTone = name;
+  state.selectedTonePrompt = prompt || '';
+
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({
+      selectedToneId: id,
+      selectedTone: name,
+      selectedTonePrompt: prompt || ''
+    });
+  }
+  renderTonePills();
+}
+
+function setupCustomToneDrawer() {
+  const drawer = document.getElementById('customToneDrawer');
+  const openBtn = document.getElementById('openCustomToneBtn');
+  const closeBtn = document.getElementById('closeCustomToneBtn');
+  const saveBtn = document.getElementById('saveCustomToneBtn');
+
+  if (openBtn) {
+    openBtn.onclick = () => {
+      if (drawer) drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+    };
+  }
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      if (drawer) drawer.style.display = 'none';
+    };
+  }
+
+  if (saveBtn) {
+    saveBtn.onclick = () => {
+      if (state.customTones.length >= state.maxCustomTemplates) {
+        alert(`Limit reached! Free user quota allows up to ${state.maxCustomTemplates} custom tone templates.\nAdmin can increase quota in Admin Control Center.`);
+        return;
+      }
+
+      const nameInput = document.getElementById('customToneNameInput');
+      const promptInput = document.getElementById('customTonePromptInput');
+      const name = nameInput ? nameInput.value.trim() : '';
+      const prompt = promptInput ? promptInput.value.trim() : '';
+
+      if (!name || !prompt) {
+        alert('Please provide both a Tone Name and Custom Prompt instructions.');
+        return;
+      }
+
+      const newId = 'custom_' + Date.now();
+      const newCustom = { id: newId, name, prompt };
+      state.customTones.push(newCustom);
+
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({ customTones: state.customTones });
+      }
+
+      selectTone(newId, name, prompt);
+
+      if (nameInput) nameInput.value = '';
+      if (promptInput) promptInput.value = '';
+      if (drawer) drawer.style.display = 'none';
+    };
+  }
+}
+
+function deleteCustomTone(id) {
+  state.customTones = state.customTones.filter(t => t.id !== id);
+  if (state.selectedToneId === id) {
+    const def = state.defaultTones[0] || { id: 'natural', name: 'Natural & Concise', prompt: '' };
+    selectTone(def.id, def.name, def.prompt);
+  }
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({ customTones: state.customTones });
+  }
+  renderTonePills();
+}
+
+function updateReplyTargetSummaryUI() {
+  const input = document.getElementById('targetTweetInput');
+  const chip = document.getElementById('replyLinkCountChip');
+  const summary = document.getElementById('replyDetectedSummary');
+  const autoBtnText = document.getElementById('autoReplyEngageBtnText');
+  if (!input) return;
+
+  const raw = input.value;
+  const extracted = extractTweetLinks(raw);
+  if (extracted.length > 1) {
+    if (chip) { chip.style.display = 'inline-block'; chip.textContent = `${extracted.length} Links`; }
+    if (summary) summary.textContent = `${extracted.length} Tweets in Batch Queue`;
+    if (autoBtnText) autoBtnText.textContent = `🚀 Auto Reply All (${extracted.length} Tweets)`;
+  } else if (extracted.length === 1) {
+    if (chip) { chip.style.display = 'inline-block'; chip.textContent = `1 Link`; }
+    if (summary) summary.textContent = `1 Tweet Ready`;
+    if (autoBtnText) autoBtnText.textContent = `🚀 1-Click Auto Reply & Engage`;
+  } else {
+    if (chip) chip.style.display = 'none';
+    if (summary) summary.textContent = '';
+    if (autoBtnText) autoBtnText.textContent = `🚀 1-Click Auto Reply & Engage`;
+  }
 }
 
 // Standard Event Listeners
 function initListeners() {
+  // Target post input listeners for instant link & batch detection
+  const targetInput = document.getElementById('targetTweetInput');
+  if (targetInput) {
+    targetInput.addEventListener('input', updateReplyTargetSummaryUI);
+    targetInput.addEventListener('paste', () => setTimeout(updateReplyTargetSummaryUI, 50));
+  }
+
   // Detect on active page
   document.getElementById('detectActiveTweetBtn')?.addEventListener('click', autoDetectTweet);
 
-  // Generate Reply (AI Reply Tab)
+  // 1-Click Autonomous Reply & Engage (Handles single or batch links)
+  document.getElementById('autoReplyEngageBtn')?.addEventListener('click', handleAutoReplyEngage);
+
+  // Generate Reply (AI Reply Tab Preview)
   document.getElementById('generateBtn')?.addEventListener('click', handleGenerateReply);
 
   // Insert into Tweet
@@ -614,8 +815,6 @@ async function loadServerState() {
     if (res && res.ok) {
       const data = await res.json();
       if (typeof data.credits === 'number') state.credits = data.credits;
-      const statusEl = document.getElementById('backendStatusText');
-      if (statusEl) statusEl.textContent = 'ATOMX Network: Online (:5000)';
     }
 
     // Sync engaged tweet IDs from backend SQLite
@@ -749,7 +948,8 @@ async function handleGenerateReply() {
       body: JSON.stringify({
         tweetText: tweetInput,
         tweetAuthor: author,
-        style: tone
+        style: tone,
+        stylePrompt: state.selectedTonePrompt
       })
     });
 
@@ -835,7 +1035,125 @@ async function handleInsertTweet() {
   }
 }
 
-// Auto-Post Reply Directly on X.com (Opens tweet, likes, types comment, and submits)
+// 1-Click Autonomous Reply & Engagement Handler for Reply Tab
+async function handleAutoReplyEngage() {
+  const targetInput = document.getElementById('targetTweetInput');
+  const rawText = targetInput ? targetInput.value.trim() : '';
+
+  const like = document.getElementById('replyActLike')?.checked ?? true;
+  const comment = document.getElementById('replyActComment')?.checked ?? true;
+  const repost = document.getElementById('replyActRepost')?.checked ?? false;
+  const follow = document.getElementById('replyActFollow')?.checked ?? false;
+  const actions = { like, comment, repost, follow, scroll: true };
+
+  const consoleCard = document.getElementById('replyConsoleCard');
+  const consoleStatus = document.getElementById('replyConsoleStatus');
+  const consoleOutput = document.getElementById('replyConsoleOutput');
+  const consoleProgress = document.getElementById('replyConsoleBatchProgress');
+
+  if (consoleCard) consoleCard.style.display = 'block';
+
+  function logReplyConsole(status, text, progress = '') {
+    if (consoleStatus) consoleStatus.textContent = status;
+    if (consoleOutput) consoleOutput.textContent = text;
+    if (consoleProgress) consoleProgress.textContent = progress;
+  }
+
+  const extracted = extractTweetLinks(rawText);
+
+  // CASE 1: MULTI-LINK BATCH QUEUE (>1 links)
+  if (extracted.length > 1) {
+    const filtered = filterTweetLinks(extracted);
+    if (filtered.freshTweets.length === 0) {
+      alert(`All ${extracted.length} links are duplicates or already engaged!`);
+      logReplyConsole('Batch Skipped', 'All links were already engaged or duplicated.');
+      return;
+    }
+
+    if (state.credits < filtered.freshTweets.length) {
+      alert(`Insufficient credits: You have ${state.credits} credits, but ${filtered.freshTweets.length} fresh links are queued.`);
+      switchExtTab('credits');
+      return;
+    }
+
+    logReplyConsole('Queue Started', `Automating ${filtered.freshTweets.length} fresh tweets with human pacing...`);
+    await executeAutonomousRaidWorkflow(filtered.freshTweets, actions, logReplyConsole);
+    updateReplyTargetSummaryUI();
+    return;
+  }
+
+  // CASE 2: SINGLE TWEET OR DETECTED TWEET
+  let targetUrl = extracted.length === 1 ? extracted[0].canonicalUrl : null;
+  let author = extracted.length === 1 ? extracted[0].handle : (document.getElementById('authorHandle')?.textContent || '@creator');
+
+  if (state.credits < 1) {
+    alert('Insufficient credits! Please top up via the Credits tab.');
+    switchExtTab('credits');
+    return;
+  }
+
+  const btn = document.getElementById('autoReplyEngageBtn');
+  const btnText = document.getElementById('autoReplyEngageBtnText');
+  if (btn) btn.disabled = true;
+  if (btnText) btnText.textContent = 'Automating Engagement...';
+
+  logReplyConsole('Generating AI Reply', `Crafting high-signal reply using ${state.selectedTone}...`);
+
+  try {
+    const backendUrl = await getBackendUrl();
+    let replyText = '';
+
+    if (actions.comment) {
+      const resp = await fetch(`${backendUrl}/api/generate-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tweetText: rawText || (targetUrl || 'https://x.com'),
+          tweetAuthor: author,
+          style: state.selectedTone,
+          stylePrompt: state.selectedTonePrompt
+        })
+      });
+
+      if (resp.ok) {
+        const d = await resp.json();
+        replyText = d.reply;
+        if (typeof d.remainingCredits === 'number') state.credits = d.remainingCredits;
+        else deductCredits(1);
+      } else {
+        replyText = 'High-signal observation. Execution velocity and clarity make all the difference.';
+        deductCredits(1);
+      }
+    }
+
+    logReplyConsole('Executing on X.com', 'Human-like letter-by-letter typing animation & submitting...');
+    const result = await runAutonomousActionOnTweet(targetUrl, actions, replyText);
+
+    if (result && result.shouldClose && result.targetTabId) {
+      await sleep(1500);
+      chrome.tabs?.remove(result.targetTabId).catch(() => null);
+    }
+
+    if (extracted.length === 1) {
+      const tid = extracted[0].tweetId;
+      state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), tid]));
+      chrome.storage?.local.set({ engagedTweetIds: state.engagedTweetIds });
+    }
+
+    logReplyConsole('✓ Engagement Complete', 'All selected actions executed with human-like typing!');
+    alert('🚀 Autonomous Engagement Complete!\n\nLiked, human typed letter-by-letter in comment box, and posted on X.com.');
+  } catch (err) {
+    console.error('Engagement error:', err);
+    logReplyConsole('Error', err.message);
+    alert('Could not complete autonomous reply: ' + err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = '🚀 1-Click Auto Reply & Engage';
+    updateCreditUI();
+  }
+}
+
+// Auto-Post Reply Directly on X.com (Single Post preview button)
 document.getElementById('autoPostReplyBtn')?.addEventListener('click', async () => {
   const replyText = document.getElementById('replyOutput')?.value?.trim();
   if (!replyText) {
@@ -878,21 +1196,26 @@ document.getElementById('autoPostReplyBtn')?.addEventListener('click', async () 
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = '🚀 Auto Post on X';
+      btn.textContent = '🚀 Post Comment';
     }
   }
 });
 
 // Autonomous Raid Loop: Visits each tweet, scrolls, likes, comments, reposts & follows
-async function executeAutonomousRaidWorkflow(tweets, actions) {
+async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null) {
   const total = tweets.length;
   let successCount = 0;
   const backendUrl = await getBackendUrl();
 
+  const logger = (st, log, prog = '') => {
+    if (logCallback) logCallback(st, log, prog);
+    else updateAgentConsole(st, log);
+  };
+
   for (let i = 0; i < total; i++) {
     const t = tweets[i];
     const indexStr = `[${i + 1}/${total}]`;
-    updateAgentConsole(`Processing ${indexStr}`, `Visiting ${t.canonicalUrl}... Executing actions.`);
+    logger(`Processing ${indexStr}`, `Visiting ${t.canonicalUrl}... Executing actions.`, `${i + 1}/${total}`);
 
     let replyText = '';
     if (actions.comment) {
@@ -903,7 +1226,8 @@ async function executeAutonomousRaidWorkflow(tweets, actions) {
           body: JSON.stringify({
             tweetText: t.canonicalUrl,
             tweetAuthor: t.handle,
-            style: state.selectedTone
+            style: state.selectedTone,
+            stylePrompt: state.selectedTonePrompt
           })
         });
         if (resp.ok) {
@@ -950,7 +1274,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions) {
       if (i < total - 1) {
         const pacingSleep = Math.max(3, state.delaySeconds + Math.floor(Math.random() * 4 - 2));
         for (let sec = pacingSleep; sec > 0; sec--) {
-          updateAgentConsole(`Pacing Safety Delay (${indexStr})`, `Waiting ${sec}s before next post to mimic human behavior...`);
+          logger(`Pacing Safety Delay (${indexStr})`, `Waiting ${sec}s before next post to mimic human behavior...`, `${i + 1}/${total}`);
           await sleep(1000);
         }
       }
@@ -959,8 +1283,8 @@ async function executeAutonomousRaidWorkflow(tweets, actions) {
     }
   }
 
-  updateAgentConsole('Raid Completed', `Successfully executed autonomous engagement on ${successCount} of ${total} tweet(s).`);
-  alert(`✓ Autonomous Raid Completed!\n\nExecuted selected actions on ${successCount} tweet(s) on X.com.\nAll comments, likes, and actions posted automatically.`);
+  logger('Engagement Completed', `Successfully executed autonomous engagement on ${successCount} of ${total} tweet(s).`, `${successCount}/${total}`);
+  alert(`✓ Autonomous Engagement Completed!\n\nExecuted selected actions on ${successCount} tweet(s) on X.com.\nAll comments were typed letter-by-letter and submitted automatically.`);
 }
 
 // Opens tab (or targets active tab) and sends command to content script

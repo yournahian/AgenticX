@@ -1,0 +1,35 @@
+{
+  "maxCustomTemplatesPerUser": 2,
+  "defaultTones": [
+    {
+      "id": "natural",
+      "name": "Natural & Concise",
+      "description": "Casual, human-sounding 1-2 sentences with high signal",
+      "prompt": "Write a casual, highly human, 1-2 sentence response. Sound like an experienced builder speaking naturally. Be direct and concise. Avoid robotic hashtags, corporate jargon, or sycophancy."
+    },
+    {
+      "id": "professional",
+      "name": "Professional",
+      "description": "Authoritative, insightful, industry-savvy perspective",
+      "prompt": "Sound authoritative, sharp, and executive-level. Offer a structured perspective or value-add observation in 1-2 sentences."
+    },
+    {
+      "id": "question",
+      "name": "Engaging Question",
+      "description": "Provocative observation ending with an engaging question",
+      "prompt": "Offer an astute observation on the post and conclude with an insightful, thought-provoking question to invite replies and discussion."
+    },
+    {
+      "id": "witty",
+      "name": "Witty",
+      "description": "Clever, witty banter with sharp intelligence",
+      "prompt": "Deliver a clever, witty, and humorous observation. Keep it light, sharp, and entertaining without being mean or cringey."
+    },
+    {
+      "id": "technical",
+      "name": "Technical Alpha",
+      "description": "Deep protocol and architectural insight",
+      "prompt": "Focus on underlying architecture, incentive design, or technical mechanics. Sound like a principal engineer or core researcher."
+    }
+  ]
+}
