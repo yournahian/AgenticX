@@ -1,6 +1,6 @@
 {
-  "activeProvider": "groq",
-  "activeModel": "allam-2-7b",
-  "lastUpdated": "2026-10-06T19:58:17.226Z",
+  "activeProvider": "openrouter",
+  "activeModel": "google/gemini-nano-banana-2.1",
+  "lastUpdated": "2026-10-06T21:45:42.514Z",
   "updatedBy": "Admin Control Center"
 }

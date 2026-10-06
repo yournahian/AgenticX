@@ -375,12 +375,15 @@
 
           <!-- Agent Live Console & Feedback Box -->
           <div class="agent-console-card">
-            <div class="console-head">
+            <div class="console-head" style="display:flex; justify-content:space-between; align-items:center;">
               <div style="display:flex; align-items:center; gap:6px;">
                 <span class="live-dot"></span>
                 <span id="agentConsoleStatus">Agent Idle — Awaiting Launch</span>
               </div>
-              <span style="font-size:10px; color:var(--text-muted);">Pacing Active</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="font-size:10px; color:var(--text-muted);">Pacing Active</span>
+                <button id="stopAgentBtn" style="display:none; background:#DC2626; color:#FFF; border:none; border-radius:4px; font-size:10px; font-weight:700; padding:2px 8px; cursor:pointer;">⏹️ Stop Agent</button>
+              </div>
             </div>
             <div class="console-body" id="agentConsoleOutput">Ready. Select parameters and click Launch to execute task with safety pacing.</div>
           </div>
@@ -472,6 +475,9 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             <span id="autoReplyEngageBtnText">🚀 1-Click Auto Reply & Engage</span>
           </button>
+          <button id="stopReplyAutomationBtn" class="action-btn" style="display:none; flex:0.7; background:#DC2626; color:#FFF; font-weight:700; border:none; border-radius:var(--radius-sm); cursor:pointer;">
+            ⏹️ Stop
+          </button>
           <button id="generateBtn" class="secondary-btn" style="flex:1; margin-top:0; padding:10px 8px; font-size:12px; font-weight:600;">
             <span id="generateBtnText">Preview Only</span>
             <span class="cost-tag" style="background:rgba(49,87,230,0.12); color:var(--blue-primary); margin-left:2px;">1 C</span>
@@ -485,7 +491,10 @@
               <span class="live-dot"></span>
               <span id="replyConsoleStatus">Automating Engagement...</span>
             </div>
-            <span id="replyConsoleBatchProgress" style="font-size:10px; color:var(--blue-primary); font-weight:700;"></span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span id="replyConsoleBatchProgress" style="font-size:10px; color:var(--blue-primary); font-weight:700;"></span>
+              <button id="stopReplyConsoleBtn" style="background:#DC2626; color:#FFF; border:none; border-radius:4px; font-size:10px; font-weight:700; padding:2px 8px; cursor:pointer;">⏹️ Stop</button>
+            </div>
           </div>
           <div class="console-body" id="replyConsoleOutput" style="padding:8px 10px; font-size:11px; color:var(--text-secondary); max-height:80px; overflow-y:auto;">Ready to automate.</div>
         </div>

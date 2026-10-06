@@ -89,60 +89,124 @@ function extractTweetData(article) {
   return { text, authorName, authorHandle };
 }
 
+let isWorkflowAborted = false;
+
 // Human-like typing delay simulator
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
- * Human-like letter-by-letter typing into Twitter/X Draft.js / Lexical comment box.
- * Types one character at a time with realistic human jitter, natural pauses on punctuation,
- * and synthetic events so Twitter's React state reflects each typed letter.
+ * Robust detection of the Main Focal Post on Twitter/X status pages.
+ * Ensures actions (like, retweet) NEVER hit a random comment below.
+ */
+function getMainPostArticle() {
+  const primary = document.querySelector('div[data-testid="primaryColumn"]') || document;
+  const articles = Array.from(primary.querySelectorAll('article[data-testid="tweet"]'));
+  if (articles.length === 0) return null;
+
+  // If viewing a status URL /status/12345, find matching article
+  const statusMatch = window.location.pathname.match(/\/status\/(\d+)/);
+  if (statusMatch) {
+    const targetId = statusMatch[1];
+    const match = articles.find(a => {
+      const links = Array.from(a.querySelectorAll('a[href*="/status/"]'));
+      return links.some(l => l.getAttribute('href').includes(targetId));
+    });
+    if (match) return match;
+  }
+
+  // Fallback: The topmost tweet article is the focal post
+  return articles[0];
+}
+
+/**
+ * Detect the logged-in user's Twitter handle from navigation/profile links
+ */
+function getLoggedInUserHandle() {
+  try {
+    const profileLink = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+    if (profileLink) {
+      const href = profileLink.getAttribute('href') || '';
+      const clean = href.replace('/', '').toLowerCase();
+      if (clean) return clean;
+    }
+    const switcher = document.querySelector('div[data-testid="SideNav_AccountSwitcher_Button"]');
+    if (switcher) {
+      const match = switcher.innerText.match(/@([\w_]+)/);
+      if (match) return match[1].toLowerCase();
+    }
+  } catch (e) {}
+  return null;
+}
+
+/**
+ * Check if the logged-in user has already replied/commented on this tweet
+ */
+function hasUserAlreadyCommented(myHandle) {
+  if (!myHandle) return false;
+  const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+  if (articles.length <= 1) return false;
+
+  // Comments are all articles after the main tweet (index 1+)
+  const comments = articles.slice(1);
+  return comments.some(c => {
+    const userEl = c.querySelector('div[data-testid="User-Name"]');
+    const txt = userEl ? userEl.innerText.toLowerCase() : '';
+    return txt.includes(`@${myHandle}`);
+  });
+}
+
+/**
+ * Human-like letter-by-letter typing into Twitter/X Lexical comment box.
+ * Types one character at a time with realistic human jitter without duplicate synthetic events.
  */
 async function typeTextHumanLike(editor, text) {
   if (!editor || !text) return;
 
   editor.focus();
-  // Clear any existing placeholder or content if needed
+  await sleep(100);
+
+  // 1. Clean editor first using selectAll and delete
+  document.execCommand('selectAll', false, null);
+  document.execCommand('delete', false, null);
   await sleep(150);
 
+  // 2. Type character by character cleanly
   for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-
-    // Twitter Draft.js/Lexical requires insertText via execCommand to update editor state properly
-    document.execCommand('insertText', false, char);
-
-    // Fire standard input event for full React synthetic compatibility
-    try {
-      editor.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        cancelable: true,
-        data: char,
-        inputType: 'insertText'
-      }));
-    } catch (e) {
-      editor.dispatchEvent(new Event('input', { bubbles: true }));
+    if (isWorkflowAborted) {
+      console.log('[ATOMX] Typing aborted by user.');
+      return;
     }
 
-    // Realistic human typing cadence:
-    // Base keystroke delay: 28ms to 65ms
-    let delay = Math.floor(Math.random() * 38) + 28;
+    const char = text[i];
+    // Native execCommand inserts char at caret and triggers browser's native beforeinput & input
+    document.execCommand('insertText', false, char);
 
-    // Natural pauses:
+    let delay = Math.floor(Math.random() * 25) + 18; // 18ms - 43ms natural human speed
     if (char === '.' || char === '!' || char === '?') {
-      delay += Math.floor(Math.random() * 120) + 120; // 148ms - 213ms thought pause
-    } else if (char === ',' || char === ';' || char === ':') {
-      delay += Math.floor(Math.random() * 80) + 70;   // 98ms - 175ms breath pause
-    } else if (char === ' ') {
-      delay += Math.floor(Math.random() * 30) + 15;   // minor word boundary jitter
+      delay += 110;
+    } else if (char === ',' || char === ' ') {
+      delay += 35;
     } else if (char === '\n') {
-      delay += Math.floor(Math.random() * 150) + 100; // newline pause
+      delay += 120;
     }
 
     await sleep(delay);
   }
 
-  // Final slight pause after sentence completion
+  // 3. Safety check: ensure editor text was not corrupted by 3rd party autocomplete extensions
+  if (!isWorkflowAborted && editor.innerText) {
+    const current = editor.innerText.trim();
+    const target = text.trim();
+    if (current.length > target.length + 10 || current.length < target.length - 10) {
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertText', false, text);
+    }
+  }
+
+  // 4. Fire final input event to guarantee Twitter's React/Lexical submit button is enabled
+  editor.dispatchEvent(new Event('input', { bubbles: true }));
   await sleep(400);
 }
 
@@ -154,13 +218,18 @@ async function insertIntoTwitterInput(text) {
   }
 }
 
-// Listen to commands from the Extension Popup
+// Listen to commands from Extension Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'ABORT_WORKFLOW') {
+    isWorkflowAborted = true;
+    console.log('[ATOMX] Abort signal received. Stopping all automation.');
+    sendResponse({ success: true, aborted: true });
+    return true;
+  }
+
   if (message.type === 'EXTRACT_FOCUSED_TWEET') {
-    // Look for focused or topmost visible tweet
-    const articles = document.querySelectorAll('article[data-testid="tweet"]');
-    if (articles.length > 0) {
-      const firstTweet = articles[0];
+    const firstTweet = getMainPostArticle();
+    if (firstTweet) {
       const data = extractTweetData(firstTweet);
       sendResponse({
         success: true,
@@ -190,7 +259,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Wait for element helper with timeout
-
 function waitForElement(selector, timeout = 7000) {
   return new Promise((resolve) => {
     const el = document.querySelector(selector);
@@ -211,44 +279,87 @@ function waitForElement(selector, timeout = 7000) {
 }
 
 async function executeAutonomousTweetWorkflow(params) {
+  isWorkflowAborted = false;
   const actions = params.actions || { like: true, comment: true, repost: false, follow: false, scroll: true };
   const replyText = params.replyText || '';
   const performed = [];
 
   console.log('[ATOMX AUTONOMOUS WORKFLOW] Starting execution with actions:', actions);
 
-  // 1. Smooth Scroll down to hydrate tweet content and mimic human reader
-  if (actions.scroll !== false) {
-    window.scrollBy({ top: 320, behavior: 'smooth' });
-    performed.push('Scrolled & hydrated');
-    await sleep(900);
+  // 1. Identify MAIN POST article (never a comment!)
+  const mainArticle = getMainPostArticle() || document;
+
+  // 2. Detect already liked & already commented status
+  const isAlreadyLiked = !!mainArticle.querySelector('button[data-testid="unlike"]');
+  const loggedInHandle = getLoggedInUserHandle();
+  const isAlreadyCommented = hasUserAlreadyCommented(loggedInHandle);
+
+  console.log(`[ATOMX STATUS CHECK] isAlreadyLiked: ${isAlreadyLiked}, isAlreadyCommented: ${isAlreadyCommented} (user: @${loggedInHandle || 'unknown'})`);
+
+  // USER RULE: If both like and comment are already done -> IGNORE AUTOMATICALLY!
+  if (isAlreadyLiked && isAlreadyCommented) {
+    console.log('[ATOMX] Both like and comment already completed on this post. Auto-ignoring.');
+    return {
+      success: true,
+      ignored: true,
+      reason: 'Both like and comment already completed on this post.',
+      performed: ['Auto-Ignored (Already Liked & Commented)']
+    };
   }
 
-  // 2. Auto-Like Action
-  if (actions.like) {
+  // USER RULE: If like only done -> do comment only. If neither -> do both.
+  const shouldLike = actions.like && !isAlreadyLiked;
+  const shouldComment = actions.comment && !isAlreadyCommented;
+
+  if (isAlreadyLiked && actions.like) {
+    performed.push('Already Liked (Skipped like)');
+  }
+  if (isAlreadyCommented && actions.comment) {
+    performed.push('Already Commented (Skipped comment)');
+  }
+
+  // If no remaining requested actions needed:
+  if (!shouldLike && !shouldComment && !actions.repost && !actions.follow) {
+    return {
+      success: true,
+      ignored: true,
+      reason: 'Requested actions were already satisfied on this post.',
+      performed
+    };
+  }
+
+  // 3. Smooth Scroll down to mimic human reader
+  if (actions.scroll !== false && !isWorkflowAborted) {
+    window.scrollBy({ top: 320, behavior: 'smooth' });
+    performed.push('Scrolled & hydrated');
+    await sleep(800);
+  }
+
+  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+
+  // 4. Auto-Like Action (MAIN POST ONLY)
+  if (shouldLike && !isWorkflowAborted) {
     try {
-      const likeBtn = await waitForElement('button[data-testid="like"]', 3000);
+      const likeBtn = mainArticle.querySelector('button[data-testid="like"]');
       if (likeBtn) {
         likeBtn.click();
-        performed.push('Liked ❤️');
+        performed.push('Liked Main Post ❤️');
         await sleep(600);
-      } else {
-        const unlikeBtn = document.querySelector('button[data-testid="unlike"]');
-        if (unlikeBtn) performed.push('Already Liked');
       }
     } catch (e) {
-      console.warn('Like action skipped:', e);
+      console.warn('Like action error:', e);
     }
   }
 
-  // 3. Auto-Repost Action
-  if (actions.repost) {
+  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+
+  // 5. Auto-Repost Action (MAIN POST ONLY)
+  if (actions.repost && !isWorkflowAborted) {
     try {
-      const rtBtn = await waitForElement('button[data-testid="retweet"]', 3000);
+      const rtBtn = mainArticle.querySelector('button[data-testid="retweet"]');
       if (rtBtn) {
         rtBtn.click();
         await sleep(500);
-        // Wait for Repost confirmation popover
         const confirmBtn = await waitForElement('div[data-testid="retweetConfirm"], button[data-testid="retweetConfirm"]', 3000);
         if (confirmBtn) {
           confirmBtn.click();
@@ -257,15 +368,16 @@ async function executeAutonomousTweetWorkflow(params) {
         }
       }
     } catch (e) {
-      console.warn('Repost action skipped:', e);
+      console.warn('Repost action error:', e);
     }
   }
 
-  // 4. Auto-Follow Creator Action
-  if (actions.follow) {
+  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+
+  // 6. Auto-Follow Creator Action
+  if (actions.follow && !isWorkflowAborted) {
     try {
-      // Find follow button on page (e.g. author follow button)
-      const followButtons = Array.from(document.querySelectorAll('button'));
+      const followButtons = Array.from(mainArticle.querySelectorAll('button'));
       const followBtn = followButtons.find(b => {
         const txt = b.innerText.trim();
         const testId = b.getAttribute('data-testid') || '';
@@ -278,17 +390,19 @@ async function executeAutonomousTweetWorkflow(params) {
         await sleep(600);
       }
     } catch (e) {
-      console.warn('Follow action skipped:', e);
+      console.warn('Follow action error:', e);
     }
   }
 
-  // 5. Auto-Comment / Reply Action
-  if (actions.comment && replyText) {
+  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+
+  // 7. Auto-Comment Action with Human-Like Typing
+  if (shouldComment && replyText && !isWorkflowAborted) {
     try {
-      // Look for reply input or trigger reply button
+      // Look for reply input or click reply button on MAIN post
       let textarea = document.querySelector('div[data-testid="tweetTextarea_0"]');
       if (!textarea) {
-        const replyBtn = document.querySelector('button[data-testid="reply"]');
+        const replyBtn = mainArticle.querySelector('button[data-testid="reply"]') || document.querySelector('button[data-testid="reply"]');
         if (replyBtn) {
           replyBtn.click();
           await sleep(600);
@@ -299,6 +413,11 @@ async function executeAutonomousTweetWorkflow(params) {
       if (textarea) {
         // Human-like letter-by-letter typing animation into the reply box
         await typeTextHumanLike(textarea, replyText);
+
+        if (isWorkflowAborted) {
+          return { success: false, aborted: true, performed };
+        }
+
         await sleep(500);
 
         // Click Tweet / Reply submit button
@@ -312,13 +431,15 @@ async function executeAutonomousTweetWorkflow(params) {
         }
       }
     } catch (e) {
-      console.warn('Comment action skipped:', e);
+      console.warn('Comment action error:', e);
     }
   }
 
   console.log('[ATOMX AUTONOMOUS WORKFLOW] Finished. Actions completed:', performed);
   return {
     success: true,
-    performed
+    performed,
+    isAlreadyLiked,
+    isAlreadyCommented
   };
 }

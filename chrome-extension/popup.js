@@ -7,6 +7,7 @@ const DEFAULT_BACKEND_URL = 'http://localhost:5000';
 
 let state = {
   credits: 0,
+  isAborted: false,
   selectedTone: 'Natural & Concise',
   selectedTonePrompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise.',
   selectedToneId: 'natural',
@@ -357,6 +358,11 @@ function initListeners() {
 
   // 1-Click Autonomous Reply & Engage (Handles single or batch links)
   document.getElementById('autoReplyEngageBtn')?.addEventListener('click', handleAutoReplyEngage);
+
+  // Stop Automation Buttons
+  document.getElementById('stopReplyAutomationBtn')?.addEventListener('click', triggerStopAutomation);
+  document.getElementById('stopReplyConsoleBtn')?.addEventListener('click', triggerStopAutomation);
+  document.getElementById('stopAgentBtn')?.addEventListener('click', triggerStopAutomation);
 
   // Generate Reply (AI Reply Tab Preview)
   document.getElementById('generateBtn')?.addEventListener('click', handleGenerateReply);
@@ -1035,8 +1041,72 @@ async function handleInsertTweet() {
   }
 }
 
+// ==============================================================
+// AUTOMATION CONTROL & STOP BUTTON LOGIC
+// ==============================================================
+function triggerStopAutomation() {
+  state.isAborted = true;
+  console.log('[ATOMX] Stop automation requested by user.');
+
+  // Broadcast abort signal to all Twitter / X tabs
+  chrome.tabs?.query({}, (tabs) => {
+    (tabs || []).forEach(tab => {
+      if (tab.url && (tab.url.includes('twitter.com') || tab.url.includes('x.com'))) {
+        chrome.tabs.sendMessage(tab.id, { type: 'ABORT_WORKFLOW' }, () => {
+          if (chrome.runtime?.lastError) { /* ignore */ }
+        });
+      }
+    });
+  });
+
+  setAutomationRunningUI(false);
+
+  // Update live consoles
+  const replyStatus = document.getElementById('replyConsoleStatus');
+  const replyOutput = document.getElementById('replyConsoleOutput');
+  if (replyStatus) replyStatus.textContent = '⏹️ Automation Stopped';
+  if (replyOutput) replyOutput.textContent = 'Automation halted by user. Pacing delays and pending typing actions cancelled.';
+
+  const agentStatus = document.getElementById('agentConsoleStatus');
+  const agentOutput = document.getElementById('agentConsoleOutput');
+  if (agentStatus) agentStatus.textContent = '⏹️ Agent Stopped';
+  if (agentOutput) agentOutput.textContent = 'Workflow halted by user.';
+}
+
+function setAutomationRunningUI(isRunning) {
+  const stopReplyBtn = document.getElementById('stopReplyAutomationBtn');
+  const stopReplyConsoleBtn = document.getElementById('stopReplyConsoleBtn');
+  const stopAgentBtn = document.getElementById('stopAgentBtn');
+  const autoReplyBtn = document.getElementById('autoReplyEngageBtn');
+  const autoReplyBtnText = document.getElementById('autoReplyEngageBtnText');
+  const runTgBtn = document.getElementById('runTgEngageBtn');
+
+  if (isRunning) {
+    if (stopReplyBtn) stopReplyBtn.style.display = 'block';
+    if (stopReplyConsoleBtn) stopReplyConsoleBtn.style.display = 'inline-block';
+    if (stopAgentBtn) stopAgentBtn.style.display = 'inline-block';
+    if (autoReplyBtn) autoReplyBtn.disabled = true;
+    if (autoReplyBtnText) autoReplyBtnText.textContent = '⏳ Running Automation...';
+    if (runTgBtn) {
+      runTgBtn.disabled = true;
+      runTgBtn.textContent = '⏳ Autonomous Raid Running...';
+    }
+  } else {
+    if (stopReplyBtn) stopReplyBtn.style.display = 'none';
+    if (stopReplyConsoleBtn) stopReplyConsoleBtn.style.display = 'none';
+    if (stopAgentBtn) stopAgentBtn.style.display = 'none';
+    if (autoReplyBtn) autoReplyBtn.disabled = false;
+    updateReplyTargetSummaryUI();
+    if (runTgBtn) {
+      runTgBtn.disabled = false;
+      runTgBtn.textContent = '▶ Launch Auto Engage';
+    }
+  }
+}
+
 // 1-Click Autonomous Reply & Engagement Handler for Reply Tab
 async function handleAutoReplyEngage() {
+  state.isAborted = false;
   const targetInput = document.getElementById('targetTweetInput');
   const rawText = targetInput ? targetInput.value.trim() : '';
 
@@ -1077,8 +1147,13 @@ async function handleAutoReplyEngage() {
     }
 
     logReplyConsole('Queue Started', `Automating ${filtered.freshTweets.length} fresh tweets with human pacing...`);
-    await executeAutonomousRaidWorkflow(filtered.freshTweets, actions, logReplyConsole);
-    updateReplyTargetSummaryUI();
+    setAutomationRunningUI(true);
+    try {
+      await executeAutonomousRaidWorkflow(filtered.freshTweets, actions, logReplyConsole);
+    } finally {
+      setAutomationRunningUI(false);
+      updateReplyTargetSummaryUI();
+    }
     return;
   }
 
@@ -1092,11 +1167,7 @@ async function handleAutoReplyEngage() {
     return;
   }
 
-  const btn = document.getElementById('autoReplyEngageBtn');
-  const btnText = document.getElementById('autoReplyEngageBtnText');
-  if (btn) btn.disabled = true;
-  if (btnText) btnText.textContent = 'Automating Engagement...';
-
+  setAutomationRunningUI(true);
   logReplyConsole('Generating AI Reply', `Crafting high-signal reply using ${state.selectedTone}...`);
 
   try {
@@ -1118,16 +1189,30 @@ async function handleAutoReplyEngage() {
       if (resp.ok) {
         const d = await resp.json();
         replyText = d.reply;
-        if (typeof d.remainingCredits === 'number') state.credits = d.remainingCredits;
-        else deductCredits(1);
       } else {
         replyText = 'High-signal observation. Execution velocity and clarity make all the difference.';
-        deductCredits(1);
       }
     }
 
-    logReplyConsole('Executing on X.com', 'Human-like letter-by-letter typing animation & submitting...');
+    if (state.isAborted) return;
+
+    logReplyConsole('Executing on X.com', 'Checking status & executing actions with human typing...');
     const result = await runAutonomousActionOnTweet(targetUrl, actions, replyText);
+
+    if (state.isAborted) return;
+
+    // Handle auto-ignore rule: post already liked and commented
+    if (result && result.result && result.result.ignored) {
+      logReplyConsole('✓ Auto-Ignored', result.result.reason || 'Already completed');
+      if (result.shouldClose && result.targetTabId) {
+        chrome.tabs?.remove(result.targetTabId).catch(() => null);
+      }
+      alert(`ℹ️ Post Auto-Ignored:\n\n${result.result.reason}\n\nSince this post was already completed, no actions were performed and 0 credits were deducted.`);
+      return;
+    }
+
+    // Engagement succeeded: deduct credit now
+    deductCredits(1);
 
     if (result && result.shouldClose && result.targetTabId) {
       await sleep(1500);
@@ -1140,15 +1225,15 @@ async function handleAutoReplyEngage() {
       chrome.storage?.local.set({ engagedTweetIds: state.engagedTweetIds });
     }
 
-    logReplyConsole('✓ Engagement Complete', 'All selected actions executed with human-like typing!');
-    alert('🚀 Autonomous Engagement Complete!\n\nLiked, human typed letter-by-letter in comment box, and posted on X.com.');
+    const actionsPerformed = result?.result?.performed?.join(', ') || 'Liked and Commented';
+    logReplyConsole('✓ Engagement Complete', `Done: ${actionsPerformed}`);
+    alert(`🚀 Autonomous Engagement Complete!\n\n${actionsPerformed} on X.com.`);
   } catch (err) {
     console.error('Engagement error:', err);
     logReplyConsole('Error', err.message);
     alert('Could not complete autonomous reply: ' + err.message);
   } finally {
-    if (btn) btn.disabled = false;
-    if (btnText) btnText.textContent = '🚀 1-Click Auto Reply & Engage';
+    setAutomationRunningUI(false);
     updateCreditUI();
   }
 }
@@ -1203,8 +1288,11 @@ document.getElementById('autoPostReplyBtn')?.addEventListener('click', async () 
 
 // Autonomous Raid Loop: Visits each tweet, scrolls, likes, comments, reposts & follows
 async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null) {
+  state.isAborted = false;
+  setAutomationRunningUI(true);
   const total = tweets.length;
   let successCount = 0;
+  let ignoredCount = 0;
   const backendUrl = await getBackendUrl();
 
   const logger = (st, log, prog = '') => {
@@ -1212,79 +1300,113 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
     else updateAgentConsole(st, log);
   };
 
-  for (let i = 0; i < total; i++) {
-    const t = tweets[i];
-    const indexStr = `[${i + 1}/${total}]`;
-    logger(`Processing ${indexStr}`, `Visiting ${t.canonicalUrl}... Executing actions.`, `${i + 1}/${total}`);
+  try {
+    for (let i = 0; i < total; i++) {
+      if (state.isAborted) {
+        logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
+        break;
+      }
 
-    let replyText = '';
-    if (actions.comment) {
+      const t = tweets[i];
+      const indexStr = `[${i + 1}/${total}]`;
+      logger(`Processing ${indexStr}`, `Visiting ${t.canonicalUrl}... Checking actions.`, `${i + 1}/${total}`);
+
+      let replyText = '';
+      if (actions.comment) {
+        try {
+          const resp = await fetch(`${backendUrl}/api/generate-reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tweetText: t.canonicalUrl,
+              tweetAuthor: t.handle,
+              style: state.selectedTone,
+              stylePrompt: state.selectedTonePrompt
+            })
+          });
+          if (resp.ok) {
+            const d = await resp.json();
+            replyText = d.reply;
+          }
+        } catch (e) {
+          replyText = 'High-signal insight. Execution velocity and clarity are key.';
+        }
+      }
+
+      if (state.isAborted) {
+        logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
+        break;
+      }
+
       try {
-        const resp = await fetch(`${backendUrl}/api/generate-reply`, {
+        const outcome = await runAutonomousActionOnTweet(t.canonicalUrl, actions, replyText);
+
+        if (state.isAborted) {
+          logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
+          break;
+        }
+
+        // Auto-ignore rule: post already liked & commented
+        if (outcome && outcome.result && outcome.result.ignored) {
+          ignoredCount++;
+          logger(`Skipped ${indexStr}`, `Auto-ignored: ${outcome.result.reason || 'Already completed'} (0 credits used)`, `${i + 1}/${total}`);
+          if (outcome.shouldClose && outcome.targetTabId) {
+            chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
+          }
+          continue; // No credit deduction, proceed to next tweet
+        }
+
+        successCount++;
+
+        // Deduct credit & persist engaged tweet ID
+        deductCredits(1);
+        state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
+        }
+
+        fetch(`${backendUrl}/api/tweets/mark-engaged`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            tweetText: t.canonicalUrl,
-            tweetAuthor: t.handle,
-            style: state.selectedTone,
-            stylePrompt: state.selectedTonePrompt
+            tweets: [{
+              tweet_id: t.tweetId,
+              handle: t.handle,
+              canonical_url: t.canonicalUrl,
+              action_type: 'autonomous_raid'
+            }]
           })
-        });
-        if (resp.ok) {
-          const d = await resp.json();
-          replyText = d.reply;
+        }).catch(() => null);
+
+        if (outcome.shouldClose && outcome.targetTabId) {
+          await sleep(1500);
+          chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
         }
-      } catch (e) {
-        replyText = 'High-signal insight. Execution velocity and clarity are key.';
+
+        updateTgParseSummaryUI();
+
+        // Anti-ban randomized pacing sleep before next tweet
+        if (i < total - 1 && !state.isAborted) {
+          const pacingSleep = Math.max(3, state.delaySeconds + Math.floor(Math.random() * 4 - 2));
+          for (let sec = pacingSleep; sec > 0; sec--) {
+            if (state.isAborted) break;
+            logger(`Pacing Safety Delay (${indexStr})`, `Waiting ${sec}s before next post to mimic human behavior...`, `${i + 1}/${total}`);
+            await sleep(1000);
+          }
+        }
+      } catch (err) {
+        console.warn(`Error automating tweet ${t.canonicalUrl}:`, err);
       }
     }
 
-    try {
-      const outcome = await runAutonomousActionOnTweet(t.canonicalUrl, actions, replyText);
-      successCount++;
-
-      // Deduct credit & persist engaged tweet ID
-      deductCredits(1);
-      state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
-      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-        chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
-      }
-
-      fetch(`${backendUrl}/api/tweets/mark-engaged`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tweets: [{
-            tweet_id: t.tweetId,
-            handle: t.handle,
-            canonical_url: t.canonicalUrl,
-            action_type: 'autonomous_raid'
-          }]
-        })
-      }).catch(() => null);
-
-      if (outcome.shouldClose && outcome.targetTabId) {
-        await sleep(1500);
-        chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
-      }
-
-      updateTgParseSummaryUI();
-
-      // Anti-ban randomized pacing sleep before next tweet
-      if (i < total - 1) {
-        const pacingSleep = Math.max(3, state.delaySeconds + Math.floor(Math.random() * 4 - 2));
-        for (let sec = pacingSleep; sec > 0; sec--) {
-          logger(`Pacing Safety Delay (${indexStr})`, `Waiting ${sec}s before next post to mimic human behavior...`, `${i + 1}/${total}`);
-          await sleep(1000);
-        }
-      }
-    } catch (err) {
-      console.warn(`Error automating tweet ${t.canonicalUrl}:`, err);
+    if (!state.isAborted) {
+      logger('Engagement Completed', `Finished: ${successCount} engaged, ${ignoredCount} auto-ignored of ${total} tweet(s).`, `${successCount}/${total}`);
+      alert(`✓ Autonomous Engagement Finished!\n\n• Engaged: ${successCount}\n• Auto-Ignored (Already completed): ${ignoredCount}\n• Total Processed: ${total}\n\nHuman-like typing and selective action rules applied.`);
     }
+  } finally {
+    setAutomationRunningUI(false);
+    updateCreditUI();
   }
-
-  logger('Engagement Completed', `Successfully executed autonomous engagement on ${successCount} of ${total} tweet(s).`, `${successCount}/${total}`);
-  alert(`✓ Autonomous Engagement Completed!\n\nExecuted selected actions on ${successCount} tweet(s) on X.com.\nAll comments were typed letter-by-letter and submitted automatically.`);
 }
 
 // Opens tab (or targets active tab) and sends command to content script
