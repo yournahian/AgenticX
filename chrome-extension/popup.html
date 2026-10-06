@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ATOMX ENGAGE — Twitter Growth Extension</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-wrapper">
+    <!-- Extension Top Header (Clean User Header - Zero Admin Links) -->
+    <header class="ext-header">
+      <div class="ext-brand">
+        <div class="ext-logo-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4l16 16"/>
+            <path d="M20 4L4 20"/>
+            <circle cx="12" cy="12" r="3" fill="#FFFFFF"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-bold">ATOMX</span>
+          <span class="brand-light">ENGAGE</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="credit-pill" id="creditPill" title="Your Verified Credits (1 Credit = 1 Action)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span id="creditBalanceText">--</span> C
+        </div>
+        <button class="icon-btn" id="extThemeToggleBtn" title="Toggle Dark / Light Theme" style="font-size:12px;">🌙</button>
+        <button class="icon-btn" id="dockSidePanelBtn" title="Open in Chrome Side Panel (Side-by-side with X)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <line x1="15" y1="3" x2="15" y2="21"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Modern Segmented Navigation Tabs (Spacious, Single Line, No Clutter) -->
+    <nav class="ext-tabs">
+      <button class="tab-btn active" data-tab="agents">
+        <span class="tab-icon">⚡</span>
+        <span class="tab-text">Agents</span>
+      </button>
+      <button class="tab-btn" data-tab="reply">
+        <span class="tab-icon">💬</span>
+        <span class="tab-text">Reply</span>
+      </button>
+      <button class="tab-btn" data-tab="safety">
+        <span class="tab-icon">🛡️</span>
+        <span class="tab-text">Safety</span>
+      </button>
+      <button class="tab-btn" data-tab="credits">
+        <span class="tab-icon">💳</span>
+        <span class="tab-text">Credits</span>
+      </button>
+      <button class="tab-btn" data-tab="access">
+        <span class="tab-icon">🔑</span>
+        <span class="tab-text">Access</span>
+      </button>
+    </nav>
+
+    <!-- Main Content Panels -->
+    <main class="ext-main">
+
+      <!-- ============================================== -->
+      <!-- TAB 1: 10 AUTONOMOUS AGENTS (ACCORDION STYLE)  -->
+      <!-- ============================================== -->
+      <!-- ============================================== -->
+      <!-- TAB 1: 10 AUTONOMOUS AGENTS (BENTO GRID + DETAIL VIEW) -->
+      <!-- ============================================== -->
+      <section id="panel-agents" class="tab-panel active">
+
+        <!-- VIEW A: BENTO GRID DASHBOARD -->
+        <div id="agentsBentoView" class="agents-bento-container">
+          <div class="section-intro">
+            <div style="font-weight:700; font-size:13px; color:var(--text-primary); display:flex; align-items:center; justify-content:space-between;">
+              <span>Autonomous Agents (100% Auto)</span>
+              <span class="badge-mini popular">10 SUITE</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary);">Click any agent below to launch its dedicated automation workspace.</div>
+          </div>
+
+          <div class="bento-grid">
+            <!-- 1. Telegram Group Engage -->
+            <button type="button" class="bento-card" data-agent-id="telegram">
+              <div class="bento-top">
+                <span class="bento-emoji">✈️</span>
+                <span class="badge-mini popular">POPULAR</span>
+              </div>
+              <div class="bento-title">Telegram Engage</div>
+              <div class="bento-desc">Auto-visits raid links to like, comment & reply</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 2. Audience Builder -->
+            <button type="button" class="bento-card" data-agent-id="audience">
+              <div class="bento-top">
+                <span class="bento-emoji">👥</span>
+                <span class="badge-mini growth">GROWTH</span>
+              </div>
+              <div class="bento-title">Audience Builder</div>
+              <div class="bento-desc">Target niche audiences with 2 Free Curated Lists</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 3. Sorsa Score Booster -->
+            <button type="button" class="bento-card" data-agent-id="sorsa">
+              <div class="bento-top">
+                <span class="bento-emoji">⚡</span>
+                <span class="badge-mini roi">AIRDROP ROI</span>
+              </div>
+              <div class="bento-title">Sorsa Booster</div>
+              <div class="bento-desc">Boost score via Top 100 Crypto KOLs & projects</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 4. Followers Increase -->
+            <button type="button" class="bento-card" data-agent-id="followers">
+              <div class="bento-top">
+                <span class="bento-emoji">📈</span>
+                <span class="badge-mini viral">100% AUTO</span>
+              </div>
+              <div class="bento-title">Followers Increase</div>
+              <div class="bento-desc">Smart value-replies to active users for high follow-back</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 5. Post Generator -->
+            <button type="button" class="bento-card" data-agent-id="postgen">
+              <div class="bento-top">
+                <span class="bento-emoji">✍️</span>
+                <span class="badge-mini ready">AI STUDIO</span>
+              </div>
+              <div class="bento-title">Post Generator</div>
+              <div class="bento-desc">Turn rough notes into Medium, Long or Threads</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 6. Reply Back Loop -->
+            <button type="button" class="bento-card" data-agent-id="replyback">
+              <div class="bento-top">
+                <span class="bento-emoji">🔄</span>
+                <span class="badge-mini auto">AUTO LOOP</span>
+              </div>
+              <div class="bento-title">Reply Back</div>
+              <div class="bento-desc">Auto-replies & likes all comments on your posts</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 7. Auto Clean & Unfollow -->
+            <button type="button" class="bento-card" data-agent-id="unfollow">
+              <div class="bento-top">
+                <span class="bento-emoji">🧹</span>
+                <span class="badge-mini safety">SAFETY</span>
+              </div>
+              <div class="bento-title">Auto Unfollow</div>
+              <div class="bento-desc">Filter non-followers with safety randomized pacing</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 8. Picture & Voice Match -->
+            <button type="button" class="bento-card" data-agent-id="match">
+              <div class="bento-top">
+                <span class="bento-emoji">🎨</span>
+                <span class="badge-mini ai">PERSONA</span>
+              </div>
+              <div class="bento-title">Voice & Image Match</div>
+              <div class="bento-desc">Match @evanjawadx voice & generate visuals</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 9. Favorite Creators -->
+            <button type="button" class="bento-card" data-agent-id="creators">
+              <div class="bento-top">
+                <span class="bento-emoji">⭐</span>
+                <span class="badge-mini saved">RADAR</span>
+              </div>
+              <div class="bento-title">Creator Radar</div>
+              <div class="bento-desc">Track handles & land top early comment spots</div>
+              <div class="bento-action">Configure & Run ➔</div>
+            </button>
+
+            <!-- 10. AI Reply Assistant -->
+            <button type="button" class="bento-card" data-agent-id="replystudio">
+              <div class="bento-top">
+                <span class="bento-emoji">💬</span>
+                <span class="badge-mini popular">1-CLICK</span>
+              </div>
+              <div class="bento-title">1-Click Reply</div>
+              <div class="bento-desc">Open dedicated AI reply studio with live page detect</div>
+              <div class="bento-action">Open Studio ➔</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- VIEW B: DEDICATED AGENT WORKSPACE VIEW (SHOWN ON CLICK, WITH BACK BUTTON) -->
+        <div id="agentDetailView" class="agent-detail-container" style="display: none;">
+          <div class="agent-detail-topbar">
+            <button type="button" class="back-btn" id="agentDetailBackBtn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+              <span>Back to Agents</span>
+            </button>
+            <span class="badge-mini" id="detailAgentBadge">100% AUTO</span>
+          </div>
+
+          <!-- Hero Info -->
+          <div class="agent-hero-card">
+            <div class="agent-hero-icon" id="detailAgentIcon">✈️</div>
+            <div style="flex:1;">
+              <div class="agent-hero-title" id="detailAgentTitle">Telegram Group Engage</div>
+              <div class="agent-hero-desc" id="detailAgentDesc">Auto-visits Telegram raid links ➔ Likes, comments & replies</div>
+            </div>
+          </div>
+
+          <!-- Dedicated Agent Configuration Panels (Only one visible at a time) -->
+          <div class="agent-workspace-panels">
+            
+            <!-- Workspace 1: Telegram -->
+            <div class="agent-panel-content" id="panel-agent-telegram">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label class="opt-label" style="margin-bottom:0;">Paste Telegram Raid / Engagement Tweet Links</label>
+                <span id="tgLinkBadge" style="font-size:10px; font-weight:700; color:var(--text-muted);">Smart Filter</span>
+              </div>
+              <div style="font-size:11px; color:var(--text-secondary); margin-bottom:6px;">
+                Paste raw chat messages with timestamps, emojis & bot tags. System extracts clean links and skips duplicates and already-engaged posts.
+              </div>
+              <textarea id="tgLinksInput" class="ext-textarea mini" style="min-height:85px; font-size:11px; font-family:monospace;" placeholder="Paste Telegram text with links:&#10;[06/10 9:48 pm] #859 x.com/user/status/123456...&#10;https://x.com/creator/status/1842...&#10;https://x.com/intent/like?tweet_id=..."></textarea>
+              
+              <!-- Action Selection Checkboxes (User Chooses Exactly What to Execute) -->
+              <div class="action-selection-box" style="margin: 8px 0; padding: 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                  <span style="font-size: 11px; font-weight: 700; color: var(--text-primary);">Actions to Execute on Each Tweet:</span>
+                  <div style="display:flex; gap: 4px;">
+                    <button type="button" id="actionSelectAllBtn" style="font-size: 9.5px; padding: 2px 6px; border: 1px solid var(--border-subtle); background: var(--bg-canvas); color: var(--text-secondary); border-radius: 4px; cursor: pointer;">All</button>
+                    <button type="button" id="actionSelectLikeCommentBtn" style="font-size: 9.5px; padding: 2px 6px; border: 1px solid var(--border-subtle); background: var(--bg-canvas); color: var(--text-secondary); border-radius: 4px; cursor: pointer;">Like+Comment</button>
+                    <button type="button" id="actionSelectLikeOnlyBtn" style="font-size: 9.5px; padding: 2px 6px; border: 1px solid var(--border-subtle); background: var(--bg-canvas); color: var(--text-secondary); border-radius: 4px; cursor: pointer;">Like Only</button>
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px;">
+                  <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="checkbox" id="actionOptLike" checked style="accent-color: var(--blue-primary);">
+                    <span>❤️ Auto-Like</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="checkbox" id="actionOptComment" checked style="accent-color: var(--blue-primary);">
+                    <span>💬 Auto-Comment / Reply</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="checkbox" id="actionOptRepost" style="accent-color: var(--blue-primary);">
+                    <span>🔁 Auto-Repost</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                    <input type="checkbox" id="actionOptFollow" style="accent-color: var(--blue-primary);">
+                    <span>➕ Auto-Follow Creator</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; grid-column: span 2;">
+                    <input type="checkbox" id="actionOptScroll" checked style="accent-color: var(--blue-primary);">
+                    <span>📜 Smooth Scroll & Hydrate Tweet</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Link Parser & Filter Live Feedback Card -->
+              <div id="tgParseSummary" style="display:none; margin:8px 0; padding:8px 10px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
+                  <span>Link Analysis Breakdown</span>
+                  <span id="tgFreshCountBadge" style="color:var(--status-success); font-weight:800;">0 Fresh</span>
+                </div>
+                <div id="tgBreakdownText" style="color:var(--text-secondary); line-height:1.4;"></div>
+              </div>
+
+              <div style="display:flex; gap:6px; margin-top:8px;">
+                <button class="primary-btn mini-btn" id="runTgEngageBtn" style="flex:2; margin-top:0;">▶ Launch Auto Engage</button>
+                <button class="secondary-btn mini-btn" id="cleanTgInputBtn" style="flex:1; margin-top:0;" title="Format input to only show fresh canonical links">⚡ Clean Text</button>
+              </div>
+            </div>
+
+            <!-- Workspace 2: Audience -->
+            <div class="agent-panel-content" id="panel-agent-audience" style="display:none;">
+              <label class="opt-label">Curated Audience List (Provided by System)</label>
+              <select id="audienceListSelect" class="ext-select">
+                <option value="list1">⭐ List 1: Web3 & Crypto Alpha Hunters (Curated Free)</option>
+                <option value="list2">⭐ List 2: Tech Founders & Angel VCs (Curated Free)</option>
+                <option value="custom">Custom Influencer Account Target</option>
+              </select>
+              <input type="text" id="targetInfluencerInput" class="ext-input" placeholder="Or enter target handle (e.g. @evanjawadx)" style="margin-top:6px;">
+              <button class="primary-btn mini-btn" id="runAudienceBuilderBtn">▶ Auto Follow & Engage Niche Audience</button>
+            </div>
+
+            <!-- Workspace 3: Sorsa -->
+            <div class="agent-panel-content" id="panel-agent-sorsa" style="display:none;">
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:8px;">Engage with verified accounts to maximize your Sorsa ranking and qualify for paid promotions.</div>
+              <label class="opt-label">Target Tier Selection</label>
+              <select id="sorsaTierSelect" class="ext-select">
+                <option value="tier1">Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
+                <option value="tier2">Tier 2: High-Volume Ecosystem Projects</option>
+              </select>
+              <button class="primary-btn mini-btn" id="runSorsaBoosterBtn">▶ Launch Sorsa Score Booster Cycle</button>
+            </div>
+
+            <!-- Workspace 4: Followers -->
+            <div class="agent-panel-content" id="panel-agent-followers" style="display:none;">
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:8px;">
+                <strong>Fully Autonomous:</strong> Zero manual links needed. The bot identifies active high-relevance users in your niche and delivers value-first replies to trigger organic follow-backs.
+              </div>
+              <label class="opt-label">Growth Strategy</label>
+              <select class="ext-select" id="followerStratSelect">
+                <option>High-Resonance Insightful Comments (Recommended)</option>
+                <option>Thought-Provoking Discussion Starter</option>
+                <option>Fast First-Comment Engagement</option>
+              </select>
+              <button class="primary-btn mini-btn" id="runFollowerIncreaseBtn">▶ Start 1-Click Auto Follower Growth</button>
+            </div>
+
+            <!-- Workspace 5: Post Generator -->
+            <div class="agent-panel-content" id="panel-agent-postgen" style="display:none;">
+              <label class="opt-label">Raw Notes, Links or Thoughts</label>
+              <textarea id="rawNotesInput" class="ext-textarea mini" placeholder="Paste ideas, raw bullet points, or link to summarize into viral post..."></textarea>
+              <div style="display:flex; gap:6px; margin:6px 0;">
+                <select id="postFormatSelect" class="ext-select" style="flex:1;">
+                  <option value="medium">Medium Post (180 chars)</option>
+                  <option value="long">Long Post (280 chars)</option>
+                  <option value="thread">Full Thread (3-5 Tweets)</option>
+                </select>
+                <button class="primary-btn mini-btn" id="generatePostBtn" style="flex:1; margin-top:0;">Generate</button>
+              </div>
+              <textarea id="postOutputArea" class="ext-textarea mini" style="display:none; margin-top:6px;" readonly></textarea>
+            </div>
+
+            <!-- Workspace 6: Reply Back -->
+            <div class="agent-panel-content" id="panel-agent-replyback" style="display:none;">
+              <label class="opt-label">Your Tweet URL</label>
+              <input type="text" id="myTweetUrlInput" class="ext-input" placeholder="https://x.com/yourhandle/status/1842...">
+              <button class="primary-btn mini-btn" id="runReplyBackBtn">▶ Auto-Reply to All Comments Below Tweet</button>
+            </div>
+
+            <!-- Workspace 7: Unfollow -->
+            <div class="agent-panel-content" id="panel-agent-unfollow" style="display:none;">
+              <label class="opt-label">Unfollow Criteria</label>
+              <select id="unfollowCriteria" class="ext-select">
+                <option value="nonfollowers">Users Not Following Back</option>
+                <option value="walchain">Users with Low Walchain Score (&lt;30)</option>
+                <option value="inactive">Inactive for &gt; 30 Days</option>
+              </select>
+              <div style="font-size:11px; color:var(--text-muted); margin:6px 0;">Safe randomized delay (5-10s) applied automatically to avoid Twitter flags.</div>
+              <button class="secondary-btn mini-btn" id="runAutoUnfollowBtn">🧹 Scan & Safe Unfollow Non-Followers</button>
+            </div>
+
+            <!-- Workspace 8: Picture & Voice Match -->
+            <div class="agent-panel-content" id="panel-agent-match" style="display:none;">
+              <label class="opt-label">Persona Voice Setting</label>
+              <select class="ext-select" id="personaVoiceSelect">
+                <option>Match @evanjawadx (Crisp, High Alpha, Assertive)</option>
+                <option>Tech Founder / Builder Tone</option>
+                <option>Minimalist Web3 Operator Tone</option>
+              </select>
+              <input type="text" id="imagePromptTopic" class="ext-input" placeholder="Topic for AI Image (e.g. Next-gen Autonomous AI)" style="margin-top:6px;">
+              <button class="primary-btn mini-btn" id="runPictureVoiceBtn">🎨 Match Persona & Generate Visual Concept</button>
+            </div>
+
+            <!-- Workspace 9: Creators Radar -->
+            <div class="agent-panel-content" id="panel-agent-creators" style="display:none;">
+              <div style="display:flex; gap:6px; margin-bottom:8px;">
+                <input type="text" id="addCreatorInput" class="ext-input" placeholder="@handle to track">
+                <button class="secondary-btn mini-btn" id="addCreatorBtn" style="margin-top:0;">+ Add</button>
+              </div>
+              <div id="creatorListChips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+            </div>
+
+          </div>
+
+          <!-- Agent Live Console & Feedback Box -->
+          <div class="agent-console-card">
+            <div class="console-head">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="live-dot"></span>
+                <span id="agentConsoleStatus">Agent Idle — Awaiting Launch</span>
+              </div>
+              <span style="font-size:10px; color:var(--text-muted);">Pacing Active</span>
+            </div>
+            <div class="console-body" id="agentConsoleOutput">Ready. Select parameters and click Launch to execute task with safety pacing.</div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 2: AI REPLY (ZERO MODEL DROPDOWNS FOR USER)-->
+      <!-- ============================================== -->
+      <section id="panel-reply" class="tab-panel">
+        <div class="card source-card">
+          <div class="card-header">
+            <span class="label">Target Post</span>
+            <button class="detect-btn" id="detectActiveTweetBtn">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              Detect on Page
+            </button>
+          </div>
+          <div class="tweet-author-row" id="tweetAuthorRow" style="display:none;">
+            <span class="author-name" id="authorName">Creator</span>
+            <span class="author-handle" id="authorHandle">@handle</span>
+          </div>
+          <textarea id="targetTweetInput" class="ext-textarea" placeholder="Paste tweet text or tweet URL, or click 'Detect on Page' on Twitter/X..."></textarea>
+        </div>
+
+        <!-- Tone & Style (Clean User Controls Only) -->
+        <div class="controls-row">
+          <div class="control-label">Tone & Style</div>
+          <div class="tone-pills" id="tonePills">
+            <button class="tone-pill active" data-tone="Natural & Concise">Natural</button>
+            <button class="tone-pill" data-tone="Professional">Pro</button>
+            <button class="tone-pill" data-tone="Engaging Question">Question</button>
+            <button class="tone-pill" data-tone="Witty">Witty</button>
+          </div>
+        </div>
+
+        <button id="generateBtn" class="primary-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span id="generateBtnText">Generate Reply</span>
+          <span class="cost-tag">1 Credit</span>
+        </button>
+
+        <div class="card result-card" id="resultCard" style="display:none; margin-top:10px;">
+          <div class="card-header">
+            <div class="status-chip success">
+              <span class="dot"></span> 98% Resonance
+            </div>
+            <div class="char-count" id="charCount">142 chars</div>
+          </div>
+          <textarea id="replyOutput" class="ext-textarea result-textarea"></textarea>
+          
+          <div class="action-buttons-row" style="flex-wrap:wrap; gap:6px;">
+            <button id="insertTweetBtn" class="action-btn primary-action" style="flex:1;">
+              ✓ Insert into X
+            </button>
+            <button id="autoPostReplyBtn" class="action-btn" style="flex:1.4; background:var(--blue-primary); color:#FFF; font-weight:700;">
+              🚀 Auto Post on X
+            </button>
+            <button id="copyReplyBtn" class="action-btn secondary-action" style="flex:0.8;">
+              Copy
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 3: SAFETY & ANTI-BAN CONTROLS -->
+      <!-- ============================================== -->
+      <section id="panel-safety" class="tab-panel">
+        <div class="card" style="padding:14px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="font-weight:700; font-size:14px; margin-bottom:4px;">Anti-Ban Safety Controls</div>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:14px;">Humanized pacing prevents Twitter rate-limits, shadowbans, and bot-detection.</p>
+
+          <div class="setting-item" style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
+              <span>Action Delay (Randomized)</span>
+              <span id="valExtDelay" style="color:var(--blue-primary);">5 - 10 sec</span>
+            </div>
+            <input type="range" min="3" max="25" value="8" id="extDelaySlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Adds randomized sleep between likes, comments, and follows.</div>
+          </div>
+
+          <div class="setting-item" style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
+              <span>Take Break After</span>
+              <span id="valExtBreak" style="color:var(--blue-primary);">20 actions</span>
+            </div>
+            <input type="range" min="10" max="60" step="5" value="20" id="extBreakSlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Pauses automation for 5-10 minutes to reset session state.</div>
+          </div>
+
+          <div class="setting-toggle-row" style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid var(--border-subtle);">
+            <div>
+              <div style="font-weight:600; font-size:13px;">Background Mode</div>
+              <div style="font-size:11px; color:var(--text-secondary);">Keep automation running while switching tabs</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="extBackgroundToggle" checked>
+              <span class="slider-round"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 4: CREDITS, CRYPTO & INVITE -->
+      <!-- ============================================== -->
+      <section id="panel-credits" class="tab-panel">
+        <!-- Balance Card -->
+        <div class="card" style="padding:14px; background:linear-gradient(135deg, #FFF, #F3F7FF); border:1px solid #D6E3FF; border-radius:var(--radius-md); margin-bottom:12px;">
+          <div style="font-size:11px; font-weight:700; color:var(--blue-primary); text-transform:uppercase;">CURRENT BALANCE</div>
+          <div style="font-size:28px; font-weight:800; color:var(--text-primary); margin:2px 0;" id="extCreditsBig">-- C</div>
+          <div style="font-size:11px; color:var(--text-secondary);">1 Credit = 1 AI Reply or Action</div>
+        </div>
+
+        <!-- Invite and Earn -->
+        <div class="card" style="padding:12px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md); margin-bottom:12px;">
+          <div style="font-weight:700; font-size:12px; margin-bottom:2px;">🎁 Invite & Earn Credits</div>
+          <div style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">Share your code; both you & your referral receive bonus credits.</div>
+          <div style="display:flex; gap:6px;">
+            <input type="text" readonly value="EVAN-X924" id="extInviteCodeInput" class="ext-input" style="font-weight:700; text-align:center; font-size:12px;">
+            <button class="primary-btn mini-btn" id="extCopyInviteBtn" style="margin-top:0;">Copy</button>
+          </div>
+        </div>
+
+        <!-- Buy with Crypto -->
+        <div class="card" style="padding:12px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="font-weight:700; font-size:12px; margin-bottom:2px;">💳 Buy Credits with Crypto ($1+)</div>
+          <div style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">Pay with USDT, USDC, ETH, BNB, Solana, or GRAM.</div>
+
+          <div style="display:flex; gap:6px; margin-bottom:8px;">
+            <select id="extCryptoAmt" class="ext-select" style="flex:1;">
+              <option value="1">$1 (1,000 C)</option>
+              <option value="5">$5 (5,000 C)</option>
+              <option value="10" selected>$10 (10,000 C)</option>
+              <option value="25">$25 (25,000 C)</option>
+            </select>
+            <select id="extCryptoToken" class="ext-select" style="flex:1;">
+              <option>USDT</option>
+              <option>USDC</option>
+              <option>SOL</option>
+              <option>ETH</option>
+              <option>GRAM</option>
+            </select>
+          </div>
+
+          <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">Deposit Address:</div>
+          <input type="text" readonly value="0x892aF71c9201481bAc0129" class="ext-input" style="font-size:11px; font-family:monospace; margin-bottom:8px;">
+
+          <label class="opt-label">Paste Blockchain Transaction Hash (Tx Hash)</label>
+          <input type="text" id="extTxHashInput" class="ext-input" placeholder="0x9f8e2a... or solana signature" style="margin-bottom:6px;">
+          <button class="primary-btn mini-btn" id="extVerifyTxBtn">
+            ✓ Submit Tx Hash & Add Credits
+          </button>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 5: ACCESS & ACCOUNT -->
+      <!-- ============================================== -->
+      <section id="panel-access" class="tab-panel">
+        <div class="card" style="padding:14px; background:#FFFFFF; border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="font-weight:700; font-size:14px; margin-bottom:4px;">Account & Access Key</div>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">Logged in via verified Access Key authorized by administrator.</p>
+
+          <label class="opt-label">Your Active Access Key</label>
+          <input type="text" id="extAccessKeyInput" class="ext-input" placeholder="Enter Access Key..." value="" style="font-family:monospace; font-size:11px; margin-bottom:8px;">
+
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--border-subtle); font-size:12px;">
+            <span style="color:var(--text-secondary);">Twitter Handle:</span>
+            <span id="extHandleText" style="font-weight:700; color:var(--text-primary);">@evanjawadx</span>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--border-subtle); font-size:12px;">
+            <span style="color:var(--text-secondary);">Account Status:</span>
+            <span id="extAccountStatus" class="badge-mini popular" style="background:var(--status-success-bg); color:var(--status-success);">ACTIVE</span>
+          </div>
+
+          <div style="margin-top:14px;">
+            <button class="secondary-btn mini-btn" id="extSaveKeyBtn" style="margin-top:0;">Save Access Key</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Clean User Footer (Zero Admin Links) -->
+    <footer class="ext-footer">
+      <div class="server-status">
+        <span class="pulse-indicator"></span>
+        <span id="backendStatusText">ATOMX Network: Connected</span>
+      </div>
+      <span style="font-size:10px; color:var(--text-muted);">v1.0.0</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

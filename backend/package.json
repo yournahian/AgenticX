@@ -1,0 +1,25 @@
+{
+  "name": "atomx-engage-backend",
+  "version": "1.0.0",
+  "description": "ATOMX ENGAGE — Production API, server-controlled credits, and AI reply engine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test/api.test.js"
+  },
+  "keywords": [
+    "atomx",
+    "ai",
+    "credits",
+    "saas"
+  ],
+  "author": "ATOMX ENGAGE Team",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

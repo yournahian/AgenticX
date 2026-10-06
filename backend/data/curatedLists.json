@@ -1,0 +1,46 @@
+{
+  "audienceList1": {
+    "name": "Web3 & Crypto Alpha Hunters",
+    "description": "Curated list of high-affinity Web3 researchers and alpha accounts.",
+    "targets": [
+      "@evanjawadx",
+      "@vitalikbuterin",
+      "@sassal0x",
+      "@cobie",
+      "@inversebrah"
+    ]
+  },
+  "audienceList2": {
+    "name": "Tech Founders & Angel VCs",
+    "description": "High-tier venture builders and angel investors on X.",
+    "targets": [
+      "@elonmusk",
+      "@sama",
+      "@paulg",
+      "@balajis",
+      "@brian_armstrong"
+    ]
+  },
+  "sorsaTier1": {
+    "name": "Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)",
+    "description": "Accounts that grant maximum Sorsa Score weight upon interaction.",
+    "targets": [
+      "@cz_binance",
+      "@brian_armstrong",
+      "@aeyakovenko",
+      "@staniKulechov",
+      "@haydenzadams"
+    ]
+  },
+  "sorsaTier2": {
+    "name": "Tier 2: High-Volume Ecosystem Projects",
+    "description": "Official ecosystem foundations and protocol accounts.",
+    "targets": [
+      "@ethereum",
+      "@solana",
+      "@base",
+      "@arbitrum",
+      "@ton_blockchain"
+    ]
+  }
+}

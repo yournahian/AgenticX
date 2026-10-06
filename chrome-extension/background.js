@@ -1,0 +1,70 @@
+/**
+ * ATOMX ENGAGE — BACKGROUND SERVICE WORKER (Manifest V3)
+ * Orchestrates extension events, context menus, and Chrome Side Panel.
+ */
+
+const DEFAULT_BACKEND_URL = 'http://localhost:5000';
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('ATOMX ENGAGE Extension Installed successfully.');
+
+  // Set initial storage if empty
+  chrome.storage.local.get(['credits'], (res) => {
+    if (res.credits === undefined) {
+      chrome.storage.local.set({ credits: 10000 });
+    }
+  });
+
+  // Both default popup and side panel supported
+  console.log('ATOMX: Default popup and Side Panel ready.');
+
+  // Create right-click context menu
+  chrome.contextMenus.create({
+    id: 'atomx-generate-reply',
+    title: 'ATOMX: Generate AI Reply for selection',
+    contexts: ['selection']
+  });
+});
+
+// Context Menu listener
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === 'atomx-generate-reply' && info.selectionText) {
+    try {
+      const response = await fetch(`${DEFAULT_BACKEND_URL}/api/generate-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tweetText: info.selectionText,
+          style: 'Natural & Concise'
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (tab && tab.id) {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'INSERT_REPLY_TEXT',
+            text: data.reply
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Backend call failed via context menu:', err);
+    }
+  }
+});
+
+// Message listener from content script or popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'PING') {
+    sendResponse({ status: 'PONG', version: '1.0.0' });
+    return true;
+  }
+
+  if (request.type === 'GET_CREDITS') {
+    chrome.storage.local.get(['credits'], (result) => {
+      sendResponse({ credits: result.credits || 0 });
+    });
+    return true;
+  }
+});
