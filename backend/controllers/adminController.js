@@ -135,7 +135,8 @@ exports.getActiveModel = (req, res) => {
 
 exports.saveActiveModel = (req, res) => {
   try {
-    const { provider, model } = req.body;
+    const provider = req.body.provider || req.body.activeProvider;
+    const model = req.body.model || req.body.activeModel;
     if (!provider || !model) {
       return res.status(400).json({ error: 'provider and model are required' });
     }

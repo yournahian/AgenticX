@@ -42,11 +42,17 @@ let state = {
     ],
     groq: [
       { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Groq LPU)' },
-      { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' }
+      { id: 'allam-2-7b', name: 'ALLaM 2 7B (SDAIA / Groq)' },
+      { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct (Groq)' },
+      { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
+      { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B' }
     ],
     openrouter: [
+      { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B Instruct' },
       { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-      { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' }
+      { id: 'openai/gpt-4o', name: 'GPT-4o (OpenRouter)' },
+      { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3' },
+      { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1' }
     ]
   }
 };

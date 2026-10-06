@@ -42,16 +42,22 @@ const DEFAULT_MODELS = {
   ],
   groq: [
     { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Groq LPU)', context: '128k' },
+    { id: 'allam-2-7b', name: 'ALLaM 2 7B (SDAIA / Groq)', context: '4k' },
+    { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct (Groq)', context: '128k' },
     { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Blazing Fast)', context: '128k' },
+    { id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B (Groq)', context: '131k' },
+    { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B', context: '128k' },
     { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B (MoE Architecture)', context: '32k' },
     { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT (Google on Groq)', context: '8k' }
   ],
   openrouter: [
+    { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B Instruct', context: '128k' },
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet (State-of-the-Art)', context: '200k' },
     { id: 'openai/gpt-4o', name: 'GPT-4o via OpenRouter', context: '128k' },
-    { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct', context: '128k' },
-    { id: 'google/gemini-flash-1.5', name: 'Gemini Flash 1.5 via OpenRouter', context: '1M' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (High Efficiency)', context: '64k' }
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (High Efficiency)', context: '64k' },
+    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 (Reasoning)', context: '128k' },
+    { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', context: '1M' },
+    { id: 'google/gemini-flash-1.5', name: 'Gemini Flash 1.5 via OpenRouter', context: '1M' }
   ]
 };
 
@@ -100,7 +106,8 @@ async function fetchLiveModels(provider, customApiKey = null) {
   const prov = (provider || 'openai').toLowerCase();
   const apiKey = customApiKey || getProviderKey(prov);
 
-  if (!apiKey) {
+  // OpenRouter models endpoint is public and does not require an API key to list models
+  if (!apiKey && prov !== 'openrouter') {
     return {
       provider: prov,
       isLive: false,
@@ -161,40 +168,95 @@ async function fetchLiveModels(provider, customApiKey = null) {
         });
         if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
         const data = await res.json();
-        const groqModels = (data.data || [])
+        const liveGroqModels = (data.data || [])
           .filter(m => m.active !== false)
           .map(m => ({
             id: m.id,
-            name: `${m.id} (${m.owned_by || 'Groq'})`,
+            name: `${m.name || m.id} (${m.owned_by || 'Groq'})`,
             context: m.context_window ? `${Math.round(m.context_window / 1000)}k` : '128k'
           }));
+
+        // Merge live models (like allam-2-7b, qwen, gpt-oss) with Groq flagship production models
+        const coreGroq = [
+          { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Groq LPU)', context: '128k' },
+          { id: 'allam-2-7b', name: 'ALLaM 2 7B (SDAIA / Groq)', context: '4k' },
+          { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct (Groq)', context: '128k' },
+          { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Blazing Fast)', context: '128k' },
+          { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B', context: '128k' },
+          { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B (MoE Architecture)', context: '32k' },
+          { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT (Google on Groq)', context: '8k' }
+        ];
+
+        const seen = new Set();
+        const mergedGroq = [];
+        // Insert live models from Groq first
+        for (const m of liveGroqModels) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            mergedGroq.push(m);
+          }
+        }
+        // Then ensure flagship production models are available
+        for (const m of coreGroq) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            mergedGroq.push(m);
+          }
+        }
 
         return {
           provider: 'groq',
           isLive: true,
-          count: groqModels.length,
-          models: groqModels.length > 0 ? groqModels : DEFAULT_MODELS.groq
+          count: mergedGroq.length,
+          models: mergedGroq
         };
       }
 
       case 'openrouter': {
-        const res = await fetch('https://openrouter.ai/api/v1/models', {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': 'https://atomx.io',
-            'X-Title': 'ATOMX ENGAGE'
-          }
-        });
+        const headers = {
+          'HTTP-Referer': 'https://atomx.io',
+          'X-Title': 'ATOMX ENGAGE'
+        };
+        if (apiKey) {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+
+        const res = await fetch('https://openrouter.ai/api/v1/models', { headers });
         if (!res.ok) throw new Error(`OpenRouter HTTP ${res.status}`);
         const data = await res.json();
-        const orModels = (data.data || [])
-          .slice(0, 80) // Limit to top 80 models
-          .map(m => ({
-            id: m.id,
-            name: m.name || m.id,
-            context: m.context_length ? `${Math.round(m.context_length / 1000)}k` : 'Unknown',
-            pricing: m.pricing?.prompt ? `$${(m.pricing.prompt * 1000000).toFixed(2)}/M` : 'Free'
-          }));
+
+        // Priority models to float at the very top of OpenRouter's 450+ models
+        const priorityIds = [
+          'meta-llama/llama-3.3-70b-instruct',
+          'anthropic/claude-3.5-sonnet',
+          'openai/gpt-4o',
+          'openai/gpt-4o-mini',
+          'deepseek/deepseek-chat',
+          'deepseek/deepseek-r1',
+          'google/gemini-2.0-flash-001',
+          'google/gemini-flash-1.5',
+          'meta-llama/llama-3.1-70b-instruct',
+          'meta-llama/llama-3.1-8b-instruct',
+          'mistralai/mistral-large-2407',
+          'qwen/qwen-2.5-72b-instruct'
+        ];
+
+        const orModels = (data.data || []).map(m => ({
+          id: m.id,
+          name: m.name || m.id,
+          context: m.context_length ? `${Math.round(m.context_length / 1000)}k` : 'Unknown',
+          pricing: m.pricing?.prompt ? `$${(Number(m.pricing.prompt) * 1000000).toFixed(2)}/M` : 'Free'
+        }));
+
+        // Sort: priority models first, then alphabetical by ID
+        orModels.sort((a, b) => {
+          const aPrio = priorityIds.indexOf(a.id);
+          const bPrio = priorityIds.indexOf(b.id);
+          if (aPrio !== -1 && bPrio !== -1) return aPrio - bPrio;
+          if (aPrio !== -1) return -1;
+          if (bPrio !== -1) return 1;
+          return a.id.localeCompare(b.id);
+        });
 
         return {
           provider: 'openrouter',

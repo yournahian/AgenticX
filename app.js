@@ -298,17 +298,23 @@ function getFallbackModelsForProvider(prov) {
     case 'groq':
       return [
         { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B (Groq LPU)', context: '128k' },
+        { id: 'allam-2-7b', name: 'ALLaM 2 7B (SDAIA / Groq)', context: '4k' },
+        { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct (Groq)', context: '128k' },
         { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Fast)', context: '128k' },
+        { id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B (Groq)', context: '131k' },
+        { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B', context: '128k' },
         { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B MoE', context: '32k' },
         { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT', context: '8k' }
       ];
     case 'openrouter':
       return [
+        { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B Instruct', context: '128k' },
         { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', context: '200k' },
         { id: 'openai/gpt-4o', name: 'GPT-4o (OpenRouter)', context: '128k' },
-        { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct', context: '128k' },
-        { id: 'google/gemini-flash-1.5', name: 'Gemini Flash 1.5', context: '1M' },
-        { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3', context: '64k' }
+        { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3', context: '64k' },
+        { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 (Reasoning)', context: '128k' },
+        { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', context: '1M' },
+        { id: 'google/gemini-flash-1.5', name: 'Gemini Flash 1.5', context: '1M' }
       ];
     case 'openai':
     default:
@@ -319,6 +325,42 @@ function getFallbackModelsForProvider(prov) {
         { id: 'o1-mini', name: 'o1 Mini (Fast Reasoning)', context: '128k' },
         { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', context: '128k' }
       ];
+  }
+}
+
+function getAdminModelCountText(prov) {
+  const models = AtomXState.modelsCache[prov]?.length > 0
+    ? AtomXState.modelsCache[prov]
+    : getFallbackModelsForProvider(prov);
+  return `${models.length} models live`;
+}
+
+function renderAdminModelOptionsHTML(prov, filterQuery = '') {
+  const allModels = AtomXState.modelsCache[prov]?.length > 0
+    ? AtomXState.modelsCache[prov]
+    : getFallbackModelsForProvider(prov);
+  const q = (filterQuery || '').toLowerCase().trim();
+  const models = q
+    ? allModels.filter(m => m.id.toLowerCase().includes(q) || (m.name && m.name.toLowerCase().includes(q)))
+    : allModels;
+
+  const currentVal = AtomXState.currentModel;
+  return models.map(m => `
+    <option value="${m.id}" ${m.id === currentVal ? 'selected' : ''}>
+      ${m.name || m.id} ${m.context ? '[' + m.context + ']' : ''}
+    </option>
+  `).join('');
+}
+
+function filterAdminModelsList(query) {
+  const select = document.getElementById('adminModelSelect');
+  if (!select) return;
+  const prov = AtomXState.currentProvider;
+  select.innerHTML = renderAdminModelOptionsHTML(prov, query);
+  const countLabel = document.getElementById('modelCountLabel');
+  if (countLabel) {
+    const total = (AtomXState.modelsCache[prov] || []).length || getFallbackModelsForProvider(prov).length;
+    countLabel.textContent = query ? `Filtered (${select.options.length}/${total})` : `${total} models live`;
   }
 }
 
@@ -350,11 +392,29 @@ function refreshModelSelectOptions(prov, models) {
 
 async function switchAdminAIProvider(provId) {
   AtomXState.currentProvider = provId;
-  const models = await fetchLiveModelsForProvider(provId, false);
-  if (models && models.length > 0) {
-    AtomXState.currentModel = models[0].id;
+  const cached = AtomXState.modelsCache[provId];
+  if (cached && cached.length > 0) {
+    if (!cached.some(m => m.id === AtomXState.currentModel)) {
+      AtomXState.currentModel = cached[0].id;
+    }
+  } else {
+    const fallbacks = getFallbackModelsForProvider(provId);
+    if (!fallbacks.some(m => m.id === AtomXState.currentModel)) {
+      AtomXState.currentModel = fallbacks[0].id;
+    }
   }
+
   navigateToScreen('12');
+
+  // Fetch live in background to ensure all 450+ models are loaded
+  fetchLiveModelsForProvider(provId, false).then(models => {
+    const select = document.getElementById('adminModelSelect');
+    if (select && models) {
+      select.innerHTML = renderAdminModelOptionsHTML(provId);
+      const countLabel = document.getElementById('modelCountLabel');
+      if (countLabel) countLabel.textContent = `${models.length} models live`;
+    }
+  });
 }
 
 async function refreshAdminModels(force = false) {
@@ -365,8 +425,14 @@ async function refreshAdminModels(force = false) {
     const models = await fetchLiveModelsForProvider(prov, force);
     const select = document.getElementById('adminModelSelect');
     if (select && models) {
-      select.innerHTML = models.map(m => `<option value="${m.id}" ${m.id === AtomXState.currentModel ? 'selected' : ''}>${m.name || m.id} (${m.context || 'Active'})</option>`).join('');
+      select.innerHTML = renderAdminModelOptionsHTML(prov);
     }
+    const countLabel = document.getElementById('modelCountLabel');
+    if (countLabel && models) {
+      countLabel.textContent = `${models.length} models live`;
+    }
+    const searchInput = document.getElementById('adminModelSearchInput');
+    if (searchInput) searchInput.value = '';
     if (force) showToast(`✓ Fetched ${models.length} live models from ${prov.toUpperCase()}!`);
   } catch (err) {
     console.warn(err);
@@ -1971,10 +2037,14 @@ function renderAdminDashboard(container) {
               </div>
 
               <div>
-                <label class="form-label" style="font-size:12px; margin-bottom:6px;">Available Model (Fetched Live)</label>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <label class="form-label" style="font-size:12px; margin-bottom:0;">Available Model (Fetched Live)</label>
+                  <span id="modelCountLabel" style="font-size:11px; color:var(--blue-primary); font-weight:700;">${getAdminModelCountText(AtomXState.currentProvider)}</span>
+                </div>
                 <select id="adminModelSelect" class="form-select" onchange="AtomXState.currentModel = this.value">
-                  <option value="${AtomXState.currentModel}">${AtomXState.currentModel}</option>
+                  ${renderAdminModelOptionsHTML(AtomXState.currentProvider)}
                 </select>
+                <input type="text" id="adminModelSearchInput" class="form-input" placeholder="🔍 Search models (e.g. llama-3.3, allam)..." style="font-size:11px; padding:4px 8px; margin-top:6px; width:100%; box-sizing:border-box;" oninput="filterAdminModelsList(this.value)">
               </div>
 
               <div style="background:var(--bg-canvas); padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); font-size:12px;">
@@ -3176,16 +3246,44 @@ function renderMobileBottomNavHTML(activeId) {
   `;
 }
 
+async function saveAdminActiveModel() {
+  const provider = AtomXState.currentProvider;
+  const model = AtomXState.currentModel;
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/active-model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activeProvider: provider, activeModel: model })
+    });
+    if (res.ok) {
+      showToast(`✓ Active system AI model set to: ${provider.toUpperCase()} / ${model}`);
+      const badge = document.getElementById('activeModelBadge');
+      if (badge) badge.textContent = `● ACTIVE: ${provider.toUpperCase()} / ${model}`;
+      return;
+    }
+  } catch (e) {
+    console.warn('Error saving active model:', e);
+  }
+  showToast(`✓ Active AI model set to: ${provider.toUpperCase()} / ${model}`);
+}
+
 // Real-time server sync for admin datasets
 async function loadAdminServerData() {
   try {
-    const [statsRes, usersRes, reqsRes, ledgerRes, engRes] = await Promise.all([
+    const [statsRes, usersRes, reqsRes, ledgerRes, engRes, modelRes] = await Promise.all([
       fetch(`${API_BASE}/api/admin/stats`).catch(() => null),
       fetch(`${API_BASE}/api/admin/users`).catch(() => null),
       fetch(`${API_BASE}/api/admin/access-requests`).catch(() => null),
       fetch(`${API_BASE}/api/admin/ledger`).catch(() => null),
-      fetch(`${API_BASE}/api/tweets/engaged`).catch(() => null)
+      fetch(`${API_BASE}/api/tweets/engaged`).catch(() => null),
+      fetch(`${API_BASE}/api/admin/active-model`).catch(() => null)
     ]);
+
+    if (modelRes && modelRes.ok) {
+      const modelData = await modelRes.json();
+      if (modelData.activeProvider) AtomXState.currentProvider = modelData.activeProvider;
+      if (modelData.activeModel) AtomXState.currentModel = modelData.activeModel;
+    }
 
     if (engRes && engRes.ok) {
       const engData = await engRes.json();
