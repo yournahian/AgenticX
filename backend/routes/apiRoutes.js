@@ -10,6 +10,24 @@ const aiController = require('../controllers/aiController');
 const campaignController = require('../controllers/campaignController');
 const adminController = require('../controllers/adminController');
 
+// API Root & Health Overview
+router.get('/', (req, res) => {
+  res.json({
+    service: 'ATOMX ENGAGE — Multi-Provider API Network',
+    status: 'online',
+    version: '1.0.0',
+    webApp: 'http://localhost:5000/',
+    adminDashboard: 'http://localhost:5000/#admin',
+    endpoints: {
+      activeModel: '/api/admin/active-model',
+      providers: '/api/providers',
+      toneStyles: '/api/tone-styles',
+      credits: '/api/credits/balance',
+      engagedTweets: '/api/tweets/engaged'
+    }
+  });
+});
+
 // Auth & Access
 router.post('/auth/login', authController.login);
 router.post('/auth/admin-login', authController.adminLogin);
