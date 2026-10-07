@@ -3,7 +3,7 @@
  * Full 10 Autonomous Agents Suite + Multi-Provider AI + Anti-Ban Pacing
  */
 
-const DEFAULT_BACKEND_URL = 'http://localhost:5000';
+const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
 let state = {
   credits: 0,
@@ -271,7 +271,7 @@ function showExtToast(text, icon = '✓') {
 
 // Redirect global window.alert to sleek native in-extension notification
 if (typeof window !== 'undefined') {
-  window.alert = function(msg) {
+  window.alert = function (msg) {
     showExtNotification(msg);
   };
 }
@@ -327,7 +327,7 @@ async function initToneSystem() {
         state.defaultTones = data.defaultTones;
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   renderTonePills();
   setupCustomToneDrawer();
@@ -1074,7 +1074,7 @@ async function initAudienceBuilderSystem() {
       if (stored.atomx_curated_lists && typeof stored.atomx_curated_lists === 'object' && Object.keys(stored.atomx_curated_lists).length > 0) {
         state.curatedLists = stored.atomx_curated_lists;
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (!state.curatedLists) {
@@ -2465,7 +2465,7 @@ async function handleGenerateReply() {
         }).catch(() => null);
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   // Display reply
   const resultCard = document.getElementById('resultCard');
@@ -2930,9 +2930,10 @@ function sleep(ms) {
 }
 
 async function getBackendUrl() {
+  let url = DEFAULT_BACKEND_URL;
   if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
     const res = await chrome.storage.sync.get(['backendUrl']);
-    return res.backendUrl || DEFAULT_BACKEND_URL;
+    if (res.backendUrl) url = res.backendUrl;
   }
-  return DEFAULT_BACKEND_URL;
+  return (url || '').replace(/\/+$/, '');
 }
