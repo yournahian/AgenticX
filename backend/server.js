@@ -42,8 +42,11 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api', apiRoutes);
 
-// Serve static frontend from parent directory (optional full-stack mode)
-const frontendPath = path.join(__dirname, '..');
+// Serve static frontend (checks local public/ first, then parent directory)
+const fs = require('fs');
+const frontendPath = fs.existsSync(path.join(__dirname, 'public', 'index.html'))
+  ? path.join(__dirname, 'public')
+  : path.join(__dirname, '..');
 app.use(express.static(frontendPath));
 
 // Fallback to index.html for presentation SPA
