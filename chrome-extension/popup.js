@@ -283,6 +283,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initListeners();
   initAgentListeners();
   await loadServerState();
+  await initAudienceBuilderSystem();
   await autoDetectTweet();
 });
 
@@ -781,27 +782,76 @@ function initAgentListeners() {
     });
   });
 
-  // Agent 2: Audience Builder
+  // Agent 2: Audience Builder (A2, Growth, Fully Auto)
+  document.getElementById('audienceListSelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('customListUrlBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+
   document.getElementById('runAudienceBuilderBtn')?.addEventListener('click', () => {
-    const list = document.getElementById('audienceListSelect')?.value;
-    const target = document.getElementById('targetInfluencerInput')?.value.trim() || 'Curated List';
-    deductCredits(5);
-    updateAgentConsole('Audience Builder Active', `Targeting: ${target}. Auto-following and engaging high-affinity creators.`);
-    alert(`👥 Audience Builder Activated!\nTargeting: ${target}\nAuto-following and engaging active high-affinity accounts.`);
+    startAudienceBuilderWorkflow();
+  });
+
+  document.getElementById('stopAudienceBuilderBtn')?.addEventListener('click', () => {
+    state.isAborted = true;
+    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
+      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+    });
+    updateAgentConsole('⏹️ Stopped', 'Audience Builder stopped by user.');
+    const startBtn = document.getElementById('runAudienceBuilderBtn');
+    const stopBtn = document.getElementById('stopAudienceBuilderBtn');
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    const statusText = document.getElementById('audienceLiveStatusText');
+    if (statusText) statusText.textContent = 'Workflow stopped by user.';
+    const countdownEl = document.getElementById('audienceCountdownText');
+    if (countdownEl) countdownEl.style.display = 'none';
+    const badge = document.getElementById('audienceStateBadge');
+    if (badge) badge.textContent = 'STOPPED';
+  });
+
+  document.getElementById('resetAudienceQueueBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove([
+      'atomx_audience_queue',
+      'atomx_audience_queue_pos',
+      'atomx_audience_counters'
+    ], () => {
+      const doneEl = document.getElementById('audienceDoneCount');
+      const colEl = document.getElementById('audienceCollectedCount');
+      const skipEl = document.getElementById('audienceSkippedCount');
+      const qInd = document.getElementById('audienceQueueIndicator');
+      const bar = document.getElementById('audienceProgressBar');
+      const status = document.getElementById('audienceLiveStatusText');
+      const badge = document.getElementById('audienceStateBadge');
+      const countdown = document.getElementById('audienceCountdownText');
+      if (doneEl) doneEl.textContent = '0';
+      if (colEl) colEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (qInd) qInd.textContent = 'Profile 0/0';
+      if (bar) bar.style.width = '0%';
+      if (status) status.textContent = 'Audience queue and counters reset.';
+      if (badge) badge.textContent = 'IDLE';
+      if (countdown) countdown.style.display = 'none';
+      showExtToast('Audience Queue Reset', '🔄');
+    });
   });
 
   // Agent 3: Increase Sorsa Score
   document.getElementById('runSorsaBoosterBtn')?.addEventListener('click', () => {
-    deductCredits(10);
-    updateAgentConsole('Sorsa Booster Running', `Engaging Tier-1 ecosystem leaders with high-signal replies to increase score multiplier.`);
-    alert(`⚡ Sorsa Score Booster Cycle Launched!\nEngaging Tier-1 ecosystem leaders with high-resonance value replies to accelerate your Sorsa Score.`);
+    startSorsaScoreBoosterWorkflow();
+  });
+  document.getElementById('stopSorsaBoosterBtn')?.addEventListener('click', () => {
+    state.isAborted = true;
+    showExtToast('Stopping Sorsa Booster...', '⏹');
   });
 
   // Agent 4: Followers Increase
   document.getElementById('runFollowerIncreaseBtn')?.addEventListener('click', () => {
-    deductCredits(8);
-    updateAgentConsole('Follower Growth Loop Active', `Scanning niche conversations. Delivering contextual value-first replies.`);
-    alert(`📈 Follower Growth Engine Running!\nAuto-commenting engaging observations on active accounts to maximize follow-back rates.`);
+    startFollowersIncreaseWorkflow();
+  });
+  document.getElementById('stopFollowerIncreaseBtn')?.addEventListener('click', () => {
+    state.isAborted = true;
+    showExtToast('Stopping Follower Growth...', '⏹');
   });
 
   // Agent 5: Post Generator
@@ -812,31 +862,52 @@ function initAgentListeners() {
       return;
     }
     const fmt = document.getElementById('postFormatSelect')?.value || 'medium';
+    const outContainer = document.getElementById('postOutputContainer');
     const outArea = document.getElementById('postOutputArea');
-    outArea.style.display = 'block';
-    outArea.value = 'Generating viral post via ATOMX AI engine...';
+    if (outContainer) outContainer.style.display = 'flex';
+    if (outArea) {
+      outArea.style.display = 'block';
+      outArea.value = 'Generating viral post via ATOMX AI engine...';
+    }
     deductCredits(1);
 
     setTimeout(() => {
-      if (fmt === 'thread') {
-        outArea.value = `1/4 Most creators overcomplicate Twitter growth.\n\nHere is what actually works based on 22k+ followers: consistency, value-first replies, and autonomous pacing.\n\n2/4 Stop commenting generic phrases. Give actionable perspectives.\n\n3/4 Focus on high Sorsa Score accounts to build real ecosystem authority.\n\n4/4 Execution compounds every single day. Keep building.`;
-      } else {
-        outArea.value = `The secret to rapid organic distribution on X isn't luck—it's high-context resonance delivered with relentless consistency. Focus on adding genuine insight to every thread.`;
+      if (outArea) {
+        if (fmt === 'thread') {
+          outArea.value = `1/4 Most creators overcomplicate Twitter growth.\n\nHere is what actually works based on 22k+ followers: consistency, value-first replies, and autonomous pacing.\n\n2/4 Stop commenting generic phrases. Give actionable perspectives.\n\n3/4 Focus on high Sorsa Score accounts to build real ecosystem authority.\n\n4/4 Execution compounds every single day. Keep building.`;
+        } else {
+          outArea.value = `The secret to rapid organic distribution on X isn't luck—it's high-context resonance delivered with relentless consistency. Focus on adding genuine insight to every thread.`;
+        }
       }
       updateAgentConsole('Post Generated', `Successfully formatted post (${fmt}) using ATOMX AI Studio.`);
     }, 500);
   });
 
-  // Agent 6: Reply Back
-  document.getElementById('runReplyBackBtn')?.addEventListener('click', () => {
-    const url = document.getElementById('myTweetUrlInput')?.value.trim();
-    if (!url) {
-      alert('Please paste your tweet URL.');
-      return;
+  document.getElementById('copyPostDraftBtn')?.addEventListener('click', () => {
+    const text = document.getElementById('postOutputArea')?.value;
+    if (text) {
+      navigator.clipboard?.writeText(text);
+      alert('✓ Post draft copied to clipboard!');
     }
-    deductCredits(3);
-    updateAgentConsole('Reply Loop Listening', `Listening for incoming comments on: ${url}`);
-    alert(`🔄 Reply Back Loop Activated!\nListening to all incoming comments under your tweet. Bot will automatically like and reply with contextual persona adherence.`);
+  });
+
+  // Agent 6: Reply Back (A6, Posts, Fully Auto)
+  document.getElementById('runReplyBackBtn')?.addEventListener('click', () => {
+    startReplyBackLoopWorkflow();
+  });
+
+  document.getElementById('stopReplyBackBtn')?.addEventListener('click', () => {
+    state.isAborted = true;
+    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
+      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+    });
+    updateAgentConsole('⏹️ Stopped', 'Reply Back loop stopped by user.');
+    const startBtn = document.getElementById('runReplyBackBtn');
+    const stopBtn = document.getElementById('stopReplyBackBtn');
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    const statusText = document.getElementById('replyBackLiveStatusText');
+    if (statusText) statusText.textContent = 'Workflow stopped by user.';
   });
 
   // Agent 7: Auto Unfollow
@@ -869,6 +940,11 @@ function initAgentListeners() {
     input.value = '';
     updateAgentConsole('Radar Updated', `Added creator handle ${val} to high-priority engagement radar.`);
   });
+
+  document.getElementById('runCreatorRadarBtn')?.addEventListener('click', () => {
+    updateAgentConsole('Radar Active', `Monitoring ${state.creators.length} creators for early engagement.`);
+    alert(`⚡ Creators Radar Active!\nMonitoring ${state.creators.length} VIP accounts.\nThe bot will scan for new posts and notify or comment immediately.`);
+  });
 }
 
 function renderCreatorChips() {
@@ -894,6 +970,1129 @@ function renderCreatorChips() {
   });
 }
 
+// =========================================================================
+// AGENT 1: AUDIENCE BUILDER WORKFLOW ENGINE (A2, GROWTH, FULLY AUTO)
+// =========================================================================
+
+// Fallback curated lists if backend offline
+const FALLBACK_CURATED_LISTS = {
+  audienceList1: {
+    id: 'audienceList1',
+    name: 'Web3 & Crypto Alpha Hunters',
+    category: 'Audience Builder',
+    listUrl: '',
+    targets: ['@vitalikbuterin', '@sassal0x', '@cobie', '@inversebrah', '@brian_armstrong', '@zachxbt', '@balajis']
+  },
+  audienceList2: {
+    id: 'audienceList2',
+    name: 'Tech Founders & Angel VCs',
+    category: 'Audience Builder',
+    listUrl: '',
+    targets: ['@elonmusk', '@sama', '@paulg', '@balajis', '@brian_armstrong']
+  }
+};
+
+async function initAudienceBuilderSystem() {
+  const backendUrl = await getBackendUrl();
+  let lists = FALLBACK_CURATED_LISTS;
+
+  // 1. Fetch live curated lists from Backend API
+  try {
+    const res = await fetch(`${backendUrl}/api/curated-lists`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.lists && Object.keys(data.lists).length > 0) {
+        lists = data.lists;
+      }
+    }
+  } catch (e) {
+    console.warn('[ATOMX] Could not sync curated lists from backend, using cache/fallback', e);
+  }
+
+  state.curatedLists = lists;
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({ atomx_curated_lists: lists });
+  }
+
+function isUserPaidPlan(plan) {
+  const p = (plan || state.userPlan || 'Free').toLowerCase();
+  return p.includes('pro') || p.includes('growth') || p.includes('paid') || p.includes('elite') || p.includes('premium') || p.includes('tier 1') || p.includes('unlimited');
+}
+
+  // 2. Populate Audience Target List Dropdown (Only Published + Category: Audience Builder)
+  const select = document.getElementById('audienceListSelect');
+  if (select) {
+    select.innerHTML = '';
+    const keys = Object.keys(lists);
+    keys.forEach((k) => {
+      const item = lists[k];
+      const isPublished = (item.status || 'published') === 'published';
+      if (item.category === 'Audience Builder' && isPublished) {
+        const isPaid = (item.accessTier || 'free') === 'paid';
+        const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+        const opt = document.createElement('option');
+        opt.value = k;
+        const targetCount = (item.targets || []).length;
+        opt.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
+        select.appendChild(opt);
+      }
+    });
+
+    const customOpt = document.createElement('option');
+    customOpt.value = 'custom';
+    customOpt.textContent = '➕ Add Your Own Custom Twitter List URL or Handles';
+    select.appendChild(customOpt);
+  }
+
+  // Populate Sorsa Score Lists (Only Published + Category: Increase Sorsa Score)
+  await initSorsaScoreSystem();
+  // Populate Followers Increase Lists (Only Published + Category: Followers Increase)
+  await initFollowersListsSystem();
+
+  // 3. Restore persisted counters, settings & queue state
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.get([
+      'atomx_audience_followed_ids',
+      'atomx_audience_queue',
+      'atomx_audience_queue_pos',
+      'atomx_audience_counters',
+      'atomx_audience_settings'
+    ], (stored) => {
+      if (stored.atomx_audience_counters) {
+        const { done = 0, collected = 0, skipped = 0 } = stored.atomx_audience_counters;
+        const dEl = document.getElementById('audienceDoneCount');
+        const cEl = document.getElementById('audienceCollectedCount');
+        const sEl = document.getElementById('audienceSkippedCount');
+        if (dEl) dEl.textContent = done;
+        if (cEl) cEl.textContent = collected;
+        if (sEl) sEl.textContent = skipped;
+      }
+
+      if (stored.atomx_audience_queue && stored.atomx_audience_queue.length > 0) {
+        const pos = stored.atomx_audience_queue_pos || 0;
+        const total = stored.atomx_audience_queue.length;
+        const qInd = document.getElementById('audienceQueueIndicator');
+        if (qInd) qInd.textContent = `Profile ${Math.min(pos + 1, total)}/${total}`;
+        const card = document.getElementById('audienceProgressCard');
+        if (card) card.style.display = 'block';
+      }
+
+      if (stored.atomx_audience_settings) {
+        const s = stored.atomx_audience_settings;
+        if (s.dateRange && document.getElementById('audienceDateRangeSelect')) {
+          document.getElementById('audienceDateRangeSelect').value = s.dateRange;
+        }
+        if (s.sortBy && document.getElementById('audienceSortBySelect')) {
+          document.getElementById('audienceSortBySelect').value = s.sortBy;
+        }
+        if (s.targetCount && document.getElementById('audienceTargetCountSelect')) {
+          document.getElementById('audienceTargetCountSelect').value = s.targetCount;
+        }
+        if (s.delaySec && document.getElementById('audienceDelaySelect')) {
+          document.getElementById('audienceDelaySelect').value = s.delaySec;
+        }
+        if (typeof s.likePosts !== 'undefined' && document.getElementById('audienceLikePostsToggle')) {
+          document.getElementById('audienceLikePostsToggle').checked = s.likePosts;
+        }
+        if (typeof s.replyPosts !== 'undefined' && document.getElementById('audienceReplyPostsToggle')) {
+          document.getElementById('audienceReplyPostsToggle').checked = s.replyPosts;
+        }
+        if (typeof s.autoUnfollow !== 'undefined' && document.getElementById('audienceUnfollowToggle')) {
+          document.getElementById('audienceUnfollowToggle').checked = s.autoUnfollow;
+        }
+      }
+    });
+  }
+}
+
+async function initSorsaScoreSystem() {
+  const select = document.getElementById('sorsaTierSelect');
+  if (!select) return;
+
+  const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
+  const keys = Object.keys(lists);
+  let hasPublished = false;
+
+  select.innerHTML = '';
+  keys.forEach((k) => {
+    const item = lists[k];
+    const isPublished = (item.status || 'published') === 'published';
+    if (item.category === 'Increase Sorsa Score' && isPublished) {
+      hasPublished = true;
+      const isPaid = (item.accessTier || 'free') === 'paid';
+      const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+      const opt = document.createElement('option');
+      opt.value = k;
+      const targetCount = (item.targets || []).length;
+      opt.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
+      select.appendChild(opt);
+    }
+  });
+
+  if (!hasPublished) {
+    select.innerHTML = `
+      <option value="sorsaTier1">⭐ Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
+      <option value="sorsaTier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
+    `;
+  }
+}
+
+async function initFollowersListsSystem() {
+  const select = document.getElementById('followerNicheSelect');
+  if (!select) return;
+
+  const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
+  const standardOptions = [
+    { val: 'crypto', text: '🌐 Crypto & Web3 Discussions' },
+    { val: 'ai', text: '🤖 AI Agents & Autonomous Tech' },
+    { val: 'founders', text: '🚀 Startups & Founders (Build in Public)' },
+    { val: 'solana', text: '⚡ Solana Ecosystem Discussions' }
+  ];
+
+  select.innerHTML = '';
+  standardOptions.forEach(opt => {
+    const el = document.createElement('option');
+    el.value = opt.val;
+    el.textContent = opt.text;
+    select.appendChild(el);
+  });
+
+  Object.keys(lists).forEach((k) => {
+    const item = lists[k];
+    const isPublished = (item.status || 'published') === 'published';
+    if (item.category === 'Followers Increase' && isPublished) {
+      const isPaid = (item.accessTier || 'free') === 'paid';
+      const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+      const el = document.createElement('option');
+      el.value = k;
+      const targetCount = (item.targets || []).length;
+      el.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
+      select.appendChild(el);
+    }
+  });
+}
+
+async function startAudienceBuilderWorkflow() {
+  const listSelect = document.getElementById('audienceListSelect')?.value || 'audienceList1';
+  let targetUrl = '';
+
+  const dateRange = document.getElementById('audienceDateRangeSelect')?.value || '24h';
+  const sortBy = document.getElementById('audienceSortBySelect')?.value || 'replies';
+  const targetCount = Number(document.getElementById('audienceTargetCountSelect')?.value || 10);
+  const delaySec = Number(document.getElementById('audienceDelaySelect')?.value || 15);
+  const likePosts = document.getElementById('audienceLikePostsToggle')?.checked ?? true;
+  const replyPosts = document.getElementById('audienceReplyPostsToggle')?.checked ?? true;
+  const autoUnfollow = document.getElementById('audienceUnfollowToggle')?.checked ?? false;
+
+  // Persist settings immediately
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({
+      atomx_audience_settings: { listKey: listSelect, dateRange, sortBy, targetCount, delaySec, likePosts, replyPosts, autoUnfollow }
+    });
+  }
+
+  // Check Paid plan access
+  if (listSelect !== 'custom') {
+    const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect];
+    if (curated?.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
+      alert(`🔒 Pro Plan Required!\n\n"${curated.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
+      switchExtTab('credits');
+      return;
+    }
+  }
+
+  // Phase A: Resolve Target Feed URL
+  if (listSelect === 'custom') {
+    const rawCustomUrl = document.getElementById('customListUrlInput')?.value.trim() || '';
+    if (!rawCustomUrl) {
+      alert('⚠️ Please enter a Twitter List URL or handles (e.g. @vitalikbuterin, @cz_binance).');
+      return;
+    }
+    const listIdMatch = rawCustomUrl.match(/\/lists\/(\d+)/) || rawCustomUrl.match(/^(\d{15,25})$/);
+    if (listIdMatch) {
+      // 100% Reliable, Clean Filtered Live Search: No retweets, no replies, English only!
+      const listId = listIdMatch[1];
+      targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies`)}&f=live`;
+    } else if (rawCustomUrl.includes('x.com') || rawCustomUrl.includes('twitter.com')) {
+      targetUrl = rawCustomUrl;
+    } else {
+      // Direct handles pasted (e.g. "@vitalikbuterin, @cz_binance" or "sama, elonmusk")
+      const extractedHandles = rawCustomUrl
+        .split(/[\s,]+/)
+        .map(h => h.replace(/^@/, '').trim())
+        .filter(h => h && /^[A-Za-z0-9_]{1,25}$/.test(h));
+
+      if (extractedHandles.length > 0) {
+        const query = extractedHandles.slice(0, 15).map(h => 'from:' + h).join(' OR ');
+        targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
+      } else {
+        alert('⚠️ Please enter a valid Twitter List URL or handle(s) (e.g. https://x.com/i/lists/... or @vitalikbuterin, @cz_binance).');
+        return;
+      }
+    }
+  } else {
+    const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect] || FALLBACK_CURATED_LISTS.audienceList1;
+    const rawListUrl = (curated.listUrl || '').trim();
+    const listIdMatch = rawListUrl.match(/\/lists\/(\d+)/);
+
+    // If valid Twitter List URL is given and has a list ID, use the ultra-clean filtered live search!
+    if (listIdMatch && !rawListUrl.includes('1498675129654161413')) {
+      const listId = listIdMatch[1];
+      targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies`)}&f=live`;
+    } else {
+      // 100% Reliable Live Search Feed with targets:
+      const rawTargets = curated.targets || [];
+      const cleanHandles = rawTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
+      if (cleanHandles.length > 0) {
+        // Pick random batch of 12 handles for variety across multiple runs
+        const selected = cleanHandles.length > 12 ? [...cleanHandles].sort(() => 0.5 - Math.random()).slice(0, 12) : cleanHandles;
+        const query = selected.map(h => 'from:' + h).join(' OR ');
+        targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
+      } else {
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) lang:en -filter:retweets -filter:replies') + '&f=live';
+      }
+    }
+  }
+
+  if (state.credits < 1) {
+    alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to follow active accounts, but you have ${state.credits}.\nPlease top up credits.`);
+    switchExtTab('credits');
+    return;
+  }
+
+  const startBtn = document.getElementById('runAudienceBuilderBtn');
+  const stopBtn = document.getElementById('stopAudienceBuilderBtn');
+  const progressCard = document.getElementById('audienceProgressCard');
+  const stateBadge = document.getElementById('audienceStateBadge');
+  const titleEl = document.getElementById('audienceProgressTitle');
+  const queueIndicator = document.getElementById('audienceQueueIndicator');
+  const doneEl = document.getElementById('audienceDoneCount');
+  const colEl = document.getElementById('audienceCollectedCount');
+  const skipEl = document.getElementById('audienceSkippedCount');
+  const barEl = document.getElementById('audienceProgressBar');
+  const statusText = document.getElementById('audienceLiveStatusText');
+  const countdownEl = document.getElementById('audienceCountdownText');
+
+  state.isAborted = false;
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (progressCard) progressCard.style.display = 'block';
+
+  // Load existing followed IDs & counters
+  const storageData = await new Promise(r => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get(['atomx_audience_followed_ids', 'atomx_audience_counters'], r);
+    } else {
+      r({});
+    }
+  });
+
+  const followedSet = new Set((storageData.atomx_audience_followed_ids || []).map(h => h.toLowerCase()));
+  // Reset session counters for fresh Audience Builder session
+  let doneCount = 0;
+  let skippedCount = 0;
+  let collectedCount = 0;
+
+  if (doneEl) doneEl.textContent = '0';
+  if (colEl) colEl.textContent = '0';
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (countdownEl) countdownEl.style.display = 'none';
+
+  // STATE: LIST_SELECTED
+  if (stateBadge) stateBadge.textContent = 'LIST_SELECTED';
+  if (titleEl) titleEl.textContent = 'Audience Builder';
+  if (statusText) statusText.textContent = `List selected. Navigating to timeline...`;
+  if (barEl) barEl.style.width = '10%';
+
+  let workingTabId = null;
+  let shouldCloseWorkingTab = false;
+
+  try {
+    // STATE: FINDING_TWEETS (Phase B)
+    if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
+    if (statusText) statusText.textContent = `Opening target feed: ${targetUrl}...`;
+
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+    workingTabId = listTab.id;
+    shouldCloseWorkingTab = true;
+    await waitForTabComplete(workingTabId);
+    await sleep(2500);
+
+    if (state.isAborted) return;
+
+    // STATE: COLLECTING_IDS (Phase B & C)
+    if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
+    if (statusText) statusText.textContent = `Deep scanning timeline feed across multiple scrolls (Target: ${targetCount} profiles)...`;
+    if (barEl) barEl.style.width = '20%';
+
+    const scanResult = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(workingTabId, {
+        type: 'AUDIENCE_BUILDER_HUNT_USERS',
+        dateRange,
+        sortBy,
+        targetCount
+      }, (res) => resolve(res || { success: false, profiles: [], topTweets: [] }));
+    });
+
+    if (state.isAborted) return;
+
+    // RULE: Post-Authors Only (Directly target the creators who published the posts, no comments/repliers)
+    let collectedProfiles = [];
+    const collectedHandles = new Set();
+
+    if (scanResult?.profiles && scanResult.profiles.length > 0) {
+      for (const p of scanResult.profiles) {
+        if (collectedProfiles.length >= targetCount) break;
+        const handleKey = (p.cleanHandle || '').toLowerCase();
+        if (handleKey && !collectedHandles.has(handleKey)) {
+          collectedHandles.add(handleKey);
+          collectedProfiles.push(p);
+          if (colEl) colEl.textContent = collectedProfiles.length;
+        }
+      }
+    }
+
+    collectedCount = collectedProfiles.length;
+    if (colEl) colEl.textContent = collectedCount;
+
+    if (collectedCount === 0) {
+      alert('⚠️ No active author profiles could be extracted from this feed. Please verify the URL or try another list.');
+      return;
+    }
+
+    // STATE: QUEUE_READY
+    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
+    if (barEl) barEl.style.width = '40%';
+    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount} active accounts. Beginning profile engagement loop...`;
+    if (queueIndicator) queueIndicator.textContent = `Profile 1/${collectedCount}`;
+
+    // Persist queue
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set({
+        atomx_audience_queue: collectedProfiles,
+        atomx_audience_queue_pos: 0,
+        atomx_audience_counters: { done: doneCount, collected: collectedCount, skipped: skippedCount }
+      });
+    }
+
+    await sleep(1500);
+
+    // Phase D: Per-Profile Loop (CHECK_FOLLOWED → (LIKE → REPLY)? → FOLLOW → COUNTDOWN → next)
+    for (let i = 0; i < collectedCount; i++) {
+      if (state.isAborted) break;
+
+      const profile = collectedProfiles[i];
+      const progPercent = Math.round(40 + ((i + 1) / collectedCount) * 60);
+      if (barEl) barEl.style.width = `${progPercent}%`;
+      if (queueIndicator) queueIndicator.textContent = `Profile ${i + 1}/${collectedCount}`;
+
+      // Check if already followed in history
+      if (followedSet.has(profile.cleanHandle.toLowerCase())) {
+        skippedCount++;
+        if (skipEl) skipEl.textContent = skippedCount;
+        if (stateBadge) stateBadge.textContent = 'SKIPPED';
+        if (statusText) statusText.textContent = `@${profile.cleanHandle} already in followed history (Skipped).`;
+
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({
+            atomx_audience_queue_pos: i + 1,
+            atomx_audience_counters: { done: doneCount, collected: collectedCount, skipped: skippedCount }
+          });
+        }
+        await sleep(600);
+        continue;
+      }
+
+      // STATE: CHECK_FOLLOWED
+      if (stateBadge) stateBadge.textContent = 'CHECK_FOLLOWED';
+      if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
+
+      try {
+        await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}` });
+        await waitForTabComplete(workingTabId);
+        await sleep(2000);
+
+        if (state.isAborted) break;
+
+        // Perform engagement and follow on profile page
+        if (likePosts || replyPosts) {
+          if (stateBadge) stateBadge.textContent = 'ENGAGING';
+          if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Engaging @${profile.cleanHandle}'s recent posts...`;
+        }
+
+        const backendUrl = await getBackendUrl();
+        const actionRes = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(workingTabId, {
+            type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
+            handle: profile.cleanHandle,
+            likePosts,
+            replyPosts,
+            style: state.selectedTone,
+            stylePrompt: state.selectedTonePrompt,
+            backendUrl
+          }, (res) => resolve(res || { success: false }));
+        });
+
+        if (actionRes?.alreadyFollowing) {
+          skippedCount++;
+          if (skipEl) skipEl.textContent = skippedCount;
+          if (stateBadge) stateBadge.textContent = 'SKIPPED';
+          if (statusText) statusText.textContent = `Already following @${profile.cleanHandle} (Skipped).`;
+          followedSet.add(profile.cleanHandle.toLowerCase());
+        } else if (actionRes?.followed) {
+          doneCount++;
+          if (doneEl) doneEl.textContent = doneCount;
+          if (stateBadge) stateBadge.textContent = 'FOLLOWED';
+          followedSet.add(profile.cleanHandle.toLowerCase());
+          deductCredits(1);
+          if (statusText) statusText.textContent = `✓ Followed @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
+        } else {
+          if (statusText) statusText.textContent = `Could not follow @${profile.cleanHandle}: ${actionRes?.error || 'Button not available'}`;
+        }
+
+        // Persist progress to local storage
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({
+            atomx_audience_followed_ids: Array.from(followedSet),
+            atomx_audience_queue_pos: i + 1,
+            atomx_audience_counters: { done: doneCount, collected: collectedCount, skipped: skippedCount }
+          });
+        }
+
+      } catch (pErr) {
+        console.warn('Error on profile action:', pErr);
+      }
+
+      // COUNTDOWN between profiles
+      if (i < collectedCount - 1 && !state.isAborted) {
+        if (stateBadge) stateBadge.textContent = 'COUNTDOWN';
+        if (countdownEl) countdownEl.style.display = 'inline-block';
+
+        for (let s = delaySec; s > 0; s--) {
+          if (state.isAborted) break;
+          const pad = s < 10 ? '0' + s : s;
+          if (countdownEl) countdownEl.textContent = `Next profile in 0:${pad}`;
+          await sleep(1000);
+        }
+        if (countdownEl) countdownEl.style.display = 'none';
+      }
+    }
+
+    // STATE: DONE
+    if (!state.isAborted) {
+      if (stateBadge) stateBadge.textContent = 'DONE';
+      if (barEl) barEl.style.width = '100%';
+      if (countdownEl) countdownEl.style.display = 'none';
+      if (statusText) statusText.textContent = `✓ Audience Builder Completed! Followed: ${doneCount}, Skipped: ${skippedCount}, Collected: ${collectedCount}.`;
+      alert(`👥 Audience Builder Cycle Complete!\n\n• Profiles Collected: ${collectedCount}\n• New Accounts Followed: ${doneCount}\n• Accounts Skipped (Already Following): ${skippedCount}`);
+    }
+  } catch (err) {
+    console.error('Audience Builder error:', err);
+    alert('Audience Builder error: ' + err.message);
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (countdownEl) countdownEl.style.display = 'none';
+    if (shouldCloseWorkingTab && workingTabId) {
+      chrome.tabs?.remove(workingTabId).catch(() => null);
+    }
+  }
+}
+
+// =========================================================================
+// AGENT 3: INCREASE SORSA SCORE WORKFLOW ENGINE (A3, POST-AUTHORS ONLY)
+// =========================================================================
+async function startSorsaScoreBoosterWorkflow() {
+  const tier = document.getElementById('sorsaTierSelect')?.value || 'tier1';
+  const tone = document.getElementById('sorsaToneSelect')?.value || 'technical';
+  const targetCount = Number(document.getElementById('sorsaCountSelect')?.value || 5);
+  const likePosts = document.getElementById('sorsaOptLike')?.checked ?? true;
+  const replyPosts = document.getElementById('sorsaOptComment')?.checked ?? true;
+  const followPosts = document.getElementById('sorsaOptFollow')?.checked ?? true;
+
+  if (state.credits < 1) {
+    alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to boost your Sorsa Score.`);
+    switchExtTab('credits');
+    return;
+  }
+
+  const startBtn = document.getElementById('runSorsaBoosterBtn');
+  const stopBtn = document.getElementById('stopSorsaBoosterBtn');
+  const progressCard = document.getElementById('sorsaProgressCard');
+  const stateBadge = document.getElementById('sorsaStateBadge');
+  const titleEl = document.getElementById('sorsaProgressTitle');
+  const queueIndicator = document.getElementById('sorsaQueueIndicator');
+  const doneEl = document.getElementById('sorsaDoneCount');
+  const colEl = document.getElementById('sorsaCollectedCount');
+  const skipEl = document.getElementById('sorsaSkippedCount');
+  const barEl = document.getElementById('sorsaProgressBar');
+  const statusText = document.getElementById('sorsaLiveStatusText');
+  const countdownEl = document.getElementById('sorsaCountdownText');
+
+  state.isAborted = false;
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (progressCard) progressCard.style.display = 'block';
+
+  let doneCount = 0;
+  let skippedCount = 0;
+  let collectedCount = 0;
+
+  if (doneEl) doneEl.textContent = '0';
+  if (colEl) colEl.textContent = '0';
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (countdownEl) countdownEl.style.display = 'none';
+
+  const selectedListKey = document.getElementById('sorsaTierSelect')?.value || 'sorsaTier1';
+  const tierKey = (selectedListKey === 'tier1' ? 'sorsaTier1' : (selectedListKey === 'tier2' ? 'sorsaTier2' : selectedListKey));
+  const tierData = state.curatedLists?.[tierKey] || FALLBACK_CURATED_LISTS?.[tierKey];
+
+  // Check Paid plan access
+  if (tierData?.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
+    alert(`🔒 Pro Plan Required!\n\n"${tierData.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
+    switchExtTab('credits');
+    return;
+  }
+
+  const customTargets = (tierData?.targets && tierData.targets.length > 0) ? tierData.targets : [];
+
+  let targetUrl = '';
+  if (customTargets.length > 0) {
+    const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
+    const selected = clean.length > 12 ? [...clean].sort(() => 0.5 - Math.random()).slice(0, 12) : clean;
+    const query = selected.map(h => 'from:' + h).join(' OR ');
+    targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
+  } else if (tierData?.listUrl) {
+    const listIdMatch = tierData.listUrl.match(/\/lists\/(\d+)/);
+    if (listIdMatch) {
+      targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listIdMatch[1]} lang:en -filter:retweets -filter:replies`)}&f=live`;
+    } else {
+      targetUrl = tierData.listUrl;
+    }
+  } else if (tierKey === 'sorsaTier2' || tier === 'tier2') {
+    // Fallback: High-Volume Ecosystem Projects (exclude retweets & replies, English only, live)
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(from:ethereum OR from:solana OR from:base OR from:arbitrum OR from:optimism OR from:binance OR from:polygon) lang:en -filter:retweets -filter:replies') + '&f=live';
+  } else {
+    // Fallback: Top 100 Crypto KOLs high-weight feed (exclude retweets & replies, English only, live)
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(from:cz_binance OR from:brian_armstrong OR from:vitalikbuterin OR from:aeyakovenko OR from:mertmumtaz OR from:balajis OR from:sreeramkannan OR from:shawmakesmagic) lang:en -filter:retweets -filter:replies') + '&f=live';
+  }
+
+  let workingTabId = null;
+  let shouldCloseWorkingTab = false;
+
+  try {
+    if (stateBadge) stateBadge.textContent = 'FINDING_KOLS';
+    if (statusText) statusText.textContent = `Opening ${tier === 'tier1' ? 'Tier 1 KOLs' : 'Tier 2 Ecosystem Projects'} feed...`;
+    if (barEl) barEl.style.width = '15%';
+
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+    workingTabId = listTab.id;
+    shouldCloseWorkingTab = true;
+    await waitForTabComplete(workingTabId);
+    await sleep(2500);
+
+    if (state.isAborted) return;
+
+    if (stateBadge) stateBadge.textContent = 'COLLECTING_AUTHORS';
+    if (statusText) statusText.textContent = `Scanning timeline for top ecosystem post-authors (Target: ${targetCount} accounts)...`;
+    if (barEl) barEl.style.width = '25%';
+
+    const scanResult = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(workingTabId, {
+        type: 'AUDIENCE_BUILDER_HUNT_USERS',
+        dateRange: 'all',
+        sortBy: 'replies',
+        targetCount
+      }, (res) => resolve(res || { success: false, profiles: [] }));
+    });
+
+    if (state.isAborted) return;
+
+    // RULE: Post-Authors Only (Directly target the high-weight accounts who posted)
+    let collectedProfiles = [];
+    const collectedHandles = new Set();
+
+    if (scanResult?.profiles && scanResult.profiles.length > 0) {
+      for (const p of scanResult.profiles) {
+        if (collectedProfiles.length >= targetCount) break;
+        const handleKey = (p.cleanHandle || '').toLowerCase();
+        if (handleKey && !collectedHandles.has(handleKey)) {
+          collectedHandles.add(handleKey);
+          collectedProfiles.push(p);
+          if (colEl) colEl.textContent = collectedProfiles.length;
+        }
+      }
+    }
+
+    collectedCount = collectedProfiles.length;
+    if (colEl) colEl.textContent = collectedCount;
+
+    if (collectedCount === 0) {
+      alert('⚠️ Could not find active posts from tier accounts at this moment. Please try again.');
+      return;
+    }
+
+    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
+    if (barEl) barEl.style.width = '40%';
+    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount} high-weight ecosystem accounts. Starting Sorsa boost loop...`;
+    if (queueIndicator) queueIndicator.textContent = `Account 1/${collectedCount}`;
+
+    await sleep(1500);
+
+    // Map tone to prompt
+    let customTonePrompt = null;
+    if (tone === 'technical') {
+      customTonePrompt = "Provide sharp, technical alpha with concise developer/architect perspective (5-15 words). No fluff, no generic hype.";
+    } else if (tone === 'professional') {
+      customTonePrompt = "Professional operator insight. Focused execution, metrics, and strategic value (6-12 words).";
+    } else {
+      customTonePrompt = "Bullish and supportive momentum. High confidence in execution and community (5-10 words).";
+    }
+
+    // Per-profile engagement loop
+    for (let i = 0; i < collectedCount; i++) {
+      if (state.isAborted) break;
+
+      const profile = collectedProfiles[i];
+      const progPercent = Math.round(40 + ((i + 1) / collectedCount) * 60);
+      if (barEl) barEl.style.width = `${progPercent}%`;
+      if (queueIndicator) queueIndicator.textContent = `Account ${i + 1}/${collectedCount}`;
+
+      if (stateBadge) stateBadge.textContent = 'ENGAGING';
+      if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
+
+      try {
+        await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}` });
+        await waitForTabComplete(workingTabId);
+        await sleep(2000);
+
+        if (state.isAborted) break;
+
+        const backendUrl = await getBackendUrl();
+        const actionRes = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(workingTabId, {
+            type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
+            handle: profile.cleanHandle,
+            likePosts,
+            replyPosts,
+            style: `Sorsa ${tone}`,
+            stylePrompt: customTonePrompt,
+            backendUrl
+          }, (res) => resolve(res || { success: false }));
+        });
+
+        if (actionRes?.alreadyFollowing && !replyPosts && !likePosts) {
+          skippedCount++;
+          if (skipEl) skipEl.textContent = skippedCount;
+          if (stateBadge) stateBadge.textContent = 'SKIPPED';
+        } else {
+          doneCount++;
+          if (doneEl) doneEl.textContent = doneCount;
+          if (stateBadge) stateBadge.textContent = 'BOOSTED';
+          deductCredits(1);
+          if (statusText) statusText.textContent = `⚡ Boosted @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
+        }
+      } catch (pErr) {
+        console.warn('Error on Sorsa profile action:', pErr);
+      }
+
+      if (i < collectedCount - 1 && !state.isAborted) {
+        if (stateBadge) stateBadge.textContent = 'COUNTDOWN';
+        if (countdownEl) countdownEl.style.display = 'inline-block';
+        for (let s = 15; s > 0; s--) {
+          if (state.isAborted) break;
+          if (countdownEl) countdownEl.textContent = `Next KOL in 0:${s < 10 ? '0' : ''}${s}`;
+          await sleep(1000);
+        }
+        if (countdownEl) countdownEl.style.display = 'none';
+      }
+    }
+
+    if (!state.isAborted) {
+      if (stateBadge) stateBadge.textContent = 'DONE';
+      if (barEl) barEl.style.width = '100%';
+      if (statusText) statusText.textContent = `✓ Sorsa Score Booster Completed! Engaged ${doneCount} ecosystem accounts.`;
+      alert(`⚡ Sorsa Score Booster Cycle Complete!\n\n• High-Weight Accounts Engaged: ${doneCount}\n• Sorsa Multiplier Accelerated!`);
+    }
+  } catch (err) {
+    console.error('Sorsa Booster error:', err);
+    alert('Sorsa Booster error: ' + err.message);
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (countdownEl) countdownEl.style.display = 'none';
+    if (shouldCloseWorkingTab && workingTabId) {
+      chrome.tabs?.remove(workingTabId).catch(() => null);
+    }
+  }
+}
+
+// =========================================================================
+// AGENT 4: FOLLOWERS INCREASE WORKFLOW ENGINE (A4, THREAD REPLIERS COLLECTION)
+// =========================================================================
+async function startFollowersIncreaseWorkflow() {
+  const niche = document.getElementById('followerNicheSelect')?.value || 'crypto';
+  const strategy = document.getElementById('followerStratSelect')?.value || 'High-Resonance Insights';
+  const targetCount = Number(document.getElementById('followerDailyTargetSelect')?.value || 8);
+  const delaySec = Number(document.getElementById('followerDelaySelect')?.value || 15);
+
+  if (state.credits < 1) {
+    alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to run Follower Growth.`);
+    switchExtTab('credits');
+    return;
+  }
+
+  const startBtn = document.getElementById('runFollowerIncreaseBtn');
+  const stopBtn = document.getElementById('stopFollowerIncreaseBtn');
+  const progressCard = document.getElementById('followerProgressCard');
+  const stateBadge = document.getElementById('followerStateBadge');
+  const titleEl = document.getElementById('followerProgressTitle');
+  const queueIndicator = document.getElementById('followerQueueIndicator');
+  const doneEl = document.getElementById('followerDoneCount');
+  const colEl = document.getElementById('followerCollectedCount');
+  const skipEl = document.getElementById('followerSkippedCount');
+  const barEl = document.getElementById('followerProgressBar');
+  const statusText = document.getElementById('followerLiveStatusText');
+  const countdownEl = document.getElementById('followerCountdownText');
+
+  state.isAborted = false;
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (progressCard) progressCard.style.display = 'block';
+
+  let doneCount = 0;
+  let skippedCount = 0;
+  let collectedCount = 0;
+
+  if (doneEl) doneEl.textContent = '0';
+  if (colEl) colEl.textContent = '0';
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (countdownEl) countdownEl.style.display = 'none';
+
+  let targetUrl = '';
+  const curatedFollower = state.curatedLists?.[niche];
+  if (curatedFollower) {
+    if (curatedFollower.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
+      alert(`🔒 Pro Plan Required!\n\n"${curatedFollower.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
+      switchExtTab('credits');
+      return;
+    }
+    const customTargets = (curatedFollower.targets && curatedFollower.targets.length > 0) ? curatedFollower.targets : [];
+    if (customTargets.length > 0) {
+      const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
+      const selected = clean.length > 12 ? [...clean].sort(() => 0.5 - Math.random()).slice(0, 12) : clean;
+      const query = selected.map(h => 'from:' + h).join(' OR ');
+      targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
+    } else if (curatedFollower.listUrl) {
+      targetUrl = curatedFollower.listUrl;
+    } else {
+      targetUrl = 'https://x.com/search?q=(crypto%20OR%20web3)&f=live';
+    }
+  } else if (niche === 'ai') {
+    targetUrl = 'https://x.com/search?q=(ai%20agents%20OR%20autonomous%20agents)&f=live';
+  } else if (niche === 'founders') {
+    targetUrl = 'https://x.com/search?q=(startups%20OR%20founders%20OR%20building%20in%20public)&f=live';
+  } else if (niche === 'solana') {
+    targetUrl = 'https://x.com/search?q=(solana%20OR%20sol)&f=live';
+  } else {
+    targetUrl = 'https://x.com/search?q=(crypto%20OR%20web3)&f=live';
+  }
+
+  let workingTabId = null;
+  let shouldCloseWorkingTab = false;
+
+  try {
+    if (stateBadge) stateBadge.textContent = 'FINDING_THREADS';
+    if (statusText) statusText.textContent = `Opening niche discussion feed: ${niche.toUpperCase()}...`;
+    if (barEl) barEl.style.width = '15%';
+
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+    workingTabId = listTab.id;
+    shouldCloseWorkingTab = true;
+    await waitForTabComplete(workingTabId);
+    await sleep(2500);
+
+    if (state.isAborted) return;
+
+    if (stateBadge) stateBadge.textContent = 'SCANNING_THREADS';
+    if (statusText) statusText.textContent = `Scanning timeline for busy discussion threads with high replies...`;
+    if (barEl) barEl.style.width = '20%';
+
+    const scanResult = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(workingTabId, {
+        type: 'AUDIENCE_BUILDER_HUNT_USERS',
+        dateRange: 'all',
+        sortBy: 'replies',
+        targetCount
+      }, (res) => resolve(res || { success: false, profiles: [], topTweets: [] }));
+    });
+
+    if (state.isAborted) return;
+
+    // RULE: Multi-Thread Replier Collection (extract engaged community repliers from busy discussions)
+    let collectedProfiles = [];
+    const collectedHandles = new Set();
+
+    if (scanResult?.topTweets && scanResult.topTweets.length > 0) {
+      const busyTweets = scanResult.topTweets.filter(t => t.tweetUrl && (t.repliesCount > 0 || !t.tweetUrl.includes('/status/')));
+
+      for (let tIdx = 0; tIdx < busyTweets.length; tIdx++) {
+        if (state.isAborted || collectedProfiles.length >= targetCount) break;
+
+        const busyTweet = busyTweets[tIdx];
+        const remainingToCollect = targetCount - collectedProfiles.length;
+
+        if (stateBadge) stateBadge.textContent = 'COLLECTING_REPLIERS';
+        if (statusText) statusText.textContent = `[${collectedProfiles.length}/${targetCount} Collected] Visiting busy thread #${tIdx + 1} by @${busyTweet.cleanHandle} (${busyTweet.repliesCount || 'active'} replies) to collect repliers...`;
+        if (barEl) barEl.style.width = `${Math.min(38, 20 + Math.round((collectedProfiles.length / targetCount) * 18))}%`;
+
+        try {
+          await chrome.tabs.update(workingTabId, { url: busyTweet.tweetUrl });
+          await waitForTabComplete(workingTabId);
+          await sleep(2200);
+
+          if (!state.isAborted) {
+            const repliersRes = await new Promise((resolve) => {
+              chrome.tabs.sendMessage(workingTabId, {
+                type: 'COLLECT_REPLIERS_FROM_TWEET_THREAD',
+                targetCount: remainingToCollect
+              }, (res) => resolve(res || { success: false, profiles: [] }));
+            });
+
+            if (repliersRes?.profiles && repliersRes.profiles.length > 0) {
+              for (const r of repliersRes.profiles) {
+                const handleKey = (r.cleanHandle || '').toLowerCase();
+                if (handleKey && !collectedHandles.has(handleKey)) {
+                  collectedHandles.add(handleKey);
+                  collectedProfiles.push(r);
+                  if (colEl) colEl.textContent = collectedProfiles.length;
+                  if (collectedProfiles.length >= targetCount) break;
+                }
+              }
+            }
+          }
+        } catch (threadErr) {
+          console.warn(`Error collecting repliers from thread #${tIdx + 1}:`, threadErr);
+        }
+      }
+    }
+
+    // Backfill from scanned profiles if repliers were fewer than targetCount
+    if (collectedProfiles.length < targetCount && scanResult?.profiles && scanResult.profiles.length > 0) {
+      for (const p of scanResult.profiles) {
+        if (collectedProfiles.length >= targetCount) break;
+        const handleKey = (p.cleanHandle || '').toLowerCase();
+        if (handleKey && !collectedHandles.has(handleKey)) {
+          collectedHandles.add(handleKey);
+          collectedProfiles.push(p);
+          if (colEl) colEl.textContent = collectedProfiles.length;
+        }
+      }
+    }
+
+    collectedCount = collectedProfiles.length;
+    if (colEl) colEl.textContent = collectedCount;
+
+    if (collectedCount === 0) {
+      alert('⚠️ No active repliers or accounts could be extracted from this niche feed.');
+      return;
+    }
+
+    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
+    if (barEl) barEl.style.width = '40%';
+    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount} engaged niche accounts. Starting engagement loop...`;
+    if (queueIndicator) queueIndicator.textContent = `Profile 1/${collectedCount}`;
+
+    await sleep(1500);
+
+    // Strategy prompt
+    const strategyPrompt = `Deliver a sharp, insightful observation aligned with "${strategy}" strategy (5-12 words).`;
+
+    // Per-profile engagement loop
+    for (let i = 0; i < collectedCount; i++) {
+      if (state.isAborted) break;
+
+      const profile = collectedProfiles[i];
+      const progPercent = Math.round(40 + ((i + 1) / collectedCount) * 60);
+      if (barEl) barEl.style.width = `${progPercent}%`;
+      if (queueIndicator) queueIndicator.textContent = `Profile ${i + 1}/${collectedCount}`;
+
+      if (stateBadge) stateBadge.textContent = 'ENGAGING';
+      if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
+
+      try {
+        await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}` });
+        await waitForTabComplete(workingTabId);
+        await sleep(2000);
+
+        if (state.isAborted) break;
+
+        const backendUrl = await getBackendUrl();
+        const actionRes = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(workingTabId, {
+            type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
+            handle: profile.cleanHandle,
+            likePosts: true,
+            replyPosts: true,
+            style: strategy,
+            stylePrompt: strategyPrompt,
+            backendUrl
+          }, (res) => resolve(res || { success: false }));
+        });
+
+        if (actionRes?.alreadyFollowing) {
+          skippedCount++;
+          if (skipEl) skipEl.textContent = skippedCount;
+          if (stateBadge) stateBadge.textContent = 'SKIPPED';
+        } else if (actionRes?.followed) {
+          doneCount++;
+          if (doneEl) doneEl.textContent = doneCount;
+          if (stateBadge) stateBadge.textContent = 'FOLLOWED';
+          deductCredits(1);
+          if (statusText) statusText.textContent = `✓ Followed @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
+        }
+      } catch (pErr) {
+        console.warn('Error on follower profile action:', pErr);
+      }
+
+      if (i < collectedCount - 1 && !state.isAborted) {
+        if (stateBadge) stateBadge.textContent = 'COUNTDOWN';
+        if (countdownEl) countdownEl.style.display = 'inline-block';
+        for (let s = delaySec; s > 0; s--) {
+          if (state.isAborted) break;
+          if (countdownEl) countdownEl.textContent = `Next profile in 0:${s < 10 ? '0' : ''}${s}`;
+          await sleep(1000);
+        }
+        if (countdownEl) countdownEl.style.display = 'none';
+      }
+    }
+
+    if (!state.isAborted) {
+      if (stateBadge) stateBadge.textContent = 'DONE';
+      if (barEl) barEl.style.width = '100%';
+      if (statusText) statusText.textContent = `✓ Follower Growth Completed! Followed: ${doneCount}, Skipped: ${skippedCount}.`;
+      alert(`📈 Follower Growth Cycle Complete!\n\n• Profiles Engaged: ${doneCount}\n• Accounts Skipped: ${skippedCount}`);
+    }
+  } catch (err) {
+    console.error('Follower Growth error:', err);
+    alert('Follower Growth error: ' + err.message);
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (countdownEl) countdownEl.style.display = 'none';
+    if (shouldCloseWorkingTab && workingTabId) {
+      chrome.tabs?.remove(workingTabId).catch(() => null);
+    }
+  }
+}
+
+// =========================================================================
+// AGENT 2: REPLY BACK WORKFLOW ENGINE (A6, POSTS, FULLY AUTO)
+// =========================================================================
+async function startReplyBackLoopWorkflow() {
+  const url1 = document.getElementById('myTweetUrlInput1')?.value.trim();
+  const url2 = document.getElementById('myTweetUrlInput2')?.value.trim();
+  const url3 = document.getElementById('myTweetUrlInput3')?.value.trim();
+
+  const postUrls = [url1, url2, url3].filter(u => u && (u.includes('twitter.com') || u.includes('x.com')));
+
+  if (postUrls.length === 0) {
+    alert('⚠️ Please enter at least 1 valid link of your own post/tweet (e.g. https://x.com/yourhandle/status/...).');
+    return;
+  }
+
+  const tone = document.getElementById('replyBackToneSelect')?.value || 'Natural & Concise';
+  const delaySec = Number(document.getElementById('replyBackDelaySelect')?.value || 12);
+
+  const startBtn = document.getElementById('runReplyBackBtn');
+  const stopBtn = document.getElementById('stopReplyBackBtn');
+  const progressCard = document.getElementById('replyBackProgressCard');
+  const postInd = document.getElementById('replyBackPostIndicator');
+  const badgeEl = document.getElementById('replyBackProgressBadge');
+  const barEl = document.getElementById('replyBackProgressBar');
+  const doneEl = document.getElementById('replyBackDoneCount');
+  const statusText = document.getElementById('replyBackLiveStatusText');
+
+  state.isAborted = false;
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (progressCard) progressCard.style.display = 'block';
+
+  let totalReplied = 0;
+  let workingTabId = null;
+  let shouldCloseWorkingTab = false;
+
+  try {
+    for (let pIdx = 0; pIdx < postUrls.length; pIdx++) {
+      if (state.isAborted) break;
+
+      const currentPostUrl = postUrls[pIdx];
+      const postNumberStr = `Post ${pIdx + 1} of ${postUrls.length}`;
+      if (postInd) postInd.textContent = `${postNumberStr} (Active)`;
+      if (statusText) statusText.textContent = `Navigating to your post: ${currentPostUrl}...`;
+      updateAgentConsole('Reply Loop Running', `Accessing ${postNumberStr}: ${currentPostUrl}`);
+
+      if (!workingTabId) {
+        const tab = await chrome.tabs.create({ url: currentPostUrl, active: true });
+        workingTabId = tab.id;
+        shouldCloseWorkingTab = true;
+      } else {
+        await chrome.tabs.update(workingTabId, { url: currentPostUrl });
+      }
+
+      await waitForTabComplete(workingTabId);
+      await sleep(3000);
+
+      if (state.isAborted) break;
+
+      if (statusText) statusText.textContent = `Scanning all incoming comments under post...`;
+
+      const cycleResult = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(workingTabId, {
+          type: 'EXECUTE_REPLY_BACK_CYCLE',
+          postUrl: currentPostUrl,
+          style: tone,
+          delaySec
+        }, (res) => resolve(res || { success: false, repliedCount: 0 }));
+      });
+
+      if (state.isAborted) break;
+
+      const repliedInThisPost = cycleResult?.repliedCount || 0;
+      totalReplied += repliedInThisPost;
+
+      if (doneEl) doneEl.textContent = totalReplied;
+      if (badgeEl) badgeEl.textContent = `${totalReplied} REPLIED`;
+      const postProg = Math.round(((pIdx + 1) / postUrls.length) * 100);
+      if (barEl) barEl.style.width = `${postProg}%`;
+
+      if (pIdx < postUrls.length - 1 && !state.isAborted) {
+        if (statusText) statusText.textContent = `Completed post ${pIdx + 1}. Taking a 6s human break before post ${pIdx + 2}...`;
+        await sleep(6000);
+      }
+    }
+
+    if (!state.isAborted) {
+      if (barEl) barEl.style.width = '100%';
+      if (statusText) statusText.textContent = `✓ Done! Auto-replied to all comments across ${postUrls.length} post(s).`;
+      updateAgentConsole('Reply Loop Complete', `Finished replying to all community comments with human typing.`);
+      alert(`🔄 Reply Back Cycle Finished!\n\n• Posts Processed: ${postUrls.length}\n• Total Comments Replied: ${totalReplied}\n• Action: Liked (❤️) + Contextual Human Letter-by-Letter Typing.`);
+    }
+  } catch (err) {
+    console.error('Reply Back Loop error:', err);
+    alert('Reply Back error: ' + err.message);
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (shouldCloseWorkingTab && workingTabId) {
+      chrome.tabs?.remove(workingTabId).catch(() => null);
+    }
+  }
+}
+
 function openAgentDetailView(agentId) {
   if (agentId === 'replystudio') {
     switchExtTab('reply');
@@ -916,7 +2115,9 @@ function openAgentDetailView(agentId) {
 
   // Show only matching panel
   document.querySelectorAll('.agent-panel-content').forEach(p => {
-    p.style.display = p.id === `panel-agent-${agentId}` ? 'flex' : 'none';
+    const isTarget = p.id === `panel-agent-${agentId}`;
+    p.classList.toggle('active', isTarget);
+    p.style.display = isTarget ? 'flex' : 'none';
   });
 
   // Toggle views
@@ -1000,9 +2201,10 @@ function handleVerifyCryptoTx() {
 async function loadServerState() {
   try {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const stored = await chrome.storage.local.get(['credits', 'accessKey', 'creators', 'engagedTweetIds']);
+      const stored = await chrome.storage.local.get(['credits', 'accessKey', 'creators', 'engagedTweetIds', 'userPlan']);
       if (stored?.credits !== undefined) state.credits = stored.credits;
       if (stored?.accessKey) state.accessKey = stored.accessKey;
+      if (stored?.userPlan) state.userPlan = stored.userPlan;
       if (Array.isArray(stored?.creators)) state.creators = stored.creators;
       if (Array.isArray(stored?.engagedTweetIds)) state.engagedTweetIds = stored.engagedTweetIds;
     }
@@ -1012,6 +2214,10 @@ async function loadServerState() {
     if (res && res.ok) {
       const data = await res.json();
       if (typeof data.credits === 'number') state.credits = data.credits;
+      if (data.plan) {
+        state.userPlan = data.plan;
+        chrome.storage?.local.set({ userPlan: data.plan });
+      }
     }
 
     // Sync engaged tweet IDs from backend SQLite

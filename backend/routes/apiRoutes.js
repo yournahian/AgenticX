@@ -74,8 +74,16 @@ router.post('/admin/curated-lists', adminController.saveCuratedLists);
 router.get('/admin/active-model', adminController.getActiveModel);
 router.post('/admin/active-model', adminController.saveActiveModel);
 
+// Dynamic AI API Keys Management
+router.get('/admin/api-keys', adminController.getApiKeys);
+router.post('/admin/api-keys', adminController.saveApiKey);
+
 // Tone & Style Templates Management
 router.get('/tone-styles', adminController.getToneStyles);
 router.post('/admin/tone-styles', adminController.saveToneStyles);
+
+// Live AI API Telemetry & Key Health Testing
+router.get('/admin/api-logs', adminController.getApiLogs);
+router.get('/admin/test-keys', adminController.testProviderKeys);
 
 module.exports = router;

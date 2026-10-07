@@ -74,11 +74,23 @@ function getProviderKey(provider) {
   const keyName = envVarMap[norm];
   if (!keyName) return '';
 
+  // 1. Check keys saved via Admin Control Center in aiSettings.json
+  try {
+    const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
+    if (fs.existsSync(aiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+      if (data.apiKeys && data.apiKeys[norm] && data.apiKeys[norm].trim().length > 5) {
+        return data.apiKeys[norm].trim();
+      }
+    }
+  } catch (e) {}
+
+  // 2. Check runtime process.env
   if (process.env[keyName] && process.env[keyName].trim().length > 5) {
     return process.env[keyName].trim();
   }
 
-  // Check backend/.env directly
+  // 3. Check backend/.env directly
   try {
     const envFile = path.join(__dirname, '..', '.env');
     if (fs.existsSync(envFile)) {
@@ -176,39 +188,11 @@ async function fetchLiveModels(provider, customApiKey = null) {
             context: m.context_window ? `${Math.round(m.context_window / 1000)}k` : '128k'
           }));
 
-        // Merge live models (like allam-2-7b, qwen, gpt-oss) with Groq flagship production models
-        const coreGroq = [
-          { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Groq LPU)', context: '128k' },
-          { id: 'allam-2-7b', name: 'ALLaM 2 7B (SDAIA / Groq)', context: '4k' },
-          { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct (Groq)', context: '128k' },
-          { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Blazing Fast)', context: '128k' },
-          { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B', context: '128k' },
-          { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B (MoE Architecture)', context: '32k' },
-          { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT (Google on Groq)', context: '8k' }
-        ];
-
-        const seen = new Set();
-        const mergedGroq = [];
-        // Insert live models from Groq first
-        for (const m of liveGroqModels) {
-          if (!seen.has(m.id)) {
-            seen.add(m.id);
-            mergedGroq.push(m);
-          }
-        }
-        // Then ensure flagship production models are available
-        for (const m of coreGroq) {
-          if (!seen.has(m.id)) {
-            seen.add(m.id);
-            mergedGroq.push(m);
-          }
-        }
-
         return {
           provider: 'groq',
           isLive: true,
-          count: mergedGroq.length,
-          models: mergedGroq
+          count: liveGroqModels.length > 0 ? liveGroqModels.length : DEFAULT_MODELS.groq.length,
+          models: liveGroqModels.length > 0 ? liveGroqModels : DEFAULT_MODELS.groq
         };
       }
 
@@ -281,6 +265,126 @@ async function fetchLiveModels(provider, customApiKey = null) {
 }
 
 /**
+ * Sanitize AI output to guarantee strict compliance with user negative constraints
+ */
+function sanitizeReplyOutput(rawReply, styleInstruction = '', authorHandle = '', authorName = '') {
+  if (!rawReply) return '';
+  let reply = rawReply.trim();
+
+  // 1. Strip wrapping quotes (double quotes, single quotes, backticks, smart quotes)
+  reply = reply.replace(/^["'“`«»]+|["'”`«»]+$/g, '').trim();
+
+  // 2. Strip any author @handles or usernames completely
+  reply = reply.replace(/@[\w_]+/g, '').replace(/\s{2,}/g, ' ').trim();
+
+  // 3. Strip author name/handle if mentioned without '@'
+  if (authorHandle) {
+    const cleanHandle = authorHandle.replace(/^@/, '').trim();
+    if (cleanHandle.length >= 3) {
+      const regHandle = new RegExp('\\b' + cleanHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+      reply = reply.replace(regHandle, '');
+    }
+  }
+  if (authorName && authorName.trim().length >= 3) {
+    const cleanName = authorName.trim();
+    const regName = new RegExp('\\b' + cleanName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+    reply = reply.replace(regName, '');
+  }
+
+  // 4. Strip accidental prefixes like "Reply:", "Comment:", "Tweet:"
+  reply = reply.replace(/^(Reply|Comment|Tweet|Response|AI Reply|Output)\s*:\s*/i, '').trim();
+
+  // Again strip quotes in case prefix had quotes
+  reply = reply.replace(/^["'“`«»]+|["'”`«»]+$/g, '').trim();
+
+  // 5. If instruction explicitly forbids exclamation marks, replace '!' with '.'
+  if (styleInstruction && /no exclamation marks?/i.test(styleInstruction)) {
+    reply = reply.replace(/!+/g, '.');
+  }
+
+  // 6. If instruction specifies strict maximum word count (e.g. "Do not exceed 10 words")
+  const maxWordMatch = styleInstruction.match(/Do not exceed (\d+) words/i) || styleInstruction.match(/between \d+ and (\d+) words/i);
+  if (maxWordMatch) {
+    const maxWords = parseInt(maxWordMatch[1], 10);
+    const words = reply.split(/\s+/).filter(Boolean);
+    if (words.length > maxWords) {
+      // Find a punctuation boundary or truncate cleanly
+      reply = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
+    }
+  }
+
+  // 7. Clean up duplicate spaces and punctuation artifacts
+  reply = reply.replace(/\s{2,}/g, ' ').replace(/\s+([.,!?])/g, '$1').trim();
+
+  return reply;
+}
+
+/**
+ * Resolve style instruction prioritizing user prompt above everything
+ */
+function resolveStyleInstruction(style, stylePrompt) {
+  if (stylePrompt && stylePrompt.trim().length > 0) {
+    return stylePrompt.trim();
+  }
+
+  if (!style) {
+    return STYLE_GUIDELINES['Natural & Concise'];
+  }
+
+  // If style itself is a prompt (e.g. multi-line or contains prompt keywords or length > 25)
+  if (style.includes('\n') || style.length > 25 || /CRITICAL|STRICTLY|Do not|Write a/i.test(style)) {
+    return style.trim();
+  }
+
+  // Look up in toneStyles.json
+  try {
+    const tonePath = path.join(__dirname, '../data/toneStyles.json');
+    if (fs.existsSync(tonePath)) {
+      const toneData = JSON.parse(fs.readFileSync(tonePath, 'utf8'));
+      const sLower = style.toLowerCase();
+      const found = (toneData.defaultTones || []).find(t =>
+        (t.id && t.id.toLowerCase() === sLower) ||
+        (t.name && t.name.toLowerCase() === sLower) ||
+        (t.id && (sLower.includes(t.id.toLowerCase()) || t.id.toLowerCase().includes(sLower))) ||
+        (t.name && (sLower.includes(t.name.toLowerCase()) || t.name.toLowerCase().includes(sLower)))
+      );
+      if (found && found.prompt) {
+        return found.prompt;
+      }
+    }
+  } catch (e) {}
+
+  // Look up in hardcoded STYLE_GUIDELINES
+  if (STYLE_GUIDELINES[style]) {
+    return STYLE_GUIDELINES[style];
+  }
+
+  // Default to style string itself if non-empty
+  return style || STYLE_GUIDELINES['Natural & Concise'];
+}
+
+/**
+ * Build unified system prompt and user content where the user's prompt is supreme
+ */
+function buildPromptMessages(tweetText, styleInstruction) {
+  const systemPrompt = [
+    "You are an AI assistant generating a single authentic reply to a social media post.",
+    "CRITICAL CONSTRAINTS (HIGHEST PRIORITY - STRICT COMPLIANCE REQUIRED):",
+    "1. ABSOLUTE COMPLIANCE: Obey every rule, length constraint, and formatting directive given below strictly and verbatim.",
+    "2. NO AUTHOR NAMES OR USERNAMES: NEVER use or mention the post author's name, display name, or username. NEVER include any @handle or @username in your response.",
+    "3. NO QUOTES: Output raw text only. NEVER wrap your reply in quotes (no \" or ' or “).",
+    "4. NO AI EXPLANATIONS OR PREAMBLE: Output ONLY the exact single reply text itself, nothing else.",
+    "",
+    "USER INSTRUCTIONS & STYLE DIRECTIVES:",
+    styleInstruction || "Write a casual, highly human, 1-2 sentence response."
+  ].join('\n');
+
+  const userContent = `Post Content:\n"""\n${tweetText}\n"""\n\nGenerate the reply now:`;
+
+  return { systemPrompt, userContent };
+}
+
+/**
  * Generate AI reply using the specified provider and model
  */
 async function generateWithProvider({
@@ -288,6 +392,7 @@ async function generateWithProvider({
   model = null,
   tweetText,
   tweetAuthor = '@user',
+  tweetAuthorName = '',
   style = 'Natural & Concise',
   stylePrompt = null,
   length = 'medium'
@@ -296,30 +401,14 @@ async function generateWithProvider({
   const apiKey = getProviderKey(prov);
   const selectedModel = model || (DEFAULT_MODELS[prov]?.[0]?.id || 'gpt-4o-mini');
 
-  let styleInstruction = stylePrompt;
-  if (!styleInstruction) {
-    try {
-      const tonePath = path.join(__dirname, '../data/toneStyles.json');
-      if (fs.existsSync(tonePath)) {
-        const toneData = JSON.parse(fs.readFileSync(tonePath, 'utf8'));
-        const found = (toneData.defaultTones || []).find(t =>
-          (t.name && t.name.toLowerCase() === style.toLowerCase()) ||
-          (t.id && t.id.toLowerCase() === style.toLowerCase())
-        );
-        if (found && found.prompt) {
-          styleInstruction = found.prompt;
-        }
-      }
-    } catch (e) {}
-  }
-  if (!styleInstruction) {
-    styleInstruction = STYLE_GUIDELINES[style] || STYLE_GUIDELINES['Natural & Concise'];
-  }
+  const styleInstruction = resolveStyleInstruction(style, stylePrompt);
   const maxTokens = length === 'short' ? 45 : length === 'long' ? 140 : 80;
 
   // Real API execution if key exists
   if (apiKey && apiKey.length > 5) {
     try {
+      const { systemPrompt, userContent } = buildPromptMessages(tweetText, styleInstruction);
+
       if (prov === 'gemini') {
         // Native Google Gemini generateContent call
         const geminiCleanModel = selectedModel.replace('models/', '');
@@ -332,20 +421,21 @@ async function generateWithProvider({
               {
                 role: 'user',
                 parts: [
-                  { text: `${SYSTEM_PROMPT_TEMPLATE}\nTone Style: ${styleInstruction}\nTarget Tweet by ${tweetAuthor}:\n"${tweetText}"\n\nGenerate the reply now:` }
+                  { text: `${systemPrompt}\n\n${userContent}` }
                 ]
               }
             ],
             generationConfig: {
               maxOutputTokens: maxTokens,
-              temperature: 0.7
+              temperature: 0.65
             }
           })
         });
 
         if (response.ok) {
           const data = await response.json();
-          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+          let reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+          reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
           if (reply) {
             return {
               reply,
@@ -371,24 +461,38 @@ async function generateWithProvider({
           headers['X-Title'] = 'ATOMX ENGAGE';
         }
 
+        const t0 = Date.now();
         const response = await fetch(endpoint, {
           method: 'POST',
           headers,
           body: JSON.stringify({
             model: selectedModel,
             messages: [
-              { role: 'system', content: `${SYSTEM_PROMPT_TEMPLATE}\nTone Style: ${styleInstruction}` },
-              { role: 'user', content: `Target Tweet by ${tweetAuthor}:\n"${tweetText}"\n\nGenerate reply:` }
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userContent }
             ],
             max_tokens: maxTokens,
-            temperature: 0.72
+            temperature: 0.65
           })
         });
 
+        const latencyMs = Date.now() - t0;
+
         if (response.ok) {
           const data = await response.json();
-          const reply = data.choices?.[0]?.message?.content?.trim() || '';
+          let reply = data.choices?.[0]?.message?.content?.trim() || '';
+          reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
           if (reply) {
+            addApiLog({
+              provider: prov.toUpperCase(),
+              model: data.model || selectedModel,
+              status: 'SUCCESS',
+              statusCode: 200,
+              targetSnippet: tweetText,
+              author: tweetAuthor,
+              reply,
+              latencyMs
+            });
             return {
               reply,
               provider: prov.toUpperCase(),
@@ -399,10 +503,30 @@ async function generateWithProvider({
         } else {
           const errBody = await response.text();
           console.warn(`[MultiProvider] ${prov.toUpperCase()} returned ${response.status}:`, errBody);
+          addApiLog({
+            provider: prov.toUpperCase(),
+            model: selectedModel,
+            status: 'FAILED',
+            statusCode: response.status,
+            targetSnippet: tweetText,
+            author: tweetAuthor,
+            error: errBody.slice(0, 200),
+            latencyMs
+          });
         }
       }
     } catch (err) {
       console.warn(`[MultiProvider] Live call to ${prov} failed: ${err.message}.`);
+      addApiLog({
+        provider: prov.toUpperCase(),
+        model: selectedModel,
+        status: 'NETWORK_ERROR',
+        statusCode: 500,
+        targetSnippet: tweetText,
+        author: tweetAuthor,
+        error: err.message,
+        latencyMs: 0
+      });
     }
   }
 
@@ -432,24 +556,39 @@ async function generateWithProvider({
         fbHeaders['X-Title'] = 'ATOMX ENGAGE';
       }
 
+      const fbT0 = Date.now();
+      const { systemPrompt, userContent } = buildPromptMessages(tweetText, styleInstruction);
       const fbRes = await fetch(fbEndpoint, {
         method: 'POST',
         headers: fbHeaders,
         body: JSON.stringify({
           model: fb.model,
           messages: [
-            { role: 'system', content: `${SYSTEM_PROMPT_TEMPLATE}\nTone Style: ${styleInstruction}` },
-            { role: 'user', content: `Target Tweet by ${tweetAuthor}:\n"${tweetText}"\n\nGenerate reply:` }
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
           ],
           max_tokens: maxTokens,
-          temperature: 0.72
+          temperature: 0.65
         })
       });
 
+      const fbLatency = Date.now() - fbT0;
+
       if (fbRes.ok) {
         const data = await fbRes.json();
-        const reply = data.choices?.[0]?.message?.content?.trim();
+        let reply = data.choices?.[0]?.message?.content?.trim() || '';
+        reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
         if (reply) {
+          addApiLog({
+            provider: `${fb.provider.toUpperCase()} (Failover)`,
+            model: fb.model,
+            status: 'SUCCESS',
+            statusCode: 200,
+            targetSnippet: tweetText,
+            author: tweetAuthor,
+            reply,
+            latencyMs: fbLatency
+          });
           return {
             reply,
             provider: `${fb.provider.toUpperCase()} (Failover)`,
@@ -457,6 +596,18 @@ async function generateWithProvider({
             tokensUsed: data.usage?.total_tokens || 50
           };
         }
+      } else {
+        const errText = await fbRes.text();
+        addApiLog({
+          provider: `${fb.provider.toUpperCase()} (Failover)`,
+          model: fb.model,
+          status: 'FAILED',
+          statusCode: fbRes.status,
+          targetSnippet: tweetText,
+          author: tweetAuthor,
+          error: errText.slice(0, 150),
+          latencyMs: fbLatency
+        });
       }
     } catch (e) {
       // Continue to next failover option
@@ -465,6 +616,17 @@ async function generateWithProvider({
 
   // Graceful synthesis engine tailored to the prompt instructions
   const fallback = createSynthesizedReply(tweetText, tweetAuthor, style, styleInstruction);
+  addApiLog({
+    provider: 'FALLBACK_SYNTHESIS',
+    model: 'emergency-synthesized',
+    status: 'FALLBACK',
+    statusCode: 200,
+    targetSnippet: tweetText,
+    author: tweetAuthor,
+    reply: fallback,
+    error: 'All live API calls failed or exhausted'
+  });
+
   return {
     reply: fallback,
     provider: `${prov.toUpperCase()} (Synthesized)`,
@@ -506,9 +668,104 @@ function createSynthesizedReply(tweet, author, style, styleInstruction = '') {
   }
 }
 
+// Telemetry & API Key Health Testing Engine
+const LOGS_FILE = path.join(__dirname, '../data/apiTelemetryLogs.json');
+let recentApiLogs = [];
+
+try {
+  if (fs.existsSync(LOGS_FILE)) {
+    recentApiLogs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
+  }
+} catch (e) { recentApiLogs = []; }
+
+function addApiLog(entry) {
+  const logItem = {
+    id: Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    timestamp: new Date().toLocaleTimeString(),
+    date: new Date().toLocaleDateString(),
+    provider: entry.provider || 'unknown',
+    model: entry.model || 'unknown',
+    status: entry.status || 'SUCCESS',
+    statusCode: entry.statusCode || 200,
+    targetSnippet: (entry.targetSnippet || '').slice(0, 100),
+    author: entry.author || '@user',
+    reply: entry.reply || '',
+    error: entry.error || null,
+    latencyMs: entry.latencyMs || 0
+  };
+
+  recentApiLogs.unshift(logItem);
+  if (recentApiLogs.length > 50) recentApiLogs = recentApiLogs.slice(0, 50);
+
+  try {
+    fs.mkdirSync(path.dirname(LOGS_FILE), { recursive: true });
+    fs.writeFileSync(LOGS_FILE, JSON.stringify(recentApiLogs, null, 2), 'utf8');
+  } catch (e) {}
+}
+
+function getApiLogs() {
+  return recentApiLogs;
+}
+
+async function testAllProviderKeys() {
+  const results = {};
+  const providers = ['groq', 'openrouter', 'openai', 'gemini'];
+  for (const p of providers) {
+    const key = getProviderKey(p);
+    if (!key || key.length < 5) {
+      results[p] = { configured: false, status: 'MISSING_KEY', message: 'No API key set in .env' };
+      continue;
+    }
+    try {
+      const t0 = Date.now();
+      let testEndpoint = '';
+      let testHeaders = {};
+      let testBody = null;
+
+      if (p === 'groq') {
+        testEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
+        testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+        testBody = { model: 'qwen/qwen3.8-27b', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+      } else if (p === 'openrouter') {
+        testEndpoint = 'https://openrouter.ai/api/v1/chat/completions';
+        testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'HTTP-Referer': 'https://atomx.io' };
+        testBody = { model: 'meta-llama/llama-3.3-70b-instruct', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+      } else if (p === 'openai') {
+        testEndpoint = 'https://api.openai.com/v1/chat/completions';
+        testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+        testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+      } else if (p === 'gemini') {
+        testEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+        testHeaders = { 'Content-Type': 'application/json' };
+        testBody = { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] };
+      }
+
+      const res = await fetch(testEndpoint, {
+        method: 'POST',
+        headers: testHeaders,
+        body: JSON.stringify(testBody)
+      });
+
+      const latencyMs = Date.now() - t0;
+      if (res.ok) {
+        results[p] = { configured: true, status: 'HEALTHY', statusCode: res.status, latencyMs, message: `Active & Working (${latencyMs}ms)` };
+      } else {
+        const errText = await res.text();
+        results[p] = { configured: true, status: 'ERROR', statusCode: res.status, latencyMs, message: `HTTP ${res.status}: ${errText.slice(0, 150)}` };
+      }
+    } catch (err) {
+      results[p] = { configured: true, status: 'NETWORK_ERROR', message: err.message };
+    }
+  }
+  return results;
+}
+
 module.exports = {
   DEFAULT_MODELS,
   fetchLiveModels,
   generateWithProvider,
-  getProviderKey
+  getProviderKey,
+  getApiLogs,
+  addApiLog,
+  testAllProviderKeys
 };

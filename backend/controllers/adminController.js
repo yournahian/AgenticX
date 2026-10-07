@@ -204,3 +204,146 @@ exports.saveToneStyles = (req, res) => {
     res.status(500).json({ error: 'Failed to save tone styles: ' + err.message });
   }
 };
+
+const multiProviderService = require('../services/multiProviderService');
+
+// Live AI API Telemetry Logs for Admin Dashboard
+exports.getApiLogs = (req, res) => {
+  try {
+    const logs = multiProviderService.getApiLogs();
+    res.json({ logs });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve API telemetry logs: ' + err.message });
+  }
+};
+
+// Test All Configured Provider API Keys
+exports.testProviderKeys = async (req, res) => {
+  try {
+    const keysStatus = await multiProviderService.testAllProviderKeys();
+    res.json({ keysStatus });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to test API keys: ' + err.message });
+  }
+};
+
+function updateEnvFile(keyName, keyValue) {
+  try {
+    const envPath = path.join(__dirname, '../.env');
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf8');
+    }
+    const regex = new RegExp(`^${keyName}=.*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `${keyName}=${keyValue}`);
+    } else {
+      content = (content.trim() ? content.trim() + '\n' : '') + `${keyName}=${keyValue}\n`;
+    }
+    fs.writeFileSync(envPath, content, 'utf8');
+  } catch (err) {
+    console.warn('Could not update .env file:', err.message);
+  }
+}
+
+function readEnvValue(keyName) {
+  try {
+    const envPath = path.join(__dirname, '../.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const regex = new RegExp(`^${keyName}=([^\\r\\n]+)`, 'm');
+      const match = content.match(regex);
+      if (match && match[1]) return match[1].trim();
+    }
+  } catch (e) {}
+  return '';
+}
+
+// Get API Keys configuration status and masked keys for Admin Control Center
+exports.getApiKeys = (req, res) => {
+  try {
+    let savedKeys = {};
+    if (fs.existsSync(aiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+      savedKeys = data.apiKeys || {};
+    }
+
+    const providers = ['groq', 'openrouter', 'openai', 'gemini'];
+    const envVarMap = {
+      groq: 'GROQ_API_KEY',
+      openrouter: 'OPENROUTER_API_KEY',
+      openai: 'OPENAI_API_KEY',
+      gemini: 'GEMINI_API_KEY'
+    };
+
+    const result = {};
+    for (const p of providers) {
+      const rawKey = (savedKeys[p] || process.env[envVarMap[p]] || readEnvValue(envVarMap[p]) || '').trim();
+      const hasKey = rawKey.length > 5;
+      let masked = '';
+      if (hasKey) {
+        masked = rawKey.length > 8 ? rawKey.slice(0, 4) + '••••••••' + rawKey.slice(-4) : '••••••••';
+      }
+      result[p] = {
+        hasKey,
+        maskedKey: masked
+      };
+    }
+
+    res.json({ keys: result });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve API keys: ' + err.message });
+  }
+};
+
+// Save and activate API Key from Admin Control Center (Syncs to aiSettings.json, process.env, and .env)
+exports.saveApiKey = (req, res) => {
+  try {
+    const { provider, apiKey } = req.body;
+    if (!provider || typeof apiKey !== 'string') {
+      return res.status(400).json({ error: 'provider and apiKey are required' });
+    }
+
+    const prov = provider.toLowerCase().trim();
+    const envVarMap = {
+      groq: 'GROQ_API_KEY',
+      openrouter: 'OPENROUTER_API_KEY',
+      openai: 'OPENAI_API_KEY',
+      gemini: 'GEMINI_API_KEY'
+    };
+
+    const envName = envVarMap[prov];
+    if (!envName) {
+      return res.status(400).json({ error: `Unsupported provider: ${provider}` });
+    }
+
+    const cleanKey = apiKey.trim();
+
+    // 1. Update in aiSettings.json
+    let data = {};
+    if (fs.existsSync(aiSettingsPath)) {
+      data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+    }
+    if (!data.apiKeys) data.apiKeys = {};
+    data.apiKeys[prov] = cleanKey;
+    data.lastUpdated = new Date().toISOString();
+    fs.mkdirSync(path.dirname(aiSettingsPath), { recursive: true });
+    fs.writeFileSync(aiSettingsPath, JSON.stringify(data, null, 2), 'utf8');
+
+    // 2. Update in runtime process.env
+    process.env[envName] = cleanKey;
+
+    // 3. Sync to backend/.env
+    updateEnvFile(envName, cleanKey);
+
+    const masked = cleanKey.length > 8 ? cleanKey.slice(0, 4) + '••••••••' + cleanKey.slice(-4) : '••••••••';
+    res.json({
+      message: `✓ ${provider.toUpperCase()} API key saved successfully and activated immediately!`,
+      provider: prov,
+      maskedKey: masked,
+      hasKey: cleanKey.length > 5
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save API key: ' + err.message });
+  }
+};

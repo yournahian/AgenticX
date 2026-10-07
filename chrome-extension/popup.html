@@ -262,6 +262,8 @@
                     <span>📜 Smooth Scroll & Hydrate Tweet</span>
                   </label>
                 </div>
+              </div>
+
               <!-- Tone & Style Selector for Telegram Agent -->
               <div style="margin: 6px 0; padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 11px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 4px;">
@@ -293,96 +295,537 @@
               </div>
             </div>
 
-            <!-- Workspace 2: Audience -->
-            <div class="agent-panel-content" id="panel-agent-audience" style="display:none;">
-              <label class="opt-label">Curated Audience List (Provided by System)</label>
-              <select id="audienceListSelect" class="ext-select">
-                <option value="list1">⭐ List 1: Web3 & Crypto Alpha Hunters (Curated Free)</option>
-                <option value="list2">⭐ List 2: Tech Founders & Angel VCs (Curated Free)</option>
-                <option value="custom">Custom Influencer Account Target</option>
-              </select>
-              <input type="text" id="targetInfluencerInput" class="ext-input" placeholder="Or enter target handle (e.g. @evanjawadx)" style="margin-top:6px;">
-              <button class="primary-btn mini-btn" id="runAudienceBuilderBtn">▶ Auto Follow & Engage Niche Audience</button>
-            </div>
-
-            <!-- Workspace 3: Sorsa -->
-            <div class="agent-panel-content" id="panel-agent-sorsa" style="display:none;">
-              <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:8px;">Engage with verified accounts to maximize your Sorsa ranking and qualify for paid promotions.</div>
-              <label class="opt-label">Target Tier Selection</label>
-              <select id="sorsaTierSelect" class="ext-select">
-                <option value="tier1">Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
-                <option value="tier2">Tier 2: High-Volume Ecosystem Projects</option>
-              </select>
-              <button class="primary-btn mini-btn" id="runSorsaBoosterBtn">▶ Launch Sorsa Score Booster Cycle</button>
-            </div>
-
-            <!-- Workspace 4: Followers -->
-            <div class="agent-panel-content" id="panel-agent-followers" style="display:none;">
-              <div style="font-size:11.5px; color:var(--text-secondary); margin-bottom:8px;">
-                <strong>Fully Autonomous:</strong> Zero manual links needed. The bot identifies active high-relevance users in your niche and delivers value-first replies to trigger organic follow-backs.
+            <!-- Workspace 2: Audience Builder (A2, Growth, Fully Auto) -->
+            <div class="agent-panel-content" id="panel-agent-audience" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Follower Growth Engine:</strong> Auto-finds highest-engagement busy tweets from curated/custom lists, extracts active community members who commented, likes/replies to their posts, and auto-follows with safe human pacing.
               </div>
-              <label class="opt-label">Growth Strategy</label>
-              <select class="ext-select" id="followerStratSelect">
-                <option>High-Resonance Insightful Comments (Recommended)</option>
-                <option>Thought-Provoking Discussion Starter</option>
-                <option>Fast First-Comment Engagement</option>
-              </select>
-              <button class="primary-btn mini-btn" id="runFollowerIncreaseBtn">▶ Start 1-Click Auto Follower Growth</button>
-            </div>
 
-            <!-- Workspace 5: Post Generator -->
-            <div class="agent-panel-content" id="panel-agent-postgen" style="display:none;">
-              <label class="opt-label">Raw Notes, Links or Thoughts</label>
-              <textarea id="rawNotesInput" class="ext-textarea mini" placeholder="Paste ideas, raw bullet points, or link to summarize into viral post..."></textarea>
-              <div style="display:flex; gap:6px; margin:6px 0;">
-                <select id="postFormatSelect" class="ext-select" style="flex:1;">
-                  <option value="medium">Medium Post (180 chars)</option>
-                  <option value="long">Long Post (280 chars)</option>
-                  <option value="thread">Full Thread (3-5 Tweets)</option>
+              <!-- Phase A: Target List Selection -->
+              <div>
+                <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
+                  <span>Select Target Twitter List</span>
+                  <span class="badge-mini growth" style="font-size:9px;">2 READY-MADE LISTS</span>
+                </label>
+                <select id="audienceListSelect" class="ext-select">
+                  <option value="audienceList1">⭐ List 1: Web3 & Crypto Alpha Hunters (Curated)</option>
+                  <option value="audienceList2">⭐ List 2: Tech Founders & Angel VCs (Curated)</option>
+                  <option value="custom">➕ Add Your Own Custom Twitter List URL</option>
                 </select>
-                <button class="primary-btn mini-btn" id="generatePostBtn" style="flex:1; margin-top:0;">Generate</button>
+                <div id="customListUrlBox" style="display:none; margin-top:6px;">
+                  <input type="text" id="customListUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...)">
+                </div>
               </div>
-              <textarea id="postOutputArea" class="ext-textarea mini" style="display:none; margin-top:6px;" readonly></textarea>
-            </div>
 
-            <!-- Workspace 6: Reply Back -->
-            <div class="agent-panel-content" id="panel-agent-replyback" style="display:none;">
-              <label class="opt-label">Your Tweet URL</label>
-              <input type="text" id="myTweetUrlInput" class="ext-input" placeholder="https://x.com/yourhandle/status/1842...">
-              <button class="primary-btn mini-btn" id="runReplyBackBtn">▶ Auto-Reply to All Comments Below Tweet</button>
-            </div>
-
-            <!-- Workspace 7: Unfollow -->
-            <div class="agent-panel-content" id="panel-agent-unfollow" style="display:none;">
-              <label class="opt-label">Unfollow Criteria</label>
-              <select id="unfollowCriteria" class="ext-select">
-                <option value="nonfollowers">Users Not Following Back</option>
-                <option value="walchain">Users with Low Walchain Score (&lt;30)</option>
-                <option value="inactive">Inactive for &gt; 30 Days</option>
-              </select>
-              <div style="font-size:11px; color:var(--text-muted); margin:6px 0;">Safe randomized delay (5-10s) applied automatically to avoid Twitter flags.</div>
-              <button class="secondary-btn mini-btn" id="runAutoUnfollowBtn">🧹 Scan & Safe Unfollow Non-Followers</button>
-            </div>
-
-            <!-- Workspace 8: Picture & Voice Match -->
-            <div class="agent-panel-content" id="panel-agent-match" style="display:none;">
-              <label class="opt-label">Persona Voice Setting</label>
-              <select class="ext-select" id="personaVoiceSelect">
-                <option>Match @evanjawadx (Crisp, High Alpha, Assertive)</option>
-                <option>Tech Founder / Builder Tone</option>
-                <option>Minimalist Web3 Operator Tone</option>
-              </select>
-              <input type="text" id="imagePromptTopic" class="ext-input" placeholder="Topic for AI Image (e.g. Next-gen Autonomous AI)" style="margin-top:6px;">
-              <button class="primary-btn mini-btn" id="runPictureVoiceBtn">🎨 Match Persona & Generate Visual Concept</button>
-            </div>
-
-            <!-- Workspace 9: Creators Radar -->
-            <div class="agent-panel-content" id="panel-agent-creators" style="display:none;">
-              <div style="display:flex; gap:6px; margin-bottom:8px;">
-                <input type="text" id="addCreatorInput" class="ext-input" placeholder="@handle to track">
-                <button class="secondary-btn mini-btn" id="addCreatorBtn" style="margin-top:0;">+ Add</button>
+              <!-- Phase B: Tweet Hunting Controls (On-Screen Settings) -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Tweets used (Date Filter)</label>
+                  <select id="audienceDateRangeSelect" class="ext-select">
+                    <option value="24h" selected>Past 24 Hours</option>
+                    <option value="3d">Past 3 Days</option>
+                    <option value="7d">Past 7 Days</option>
+                    <option value="all">All Recent Tweets</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Chosen by (Priority)</label>
+                  <select id="audienceSortBySelect" class="ext-select">
+                    <option value="replies" selected>🔥 Most replies (Busy)</option>
+                    <option value="newest">⚡ Newest tweets first</option>
+                  </select>
+                </div>
               </div>
-              <div id="creatorListChips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+
+              <!-- Phase C: Queue Target & Pacing Controls -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Profiles to Collect</label>
+                  <select id="audienceTargetCountSelect" class="ext-select">
+                    <option value="10" selected>10 Profiles (Recommended)</option>
+                    <option value="25">25 Profiles</option>
+                    <option value="50">50 Profiles</option>
+                    <option value="100">100 Profiles (Bulk Queue)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Safety Delay Between Profiles</label>
+                  <select id="audienceDelaySelect" class="ext-select">
+                    <option value="15" selected>15s (Safe & Human)</option>
+                    <option value="8">8s (Fast)</option>
+                    <option value="25">25s (Ultra Safe)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Phase D: Per-Profile Actions -->
+              <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">PROFILE ENGAGEMENT ACTIONS:</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11px;">
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="audienceAutoFollowToggle" checked disabled>
+                    <span>➕ Auto-Follow</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="audienceLikePostsToggle" checked>
+                    <span>❤️ Like posts (max 2)</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="audienceReplyPostsToggle" checked>
+                    <span>💬 Reply (max 2)</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="audienceUnfollowToggle">
+                    <span>🧹 Auto-Unfollow non-followers</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Live Progress & Telemetry Card (DONE / COLLECTED / SKIPPED + State Machine) -->
+              <div id="audienceProgressCard" style="display:none; padding:10px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <!-- State Machine & Queue Header -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="badge-mini info" id="audienceStateBadge" style="font-weight:700; font-size:9.5px; text-transform:uppercase;">IDLE</span>
+                    <span style="font-weight:700; color:var(--text-primary);" id="audienceProgressTitle">Audience Builder</span>
+                  </div>
+                  <span id="audienceQueueIndicator" style="font-weight:800; color:var(--blue-primary); font-family:monospace; font-size:11.5px;">Profile 0/0</span>
+                </div>
+
+                <!-- 3 Counters: DONE / COLLECTED / SKIPPED -->
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px; text-align:center;">
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">DONE</div>
+                    <div id="audienceDoneCount" style="font-size:13px; font-weight:800; color:#10B981;">0</div>
+                  </div>
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">COLLECTED</div>
+                    <div id="audienceCollectedCount" style="font-size:13px; font-weight:800; color:var(--blue-primary);">0</div>
+                  </div>
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">SKIPPED</div>
+                    <div id="audienceSkippedCount" style="font-size:13px; font-weight:800; color:#F59E0B;">0</div>
+                  </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div style="width:100%; height:6px; background:var(--border-subtle); border-radius:3px; overflow:hidden; margin-bottom:6px;">
+                  <div id="audienceProgressBar" style="width:0%; height:100%; background:var(--blue-primary); transition:width 0.3s ease;"></div>
+                </div>
+
+                <!-- Live Status Text & Countdown -->
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <div id="audienceLiveStatusText" style="color:var(--text-secondary); font-size:10.5px; line-height:1.3; flex:1; padding-right:8px;">Ready to start audience collection.</div>
+                  <div id="audienceCountdownText" style="color:#10B981; font-weight:700; font-family:monospace; font-size:11px; white-space:nowrap; display:none;">Next profile in 0:15</div>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                <button class="primary-btn mini-btn" id="runAudienceBuilderBtn" style="flex:2; margin-top:0;">▶ START AUDIENCE BUILDER</button>
+                <button class="secondary-btn mini-btn" id="stopAudienceBuilderBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+                <button class="secondary-btn mini-btn" id="resetAudienceQueueBtn" style="padding:4px 8px; margin-top:0; font-size:11px;" title="Reset Queue & History">🔄</button>
+              </div>
+            </div>
+
+            <!-- Workspace 3: Sorsa Score Booster (A3, Airdrop ROI, Auto) -->
+            <div class="agent-panel-content" id="panel-agent-sorsa" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Airdrop & Reputation Engine:</strong> Interacts with verified high-weight ecosystem accounts to maximize your Sorsa ranking multiplier for airdrop tiers and paid promotions.
+              </div>
+
+              <!-- Tier Selection -->
+              <div>
+                <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
+                  <span>Target Ecosystem Tier</span>
+                  <span class="badge-mini popular" style="font-size:9px;">3X MULTIPLIER</span>
+                </label>
+                <select id="sorsaTierSelect" class="ext-select">
+                  <option value="tier1" selected>⭐ Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
+                  <option value="tier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
+                </select>
+                <div style="font-size:10.5px; color:var(--text-muted); margin-top:4px;">
+                  Includes: @cz_binance, @brian_armstrong, @aeyakovenko, @vitalikbuterin, @ethereum
+                </div>
+              </div>
+
+              <!-- Action & Tone Selectors -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Engagement Tone</label>
+                  <select id="sorsaToneSelect" class="ext-select">
+                    <option value="technical" selected>Technical Alpha</option>
+                    <option value="professional">Professional Operator</option>
+                    <option value="bullish">Bullish & Supportive</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Accounts Per Cycle</label>
+                  <select id="sorsaCountSelect" class="ext-select">
+                    <option value="5" selected>5 Accounts</option>
+                    <option value="10">10 Accounts</option>
+                    <option value="15">15 Accounts (Max)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Action Checkboxes -->
+              <div style="display:flex; gap:12px; font-size:11px; padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px;">
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                  <input type="checkbox" id="sorsaOptLike" checked style="accent-color:var(--blue-primary);">
+                  <span>❤️ Auto-Like</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                  <input type="checkbox" id="sorsaOptComment" checked style="accent-color:var(--blue-primary);">
+                  <span>💬 Value Reply</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                  <input type="checkbox" id="sorsaOptFollow" style="accent-color:var(--blue-primary);">
+                  <span>➕ Follow KOL</span>
+                </label>
+              </div>
+
+              <!-- Live Progress Card for Sorsa Score Booster -->
+              <div id="sorsaProgressCard" style="display:none; padding:10px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="badge-mini popular" id="sorsaStateBadge" style="font-weight:700; font-size:9.5px; text-transform:uppercase;">IDLE</span>
+                    <span style="font-weight:700; color:var(--text-primary);" id="sorsaProgressTitle">Sorsa Booster</span>
+                  </div>
+                  <span id="sorsaQueueIndicator" style="font-weight:800; color:var(--blue-primary); font-family:monospace; font-size:11.5px;">Account 0/0</span>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px; text-align:center;">
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">DONE</div>
+                    <div id="sorsaDoneCount" style="font-size:13px; font-weight:800; color:#10B981;">0</div>
+                  </div>
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">COLLECTED</div>
+                    <div id="sorsaCollectedCount" style="font-size:13px; font-weight:800; color:var(--blue-primary);">0</div>
+                  </div>
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">SKIPPED</div>
+                    <div id="sorsaSkippedCount" style="font-size:13px; font-weight:800; color:#F59E0B;">0</div>
+                  </div>
+                </div>
+                <div style="width:100%; height:6px; background:var(--border-subtle); border-radius:3px; overflow:hidden; margin-bottom:6px;">
+                  <div id="sorsaProgressBar" style="width:0%; height:100%; background:var(--blue-primary); transition:width 0.3s ease;"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <div id="sorsaLiveStatusText" style="color:var(--text-secondary); font-size:10.5px; line-height:1.3; flex:1; padding-right:8px;">Ready to boost Sorsa Score.</div>
+                  <div id="sorsaCountdownText" style="color:#10B981; font-weight:700; font-family:monospace; font-size:11px; white-space:nowrap; display:none;">Next KOL in 0:15</div>
+                </div>
+              </div>
+
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                <button class="primary-btn mini-btn" id="runSorsaBoosterBtn" style="flex:2; margin-top:0;">▶ LAUNCH SORSA BOOSTER</button>
+                <button class="secondary-btn mini-btn" id="stopSorsaBoosterBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+              </div>
+            </div>
+
+            <!-- Workspace 4: Followers Increase (A4, 100% Auto Growth) -->
+            <div class="agent-panel-content" id="panel-agent-followers" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>100% Autonomous Organic Growth:</strong> Zero manual links needed. The bot identifies busy discussion threads in your niche, extracts engaged commenters, and engages to maximize follow-backs.
+              </div>
+
+              <!-- Niche & Strategy Controls -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Target Community Niche</label>
+                  <select id="followerNicheSelect" class="ext-select">
+                    <option value="crypto" selected>Crypto & Web3</option>
+                    <option value="ai">AI Agents & Tech</option>
+                    <option value="founders">Startups & Founders</option>
+                    <option value="solana">Solana Ecosystem</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Comment Strategy</label>
+                  <select id="followerStratSelect" class="ext-select">
+                    <option selected>High-Resonance Insights</option>
+                    <option>Discussion Starter</option>
+                    <option>Early Mover Advantage</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Profiles to Collect</label>
+                  <select id="followerDailyTargetSelect" class="ext-select">
+                    <option value="8" selected>8 Profiles (Safe Pacing)</option>
+                    <option value="15">15 Profiles</option>
+                    <option value="25">25 Profiles</option>
+                    <option value="50">50 Profiles (Bulk)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Safety Pacing Delay</label>
+                  <select id="followerDelaySelect" class="ext-select">
+                    <option value="15" selected>15s (Human Pacing)</option>
+                    <option value="10">10s (Faster)</option>
+                    <option value="25">25s (Ultra Safe)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Live Progress Card for Followers Increase -->
+              <div id="followerProgressCard" style="display:none; padding:10px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="badge-mini info" id="followerStateBadge" style="font-weight:700; font-size:9.5px; text-transform:uppercase;">IDLE</span>
+                    <span style="font-weight:700; color:var(--text-primary);" id="followerProgressTitle">Followers Increase</span>
+                  </div>
+                  <span id="followerQueueIndicator" style="font-weight:800; color:var(--blue-primary); font-family:monospace; font-size:11.5px;">Profile 0/0</span>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px; text-align:center;">
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">DONE</div>
+                    <div id="followerDoneCount" style="font-size:13px; font-weight:800; color:#10B981;">0</div>
+                  </div>
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">COLLECTED</div>
+                    <div id="followerCollectedCount" style="font-size:13px; font-weight:800; color:var(--blue-primary);">0</div>
+                  </div>
+                  <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; padding:4px;">
+                    <div style="font-size:9px; color:var(--text-secondary); text-transform:uppercase;">SKIPPED</div>
+                    <div id="followerSkippedCount" style="font-size:13px; font-weight:800; color:#F59E0B;">0</div>
+                  </div>
+                </div>
+                <div style="width:100%; height:6px; background:var(--border-subtle); border-radius:3px; overflow:hidden; margin-bottom:6px;">
+                  <div id="followerProgressBar" style="width:0%; height:100%; background:var(--blue-primary); transition:width 0.3s ease;"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <div id="followerLiveStatusText" style="color:var(--text-secondary); font-size:10.5px; line-height:1.3; flex:1; padding-right:8px;">Ready to start follower growth.</div>
+                  <div id="followerCountdownText" style="color:#10B981; font-weight:700; font-family:monospace; font-size:11px; white-space:nowrap; display:none;">Next profile in 0:15</div>
+                </div>
+              </div>
+
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                <button class="primary-btn mini-btn" id="runFollowerIncreaseBtn" style="flex:2; margin-top:0;">▶ START AUTO FOLLOWER GROWTH</button>
+                <button class="secondary-btn mini-btn" id="stopFollowerIncreaseBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+              </div>
+            </div>
+
+            <!-- Workspace 5: Post Generator (A5, AI Studio) -->
+            <div class="agent-panel-content" id="panel-agent-postgen" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>AI Content Studio:</strong> Turn raw thoughts, bullet points, or reference articles into viral, high-engagement X posts and multi-tweet threads.
+              </div>
+
+              <div>
+                <label class="opt-label">Raw Notes, Thoughts, or Reference Links</label>
+                <textarea id="rawNotesInput" class="ext-textarea mini" style="min-height:75px;" placeholder="Paste ideas, bullet points, alpha, or article summary here..."></textarea>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Post Format</label>
+                  <select id="postFormatSelect" class="ext-select">
+                    <option value="medium" selected>Medium Post (180 chars)</option>
+                    <option value="long">Deep Analysis (280 chars)</option>
+                    <option value="thread">Viral Thread (4 Tweets)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Style / Voice</label>
+                  <select id="postToneSelect" class="ext-select">
+                    <option value="founder" selected>Founder / Operator</option>
+                    <option value="contrarian">Bold & Contrarian</option>
+                    <option value="data">Data-Driven Alpha</option>
+                  </select>
+                </div>
+              </div>
+
+              <button class="primary-btn mini-btn" id="generatePostBtn" style="margin-top:2px;">✨ GENERATE HIGH-ENGAGEMENT POST</button>
+
+              <div id="postOutputContainer" style="display:none; flex-direction:column; gap:6px; margin-top:6px;">
+                <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
+                  <span>Generated Post Draft</span>
+                  <span style="font-size:10px; color:var(--blue-primary); cursor:pointer;" id="copyPostDraftBtn">📋 Copy Text</span>
+                </label>
+                <textarea id="postOutputArea" class="ext-textarea mini" style="min-height:90px; font-family:inherit; line-height:1.4;" readonly></textarea>
+              </div>
+            </div>
+
+            <!-- Workspace 6: Reply Back (A6, Posts, Fully Auto) -->
+            <div class="agent-panel-content" id="panel-agent-replyback" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Auto-Reply To All Comments:</strong> Paste up to 3 links of your own posts. Bot visits each post, likes incoming comments (❤️), and generates authentic human replies with letter-by-letter typing and intentional typo correction.
+              </div>
+
+              <!-- Your Posts Input (Max 3 Posts) -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Add Your Post Links (Max 3 Posts)</label>
+                  <span id="replyBackPostCountBadge" style="font-size:10px; font-weight:700; color:var(--blue-primary);">1 / 3 Posts</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <input type="text" id="myTweetUrlInput1" class="ext-input" placeholder="Post 1 URL: https://x.com/yourhandle/status/1842...">
+                  <input type="text" id="myTweetUrlInput2" class="ext-input" placeholder="Post 2 URL (Optional): https://x.com/yourhandle/status/...">
+                  <input type="text" id="myTweetUrlInput3" class="ext-input" placeholder="Post 3 URL (Optional): https://x.com/yourhandle/status/...">
+                </div>
+              </div>
+
+              <!-- Tone & Strategy Selection -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Reply Tone / Persona</label>
+                  <select id="replyBackToneSelect" class="ext-select">
+                    <option value="Natural & Concise" selected>Natural & Concise</option>
+                    <option value="Bullish">Bullish & Supportive</option>
+                    <option value="Founder Alpha">Founder / Operator Alpha</option>
+                    <option value="Friendly">Warm & Grateful</option>
+                    <option value="Engaging Question">Insightful Follow-up Question</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Pacing Delay Between Replies</label>
+                  <select id="replyBackDelaySelect" class="ext-select">
+                    <option value="12" selected>10 - 15s (Human Pacing)</option>
+                    <option value="6">5 - 8s (Fast)</option>
+                    <option value="20">18 - 25s (Conservative)</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Live Progress & Queue Feedback Card -->
+              <div id="replyBackProgressCard" style="display:none; padding:10px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <span style="font-weight:700; color:var(--text-primary);" id="replyBackPostIndicator">Post 1 of 1</span>
+                  <span id="replyBackProgressBadge" style="font-weight:800; color:var(--status-success); font-family:monospace;">0 / 0 REPLIED</span>
+                </div>
+                <div style="width:100%; height:6px; background:var(--border-subtle); border-radius:3px; overflow:hidden; margin-bottom:6px;">
+                  <div id="replyBackProgressBar" style="width:0%; height:100%; background:var(--status-success); transition:width 0.3s ease;"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; color:var(--text-secondary); font-size:10px; margin-bottom:4px;">
+                  <span>Done: <strong id="replyBackDoneCount" style="color:var(--status-success);">0</strong></span>
+                  <span>Queue: <strong id="replyBackQueueCount" style="color:var(--blue-primary);">0</strong></span>
+                  <span>Current: <strong id="replyBackCurrentUser" style="color:var(--text-primary);">—</strong></span>
+                </div>
+                <div id="replyBackLiveStatusText" style="color:var(--text-secondary); font-size:10.5px; line-height:1.3;">Scanning post for incoming community comments...</div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                <button class="primary-btn mini-btn" id="runReplyBackBtn" style="flex:2; margin-top:0;">▶ START AUTO REPLY BACK</button>
+                <button class="secondary-btn mini-btn" id="stopReplyBackBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+              </div>
+            </div>
+
+            <!-- Workspace 7: Auto Unfollow (A7, Safety) -->
+            <div class="agent-panel-content" id="panel-agent-unfollow" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Ratio Optimizer & Safety Scanner:</strong> Clean up inactive accounts and non-followers while protecting your VIP contacts and friends with randomized safety pacing.
+              </div>
+
+              <div>
+                <label class="opt-label">Unfollow Filtering Rule</label>
+                <select id="unfollowCriteria" class="ext-select">
+                  <option value="nonfollowers" selected>Accounts Not Following You Back</option>
+                  <option value="walchain">Accounts with Low Walchain Score (&lt;30)</option>
+                  <option value="inactive">Inactive for &gt; 30 Days (No Posts)</option>
+                </select>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Max Unfollows Per Batch</label>
+                  <select id="unfollowMaxCount" class="ext-select">
+                    <option value="15" selected>15 Accounts (Safe Daily)</option>
+                    <option value="25">25 Accounts</option>
+                    <option value="50">50 Accounts (Max Safe)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Safety Delay</label>
+                  <select id="unfollowDelaySelect" class="ext-select">
+                    <option value="8" selected>8 - 14s (Randomized)</option>
+                    <option value="15">15 - 25s (Ultra Safe)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label class="opt-label">Whitelist Protected Accounts (Never Unfollow)</label>
+                <input type="text" id="unfollowWhitelistInput" class="ext-input" placeholder="@friend1, @partner2, @vitalikbuterin" style="font-size:11px;">
+              </div>
+
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                <button class="secondary-btn mini-btn" id="runAutoUnfollowBtn" style="flex:2; margin-top:0; background:rgba(239,68,68,0.08); color:#DC2626; border-color:rgba(239,68,68,0.3);">🧹 SCAN & SAFE UNFOLLOW</button>
+                <button class="secondary-btn mini-btn" id="stopAutoUnfollowBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+              </div>
+            </div>
+
+            <!-- Workspace 8: Picture & Voice Match (A8, Persona) -->
+            <div class="agent-panel-content" id="panel-agent-match" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Aesthetic & Tone Calibration:</strong> Replicates your signature writing voice while generating matched high-resolution imagery for maximum visual resonance.
+              </div>
+
+              <div>
+                <label class="opt-label">Persona Tonality</label>
+                <select class="ext-select" id="personaVoiceSelect">
+                  <option selected>Crisp High-Alpha Founder (@evanjawadx tone)</option>
+                  <option>Minimalist Web3 Operator & Systems Builder</option>
+                  <option>Analytical Researcher (Deep Signal & Logic)</option>
+                  <option>Witty Tech Maverick</option>
+                </select>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Visual Concept Topic</label>
+                  <input type="text" id="imagePromptTopic" class="ext-input" placeholder="e.g. Autonomous AI Swarms" style="font-size:11px;">
+                </div>
+                <div>
+                  <label class="opt-label">Image Aspect Ratio</label>
+                  <select id="personaAspectSelect" class="ext-select">
+                    <option value="16:9" selected>16:9 Landscape (Twitter Post)</option>
+                    <option value="1:1">1:1 Square (Feed Card)</option>
+                  </select>
+                </div>
+              </div>
+
+              <button class="primary-btn mini-btn" id="runPictureVoiceBtn" style="margin-top:2px;">🎨 CALIBRATE PERSONA & GENERATE CONCEPT</button>
+            </div>
+
+            <!-- Workspace 9: Favorite Creators Radar (A9, Radar) -->
+            <div class="agent-panel-content" id="panel-agent-creators" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Early Mover Radar:</strong> Track your favorite creators and KOLs. The moment they post, get notified or automatically claim top early-comment spots with high-signal replies.
+              </div>
+
+              <div>
+                <label class="opt-label">Add Creator to Radar</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="text" id="addCreatorInput" class="ext-input" placeholder="@handle to track (e.g. @vitalikbuterin)">
+                  <button class="secondary-btn mini-btn" id="addCreatorBtn" style="margin-top:0; white-space:nowrap;">+ Add</button>
+                </div>
+              </div>
+
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Quick Presets</label>
+                  <span style="font-size:10px; color:var(--text-muted);">Click to track</span>
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@vitalikbuterin'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @vitalikbuterin</button>
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@brian_armstrong'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @brian_armstrong</button>
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@elonmusk'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @elonmusk</button>
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@sama'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @sama</button>
+                </div>
+              </div>
+
+              <div>
+                <label class="opt-label">Tracked Creators on Active Radar</label>
+                <div id="creatorListChips" style="display:flex; flex-wrap:wrap; gap:6px; min-height:30px; padding:6px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px;"></div>
+              </div>
+
+              <div style="display:flex; gap:6px; margin-top:2px;">
+                <button class="primary-btn mini-btn" id="runCreatorRadarBtn" style="flex:1; margin-top:0;">⚡ LAUNCH RADAR MONITOR</button>
+              </div>
             </div>
 
           </div>

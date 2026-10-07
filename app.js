@@ -83,6 +83,8 @@ const AtomXState = {
     totalAIGenerations: 0,
     mrr: '$0'
   },
+  adminApiLogs: [],
+  adminKeysHealth: null,
 
   // Pricing Plans
   plans: [
@@ -95,6 +97,8 @@ const AtomXState = {
   toneStylesData: {
     maxCustomTemplatesPerUser: 2,
     defaultTones: [
+      { id: 'bullish-short', name: 'Bullish (5-10 words)', description: 'Strictly 5-10 words positive bullish community comment, matching language, zero clichés or emojis', prompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nAUTHOR RULE: Never use the post author\'s name or username. Do not tag anyone.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no dashes, no preamble, no exclamation marks (!).' },
+      { id: 'ct-human', name: 'CT Human Reply', description: 'Authentic Crypto Twitter peer reply: highly contextual, genuine, adapts to milestones or banter', prompt: 'Write a highly authentic, natural human reply to the post as a Crypto Twitter (CT) community member.\nCRITICAL CONTEXT ADAPTATION: If the post is personal (birthday, milestone, achievement, or struggle), congratulate or empathize genuinely based on what they actually wrote. If technical/crypto, provide relatable builder thoughts.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 12 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human friend/peer. Zero robotic AI clichés, no generic hype, no irrelevant market talk on personal posts.\nNEVER use the post author\'s name or username. Do not tag anyone.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no preamble.' },
       { id: 'natural', name: 'Natural & Concise', description: 'Casual, human-sounding 1-2 sentences with high signal', prompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise. Avoid robotic hashtags or buzzwords.' },
       { id: 'professional', name: 'Professional', description: 'Authoritative, insightful, industry-savvy perspective', prompt: 'Sound authoritative, sharp, and executive-level. Offer a structured perspective in 1-2 sentences.' },
       { id: 'question', name: 'Engaging Question', description: 'Provocative observation ending with an engaging question', prompt: 'Offer an astute observation on the post and conclude with an insightful, thought-provoking question to invite replies.' },
@@ -405,6 +409,7 @@ async function switchAdminAIProvider(provId) {
   }
 
   navigateToScreen('12');
+  updateAdminApiKeyUI(provId);
 
   // Fetch live in background to ensure all 450+ models are loaded
   fetchLiveModelsForProvider(provId, false).then(models => {
@@ -461,6 +466,260 @@ async function saveAdminActiveModel() {
   } catch (e) {
     showToast(`✓ Active model saved locally: ${prov.toUpperCase()} / ${model}`);
   }
+}
+
+function getAdminApiKeyInfo(prov) {
+  const p = (prov || AtomXState.currentProvider || 'groq').toLowerCase();
+  return (AtomXState.adminApiKeys && AtomXState.adminApiKeys[p]) || { hasKey: false, maskedKey: '' };
+}
+
+function updateAdminApiKeyUI(prov) {
+  const p = (prov || AtomXState.currentProvider || 'groq').toLowerCase();
+  const info = getAdminApiKeyInfo(p);
+  const label = document.getElementById('adminApiKeyProviderLabel');
+  const badge = document.getElementById('adminApiKeyStatusBadge');
+  const input = document.getElementById('adminApiKeyInput');
+
+  if (label) label.textContent = p.toUpperCase();
+  if (badge) {
+    if (info.hasKey) {
+      badge.className = 'badge badge-success';
+      badge.textContent = `🟢 Configured (${info.maskedKey || 'Active'})`;
+    } else {
+      badge.className = 'badge badge-warning';
+      badge.textContent = '⚪ Missing Key';
+    }
+  }
+  if (input) {
+    input.value = '';
+    input.placeholder = info.hasKey ? `Current Key: ${info.maskedKey} (Paste new key to replace)` : `Paste ${p.toUpperCase()} API key (e.g. gsk_...)`;
+  }
+}
+
+function toggleAdminApiKeyVisibility() {
+  const input = document.getElementById('adminApiKeyInput');
+  const btn = document.getElementById('toggleApiKeyVisibilityBtn');
+  if (!input) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    if (btn) btn.textContent = '🙈 Hide';
+  } else {
+    input.type = 'password';
+    if (btn) btn.textContent = '👁️ Show';
+  }
+}
+
+async function saveAdminApiKey() {
+  const prov = (AtomXState.currentProvider || 'groq').toLowerCase();
+  const input = document.getElementById('adminApiKeyInput');
+  const apiKey = (input?.value || '').trim();
+
+  if (!apiKey) {
+    showToast(`⚠️ Please enter an API key for ${prov.toUpperCase()}`);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: prov, apiKey })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (!AtomXState.adminApiKeys) AtomXState.adminApiKeys = {};
+      AtomXState.adminApiKeys[prov] = {
+        hasKey: true,
+        maskedKey: data.maskedKey
+      };
+      updateAdminApiKeyUI(prov);
+      showToast(data.message || `✓ ${prov.toUpperCase()} API Key saved!`);
+
+      // Automatically refresh live models using new key
+      refreshAdminModels(true);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast('❌ Failed to save API key: ' + (err.error || res.statusText));
+    }
+  } catch (err) {
+    showToast('❌ Network error saving API key: ' + err.message);
+  }
+}
+
+function renderAdminKeysHealthHTML(keysStatus) {
+  if (!keysStatus) {
+    return `
+      <div style="grid-column: 1 / -1; padding:18px; text-align:center; background:var(--bg-canvas); border-radius:var(--radius-sm); border:1px dashed var(--border-subtle); color:var(--text-muted); font-size:12px;">
+        Click <strong>"⚡ Test All Provider Keys"</strong> above to run an instant server diagnostic on Groq, OpenRouter, OpenAI, and Gemini API keys.
+      </div>
+    `;
+  }
+
+  const pNames = {
+    groq: { name: 'Groq (LPU)', icon: '🚀' },
+    openrouter: { name: 'OpenRouter', icon: '🌐' },
+    openai: { name: 'OpenAI', icon: '⚡' },
+    gemini: { name: 'Google Gemini', icon: '✨' }
+  };
+
+  return Object.entries(keysStatus).map(([prov, st]) => {
+    const meta = pNames[prov] || { name: prov.toUpperCase(), icon: '🤖' };
+    let badgeClass = 'badge-secondary';
+    let statusBadgeText = 'Not Configured';
+    let borderStyle = 'var(--border-subtle)';
+
+    if (!st.configured) {
+      statusBadgeText = '⚪ Missing Key';
+    } else if (st.status === 'HEALTHY') {
+      badgeClass = 'badge-success';
+      statusBadgeText = `🟢 Active (${st.latencyMs}ms)`;
+      borderStyle = 'rgba(16, 185, 129, 0.4)';
+    } else if (st.statusCode === 429) {
+      badgeClass = 'badge-danger';
+      statusBadgeText = `🔴 429 Quota Exhausted`;
+      borderStyle = 'rgba(239, 68, 68, 0.4)';
+    } else if (st.statusCode === 404) {
+      badgeClass = 'badge-warning';
+      statusBadgeText = `🟡 404 Model Not Found`;
+      borderStyle = 'rgba(245, 158, 11, 0.4)';
+    } else if (st.statusCode === 401 || st.statusCode === 403) {
+      badgeClass = 'badge-danger';
+      statusBadgeText = `🔴 ${st.statusCode} Invalid Key`;
+      borderStyle = 'rgba(239, 68, 68, 0.4)';
+    } else {
+      badgeClass = 'badge-danger';
+      statusBadgeText = `🔴 Error ${st.statusCode || ''}`;
+      borderStyle = 'rgba(239, 68, 68, 0.4)';
+    }
+
+    const safeMsg = (st.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    return `
+      <div style="background:var(--bg-canvas); border:1px solid ${borderStyle}; border-radius:var(--radius-sm); padding:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-weight:700; font-size:13px; display:flex; align-items:center; gap:6px;">
+            <span>${meta.icon}</span> ${meta.name}
+          </span>
+          <span class="badge ${badgeClass}" style="font-size:11px;">${statusBadgeText}</span>
+        </div>
+        <p style="font-size:11px; color:var(--text-secondary); margin:0; line-height:1.4; word-break:break-word;">
+          ${safeMsg}
+        </p>
+      </div>
+    `;
+  }).join('');
+}
+
+async function runAdminKeyDiagnostics() {
+  const btn = document.getElementById('btnKeyDiag');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Testing Provider Keys...';
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/test-keys`);
+    if (res.ok) {
+      const data = await res.json();
+      AtomXState.adminKeysHealth = data.keysStatus;
+      const container = document.getElementById('adminKeysHealthContainer');
+      if (container) {
+        container.innerHTML = renderAdminKeysHealthHTML(data.keysStatus);
+      }
+      showToast('⚡ API key diagnostics complete!');
+    } else {
+      showToast('❌ Failed to run key diagnostics: HTTP ' + res.status);
+    }
+  } catch (err) {
+    showToast('❌ Network error testing keys: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Run Live Diagnostics';
+    }
+  }
+}
+
+function renderAdminApiLogsRowsHTML(logs) {
+  if (!logs || logs.length === 0) {
+    return `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted);">
+          <div style="font-size:22px; margin-bottom:6px;">📡</div>
+          <div style="font-weight:600; font-size:13px; color:var(--text-primary); margin-bottom:2px;">No API Generation Logs Yet</div>
+          <div style="font-size:11px;">When comments are generated via extension or web, telemetry logs will appear here live.</div>
+        </td>
+      </tr>
+    `;
+  }
+
+  return logs.map(log => {
+    let statusBadge = '<span class="badge badge-success">🟢 200 OK</span>';
+    if (log.status === 'FAILED' || (log.statusCode && log.statusCode >= 400)) {
+      statusBadge = `<span class="badge badge-danger">🔴 ${log.statusCode || 'ERR'}</span>`;
+    } else if (log.status === 'FALLBACK') {
+      statusBadge = '<span class="badge badge-warning">🟡 Fallback</span>';
+    }
+
+    const safeError = (log.error || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeReply = (log.reply || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeSnippet = (log.targetSnippet || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const detailText = log.error
+      ? `<span style="color:var(--status-danger); font-family:monospace; font-size:11px; word-break:break-word;">⚠️ ${safeError}</span>`
+      : `<span style="color:var(--text-primary);">${safeReply || '—'}</span>`;
+
+    return `
+      <tr>
+        <td style="color:var(--text-muted); font-size:11px; white-space:nowrap;">
+          <div>${log.timestamp || ''}</div>
+          <div style="font-size:10px;">${log.date || ''}</div>
+        </td>
+        <td>
+          <div style="font-weight:700; color:var(--text-primary); font-size:12px;">${log.provider || 'AI'}</div>
+          <div style="font-size:11px; color:var(--text-secondary);">${log.model || ''}</div>
+        </td>
+        <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${safeSnippet}">
+          <div style="color:var(--text-secondary); font-size:11px;">${log.author || ''}</div>
+          <div style="color:var(--text-primary); font-size:12px;">"${safeSnippet.slice(0, 70)}"</div>
+        </td>
+        <td>${statusBadge}</td>
+        <td style="max-width:320px; font-size:12px; line-height:1.4;">${detailText}</td>
+        <td style="text-align:right; font-family:monospace; font-size:11px; color:var(--text-secondary);">${log.latencyMs ? log.latencyMs + 'ms' : '—'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function refreshAdminApiLogs(showToastMsg = false) {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/api-logs`);
+    if (res.ok) {
+      const data = await res.json();
+      AtomXState.adminApiLogs = data.logs || [];
+      const tbody = document.getElementById('adminApiLogsTbody');
+      if (tbody) {
+        tbody.innerHTML = renderAdminApiLogsRowsHTML(AtomXState.adminApiLogs);
+      }
+      const badge = document.getElementById('apiLogsCountBadge');
+      if (badge) {
+        badge.textContent = `${AtomXState.adminApiLogs.length} Logs`;
+      }
+      if (showToastMsg) showToast('↻ Live generation logs refreshed!');
+    }
+  } catch (e) {
+    if (showToastMsg) showToast('Could not refresh logs: ' + e.message);
+  }
+}
+
+function clearAdminApiLogsDisplay() {
+  const tbody = document.getElementById('adminApiLogsTbody');
+  if (tbody) {
+    tbody.innerHTML = renderAdminApiLogsRowsHTML([]);
+  }
+  const badge = document.getElementById('apiLogsCountBadge');
+  if (badge) badge.textContent = '0 Logs';
 }
 
 function updateFetchButtonsState(isLoading) {
@@ -2050,10 +2309,126 @@ function renderAdminDashboard(container) {
               <div style="background:var(--bg-canvas); padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); font-size:12px;">
                 <div style="color:var(--text-secondary); font-size:11px;">Server Status</div>
                 <div style="font-weight:700; color:var(--text-primary); margin-top:2px;">
-                  ✓ Keys Active in <code style="color:var(--blue-primary);">backend/.env</code>
+                  ✓ Keys Active &amp; Synced
                 </div>
                 <div style="color:var(--text-muted); font-size:11px; margin-top:2px;">Dynamic inference • Zero client exposure</div>
               </div>
+            </div>
+
+            <!-- DYNAMIC API KEY CONFIGURATION (DIRECT FROM DASHBOARD - NO .ENV MANUAL EDITING) -->
+            <div style="margin-top:16px; padding:12px 14px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:var(--radius-sm);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                <label style="font-size:12px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                  <span>🔑</span>
+                  <span><span id="adminApiKeyProviderLabel">${AtomXState.currentProvider.toUpperCase()}</span> API Key</span>
+                  <span id="adminApiKeyStatusBadge" class="badge ${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10.5px;">
+                    ${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? '🟢 Configured (' + getAdminApiKeyInfo(AtomXState.currentProvider).maskedKey + ')' : '⚪ Missing Key'}
+                  </span>
+                </label>
+                <span style="font-size:11px; color:var(--text-muted);">Change key here anytime without touching .env</span>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <input type="password" id="adminApiKeyInput" class="form-input" placeholder="${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? 'Current: ' + getAdminApiKeyInfo(AtomXState.currentProvider).maskedKey + ' (Paste new key to replace)' : 'Paste ' + AtomXState.currentProvider.toUpperCase() + ' API key (e.g. gsk_...)'}" style="font-size:12px; font-family:monospace; flex:1;" />
+                <button type="button" class="btn btn-secondary btn-sm" id="toggleApiKeyVisibilityBtn" onclick="toggleAdminApiKeyVisibility()">👁️ Show</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveAdminApiKey()">💾 Save API Key</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- TONE & STYLE PRESETS HUB (GLOBAL SYSTEM PROMPTS) -->
+          <div class="atomx-card" style="margin-bottom:24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+              <div>
+                <h3 style="font-size:15px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                  <span>🎯 Tone & Style Presets Hub</span>
+                  <span class="badge badge-success" style="font-size:10px;">Synced Live</span>
+                </h3>
+                <p style="font-size:12px; color:var(--text-secondary); margin-top:2px;">
+                  Active system tones broadcasted to all Chrome Extension users. Click any preset to view or edit its system prompt.
+                </p>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="navigateToScreen('21')">⚙️ Manage in Tone Studio</button>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;" id="adminDashboardTonePills">
+              ${(AtomXState.toneStylesData?.defaultTones || []).map((t, idx) => `
+                <button type="button" class="style-pill ${idx === 0 ? 'active' : ''}" onclick="selectAdminDashboardTone('${t.id}')" style="font-size:12px; padding:6px 12px; cursor:pointer;">
+                  ${t.name}
+                </button>
+              `).join('')}
+            </div>
+
+            <div id="adminDashboardTonePreview" style="background:var(--bg-canvas); padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); font-size:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span style="font-weight:700; color:var(--blue-primary);" id="adminTonePreviewTitle">
+                  ${AtomXState.toneStylesData?.defaultTones?.[0]?.name || 'Bullish (5-10 words)'}
+                </span>
+                <span style="font-size:11px; color:var(--text-muted);" id="adminTonePreviewDesc">
+                  ${AtomXState.toneStylesData?.defaultTones?.[0]?.description || ''}
+                </span>
+              </div>
+              <div style="font-family:monospace; font-size:11.5px; color:var(--text-primary); line-height:1.4; white-space:pre-wrap;" id="adminTonePreviewPrompt">
+                ${AtomXState.toneStylesData?.defaultTones?.[0]?.prompt || ''}
+              </div>
+            </div>
+          </div>
+
+          <!-- PROVIDER API KEYS HEALTH & LIVE STATUS -->
+          <div class="atomx-card" style="margin-bottom:24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+              <div>
+                <h3 style="font-size:15px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                  <span>🔑 Provider API Keys Health & Diagnostics</span>
+                </h3>
+                <p style="font-size:12px; color:var(--text-secondary); margin-top:2px;">
+                  Real-time server-side ping test verifying credits, authorization, and rate limits across providers.
+                </p>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="runAdminKeyDiagnostics()" id="btnKeyDiag">
+                ⚡ Run Live Diagnostics
+              </button>
+            </div>
+            <div id="adminKeysHealthContainer" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
+              ${renderAdminKeysHealthHTML(AtomXState.adminKeysHealth)}
+            </div>
+          </div>
+
+          <!-- LIVE AI GENERATION & TELEMETRY LOGS -->
+          <div class="atomx-card" style="margin-bottom:24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+              <div>
+                <h3 style="font-size:15px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                  <span>📡 Live AI Generation & Error Telemetry Logs</span>
+                  <span class="badge badge-primary" style="font-size:10px;" id="apiLogsCountBadge">${AtomXState.adminApiLogs?.length || 0} Logs</span>
+                </h3>
+                <p style="font-size:12px; color:var(--text-secondary); margin-top:2px;">
+                  Instant audit trail of all comment generation requests, HTTP status codes (200, 401, 402, 404, 429), failover cascades, and errors.
+                </p>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="refreshAdminApiLogs(true)">↻ Refresh Logs</button>
+                <button class="btn btn-sm" style="background:var(--bg-canvas); border:1px solid var(--border-subtle); color:var(--text-secondary);" onclick="clearAdminApiLogsDisplay()">Clear View</button>
+              </div>
+            </div>
+
+            <div class="atomx-table-wrapper" style="max-height:420px; overflow-y:auto;">
+              <table class="atomx-table responsive-table-as-cards" style="font-size:12px;">
+                <thead>
+                  <tr>
+                    <th style="width:100px;">Time</th>
+                    <th style="width:170px;">Provider & Model</th>
+                    <th>Target Post Snippet</th>
+                    <th style="width:110px;">Status</th>
+                    <th>Generated Output / Error Detail</th>
+                    <th style="width:80px; text-align:right;">Latency</th>
+                  </tr>
+                </thead>
+                <tbody id="adminApiLogsTbody">
+                  ${renderAdminApiLogsRowsHTML(AtomXState.adminApiLogs)}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -2079,6 +2454,30 @@ function renderAdminDashboard(container) {
       </div>
     </div>
   `;
+
+  // Auto-refresh telemetry logs on dashboard open
+  refreshAdminApiLogs(false);
+}
+
+function selectAdminDashboardTone(toneId) {
+  const tones = AtomXState.toneStylesData?.defaultTones || [];
+  const tone = tones.find(t => t.id === toneId) || tones[0];
+  if (!tone) return;
+
+  const container = document.getElementById('adminDashboardTonePills');
+  if (container) {
+    container.querySelectorAll('.style-pill').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('onclick')?.includes(`'${toneId}'`));
+    });
+  }
+
+  const titleEl = document.getElementById('adminTonePreviewTitle');
+  const descEl = document.getElementById('adminTonePreviewDesc');
+  const promptEl = document.getElementById('adminTonePreviewPrompt');
+
+  if (titleEl) titleEl.textContent = tone.name;
+  if (descEl) descEl.textContent = tone.description || '';
+  if (promptEl) promptEl.textContent = tone.prompt || '';
 }
 
 // -------------------------------------------------------------
@@ -2545,7 +2944,26 @@ function renderAdminTransactions(container) {
 // -------------------------------------------------------------
 // SCREEN 20: ADMIN CURATED LISTS & SORSA TARGETS MANAGEMENT
 // -------------------------------------------------------------
-function renderAdminCuratedLists(container) {
+async function fetchAdminCuratedLists() {
+  try {
+    const res = await fetch(`${API_BASE}/api/curated-lists`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.lists && Object.keys(data.lists).length > 0) {
+        AtomXState.curatedLists = data.lists;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch curated lists from backend:', e);
+  }
+}
+
+async function renderAdminCuratedLists(container) {
+  if (!AtomXState._curatedListsLoaded) {
+    await fetchAdminCuratedLists();
+    AtomXState._curatedListsLoaded = true;
+  }
+
   const lists = AtomXState.curatedLists;
   const listKeys = Object.keys(lists);
   const totalTargets = listKeys.reduce((acc, k) => acc + (lists[k].targets?.length || 0), 0);
@@ -2557,10 +2975,11 @@ function renderAdminCuratedLists(container) {
         <div class="workspace-header">
           <div>
             <h1 class="page-title">Curated Lists & Sorsa Targets</h1>
-            <p class="page-subtitle">Manage, update, and broadcast curated influencer accounts for Audience Builder and Sorsa Score agents.</p>
+            <p class="page-subtitle">Manage, update, and broadcast curated influencer accounts and live Twitter list URLs for Audience Builder and Sorsa Score agents.</p>
           </div>
           <div style="display:flex; gap:10px;">
             <button class="btn btn-secondary btn-sm" onclick="promptAddNewCustomList()">+ Add New List</button>
+            <button class="btn btn-secondary btn-sm" onclick="openImportGoogleSheetModal()" style="border-color:var(--status-success); color:var(--status-success); font-weight:600;">📥 Import Google Sheet / CSV</button>
             <button class="btn btn-primary btn-sm" onclick="saveCuratedListsToServer()">Save & Broadcast to Users</button>
           </div>
         </div>
@@ -2586,32 +3005,80 @@ function renderAdminCuratedLists(container) {
           </div>
 
           <!-- Lists Grid -->
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:20px;">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:20px;">
             ${listKeys.map(k => {
               const l = lists[k];
+              const isPub = (l.status || 'published') === 'published';
               return `
-                <div class="atomx-card" id="card-${k}" style="display:flex; flex-direction:column; justify-content:space-between;">
+                <div class="atomx-card" id="card-${k}" style="display:flex; flex-direction:column; justify-content:space-between; border-top: 3px solid ${isPub ? 'var(--status-success)' : 'var(--status-warning)'};">
                   <div>
+                    <!-- Header with Title, Status & Delete -->
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-                      <div>
-                        <span class="badge ${l.category.includes('Sorsa') ? 'badge-warning' : 'badge-info'}" style="font-size:10px; margin-bottom:6px; display:inline-block;">
-                          ${l.category}
-                        </span>
-                        <h3 style="font-size:16px; font-weight:700; color:var(--text-primary);">${l.name}</h3>
+                      <div style="flex:1; margin-right:10px;">
+                        <input type="text" value="${l.name}" onchange="updateListName('${k}', this.value)" class="form-input" style="font-size:15px; font-weight:700; padding:4px 8px; margin-bottom:6px; width:100%;" title="Click to rename list">
                       </div>
-                      <span class="badge badge-success" style="font-size:11px;">${l.targets?.length || 0} Targets</span>
+                      <div style="display:flex; gap:6px; align-items:center;">
+                        <button onclick="deleteCustomList('${k}')" style="background:none; border:none; color:var(--status-error); cursor:pointer; font-size:14px; padding:2px;" title="Delete List">🗑️</button>
+                      </div>
                     </div>
-                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:14px; line-height:1.4;">${l.description}</p>
 
-                    <!-- Target Chips -->
-                    <div style="font-size:11px; font-weight:700; color:var(--text-secondary); margin-bottom:6px; text-transform:uppercase;">ACTIVE TARGET ACCOUNTS:</div>
+                    <!-- Admin Decision Controls: Assigned Agent, Access Plan & Status -->
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:12px; background:var(--bg-canvas); padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
+                      <div>
+                        <label style="font-size:9.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:2px;">ASSIGNED AGENT:</label>
+                        <select onchange="updateListCategory('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%;">
+                          <option value="Audience Builder" ${l.category === 'Audience Builder' ? 'selected' : ''}>Audience Builder</option>
+                          <option value="Increase Sorsa Score" ${l.category === 'Increase Sorsa Score' ? 'selected' : ''}>Sorsa Score</option>
+                          <option value="Followers Increase" ${l.category === 'Followers Increase' ? 'selected' : ''}>Followers Growth</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style="font-size:9.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:2px;">ACCESS PLAN:</label>
+                        <select onchange="updateListAccessTier('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%; font-weight:700; color:${(l.accessTier || 'free') === 'paid' ? '#f59e0b' : '#38bdf8'};">
+                          <option value="free" ${(l.accessTier || 'free') === 'free' ? 'selected' : ''}>🔓 Free (All)</option>
+                          <option value="paid" ${l.accessTier === 'paid' ? 'selected' : ''}>🔒 Paid / Pro</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style="font-size:9.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:2px;">STATUS:</label>
+                        <select onchange="updateListStatus('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%; font-weight:700; color:${isPub ? 'var(--status-success)' : 'var(--status-warning)'};">
+                          <option value="published" ${isPub ? 'selected' : ''}>🟢 Live</option>
+                          <option value="draft" ${l.status === 'draft' ? 'selected' : ''}>🟡 Draft</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.4;">${l.description}</p>
+
+                    <!-- Twitter List URL Input -->
+                    <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:14px;">
+                      <label class="form-label" style="font-size:11px; font-weight:700; margin-bottom:4px; display:flex; justify-content:space-between;">
+                        <span>🔗 TWITTER / X LIST URL:</span>
+                        <span style="font-size:10px; color:var(--text-secondary); font-weight:normal;">(Optional)</span>
+                      </label>
+                      <input type="text" id="listurl-${k}" class="form-input" value="${l.listUrl || ''}" placeholder="https://x.com/i/lists/123456789" style="font-size:12px; padding:6px 10px;" oninput="updateListUrl('${k}', this.value)">
+                      <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px; line-height:1.3;">
+                        💡 <em>If left blank, bot uses live search from active targets below (100% reliable, never 404s).</em>
+                      </div>
+                    </div>
+
+                    <!-- Target Chips & Count Control -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                      <div style="font-size:11px; font-weight:700; color:var(--text-secondary); text-transform:uppercase;">
+                        TARGET ACCOUNTS (${(l.targets || []).length}):
+                      </div>
+                      <div style="display:flex; gap:6px;">
+                        <button onclick="trimListTargetsPrompt('${k}')" class="btn btn-secondary btn-sm" style="font-size:10.5px; padding:2px 7px;">✂️ Set ID Count</button>
+                        <button onclick="clearAllTargetsFromList('${k}')" class="btn btn-secondary btn-sm" style="font-size:10.5px; padding:2px 7px; color:var(--status-error);">Clear</button>
+                      </div>
+                    </div>
                     <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; max-height:150px; overflow-y:auto; padding:4px 0;">
-                      ${(l.targets || []).map((t, idx) => `
+                      ${(l.targets && l.targets.length > 0) ? (l.targets || []).map((t, idx) => `
                         <span style="display:inline-flex; align-items:center; gap:5px; background:var(--bg-canvas); border:1px solid var(--border-subtle); padding:4px 9px; border-radius:99px; font-size:12px; font-weight:600;">
                           ${t}
                           <button onclick="removeTargetFromList('${k}', ${idx})" style="background:none; border:none; color:var(--status-error); cursor:pointer; font-size:12px; font-weight:bold; padding:0 2px;">×</button>
                         </span>
-                      `).join('')}
+                      `).join('') : '<div style="font-size:11.5px; color:var(--text-secondary); font-style:italic;">No target accounts yet. Add handles below or import from Sheet.</div>'}
                     </div>
                   </div>
 
@@ -2631,6 +3098,20 @@ function renderAdminCuratedLists(container) {
       </div>
     </div>
   `;
+}
+
+function updateListUrl(listKey, val) {
+  if (AtomXState.curatedLists[listKey]) {
+    AtomXState.curatedLists[listKey].listUrl = (val || '').trim();
+  }
+}
+
+function deleteCustomList(listKey) {
+  if (confirm(`Are you sure you want to delete "${AtomXState.curatedLists[listKey]?.name}"?`)) {
+    delete AtomXState.curatedLists[listKey];
+    renderAdminCuratedLists(document.getElementById('mainContentArea'));
+    showToast('List removed');
+  }
 }
 
 function addTargetToList(listKey) {
@@ -2667,6 +3148,7 @@ function promptAddNewCustomList() {
   if (!name) return;
   const cat = prompt('Enter Category (1 for "Audience Builder", 2 for "Increase Sorsa Score"):', '1');
   const category = cat === '2' ? 'Increase Sorsa Score' : 'Audience Builder';
+  const listUrl = prompt('Enter Twitter/X List URL (optional, leave blank to use target handles):', '') || '';
   const newKey = 'custom_' + Date.now();
 
   AtomXState.curatedLists[newKey] = {
@@ -2674,6 +3156,7 @@ function promptAddNewCustomList() {
     name: name,
     category: category,
     description: `Custom curated list for ${category}.`,
+    listUrl: listUrl.trim(),
     targets: []
   };
 
@@ -2682,6 +3165,14 @@ function promptAddNewCustomList() {
 }
 
 async function saveCuratedListsToServer() {
+  // Sync all on-screen listUrl inputs
+  Object.keys(AtomXState.curatedLists).forEach(k => {
+    const inp = document.getElementById(`listurl-${k}`);
+    if (inp) {
+      AtomXState.curatedLists[k].listUrl = inp.value.trim();
+    }
+  });
+
   try {
     const res = await fetch(`${API_BASE}/api/admin/curated-lists`, {
       method: 'POST',
@@ -2689,13 +3180,462 @@ async function saveCuratedListsToServer() {
       body: JSON.stringify({ lists: AtomXState.curatedLists })
     });
     if (res.ok) {
+      showToast('✓ Curated lists successfully saved and broadcasted to all extensions!');
       alert('✓ Curated lists successfully saved and broadcasted to all user extensions!');
       return;
     }
   } catch (e) {
     console.warn('Could not post to backend, saved in memory', e);
   }
-  alert('✓ Lists updated in memory and ready for broadcast.');
+  showToast('✓ Lists updated in memory and ready for broadcast.');
+}
+
+// -------------------------------------------------------------
+// LIST CONTROLS: AGENT, STATUS, LIMIT, RENAME, CLEAR
+// -------------------------------------------------------------
+function updateListCategory(listKey, newCategory) {
+  if (AtomXState.curatedLists[listKey]) {
+    AtomXState.curatedLists[listKey].category = newCategory;
+    showToast(`✓ Updated ${AtomXState.curatedLists[listKey].name} agent to: ${newCategory}`);
+  }
+}
+
+function updateListStatus(listKey, newStatus) {
+  if (AtomXState.curatedLists[listKey]) {
+    AtomXState.curatedLists[listKey].status = newStatus;
+    renderAdminCuratedLists(document.getElementById('mainContentArea'));
+    showToast(`✓ Set status to: ${newStatus.toUpperCase()}`);
+  }
+}
+
+function updateListAccessTier(listKey, newAccessTier) {
+  if (AtomXState.curatedLists[listKey]) {
+    AtomXState.curatedLists[listKey].accessTier = newAccessTier;
+    renderAdminCuratedLists(document.getElementById('mainContentArea'));
+    showToast(`✓ Set plan access to: ${newAccessTier.toUpperCase()}`);
+  }
+}
+
+function updateListName(listKey, newName) {
+  if (AtomXState.curatedLists[listKey] && newName.trim()) {
+    AtomXState.curatedLists[listKey].name = newName.trim();
+    showToast(`✓ Renamed list to: ${newName.trim()}`);
+  }
+}
+
+function trimListTargetsPrompt(listKey) {
+  const l = AtomXState.curatedLists[listKey];
+  if (!l) return;
+  const currCount = l.targets?.length || 0;
+  const input = prompt(`Currently "${l.name}" has ${currCount} target accounts.\nEnter the maximum number of IDs to keep in this list (e.g. 50, 100, 250):`, currCount > 100 ? 100 : currCount);
+  if (input === null) return;
+  const limit = parseInt(input, 10);
+  if (isNaN(limit) || limit < 0) {
+    alert('Please enter a valid positive number.');
+    return;
+  }
+  l.targets = (l.targets || []).slice(0, limit);
+  renderAdminCuratedLists(document.getElementById('mainContentArea'));
+  showToast(`✓ Trimmed "${l.name}" to ${l.targets.length} targets.`);
+}
+
+function clearAllTargetsFromList(listKey) {
+  const l = AtomXState.curatedLists[listKey];
+  if (!l) return;
+  if (confirm(`Are you sure you want to remove all targets from "${l.name}"?`)) {
+    l.targets = [];
+    renderAdminCuratedLists(document.getElementById('mainContentArea'));
+    showToast(`✓ Cleared all targets from "${l.name}".`);
+  }
+}
+
+// -------------------------------------------------------------
+// GOOGLE SHEET / CSV IMPORTER FOR 3K+ CREATORS (ADMIN DECISION)
+// -------------------------------------------------------------
+function openImportGoogleSheetModal() {
+  const existingModal = document.getElementById('sheetImportModal');
+  if (existingModal) existingModal.remove();
+
+  const currentLists = AtomXState.curatedLists || {};
+  const listKeys = Object.keys(currentLists);
+
+  const modal = document.createElement('div');
+  modal.id = 'sheetImportModal';
+  modal.style.position = 'fixed';
+  modal.style.top = '0';
+  modal.style.left = '0';
+  modal.style.width = '100vw';
+  modal.style.height = '100vh';
+  modal.style.backgroundColor = 'rgba(0,0,0,0.75)';
+  modal.style.backdropFilter = 'blur(6px)';
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.zIndex = '9999';
+
+  modal.innerHTML = `
+    <div style="background:var(--bg-surface, #1e293b); border:1px solid var(--border-subtle, #334155); border-radius:12px; width:92%; max-width:740px; max-height:92vh; overflow-y:auto; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.5); color:var(--text-primary, #fff);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <h3 style="font-size:18px; font-weight:700; margin:0; display:flex; align-items:center; gap:8px;">
+          <span>📥</span> Import Google Sheet / CSV (Admin Controlled)
+        </h3>
+        <button onclick="document.getElementById('sheetImportModal').remove()" style="background:none; border:none; color:var(--text-secondary, #94a3b8); font-size:20px; cursor:pointer;">✕</button>
+      </div>
+
+      <div style="font-size:12px; color:var(--text-secondary, #94a3b8); line-height:1.5; margin-bottom:14px; background:var(--bg-canvas, #0f172a); padding:10px 14px; border-radius:8px; border:1px solid var(--border-subtle, #334155);">
+        <div><strong>Expected Sheet Columns:</strong> <code style="color:var(--blue-primary, #38bdf8);">Rank | X Username | X Profile Link | Sorsa Score | Wallchain Score | Tier</code></div>
+        <div style="font-size:11.5px; margin-top:4px;">💡 <em>Full Admin Power: Pick specific Rank Ranges (e.g. 21–99, 550–1000), choose Agent, set Free/Paid subscription access, and toggle Draft vs Live.</em></div>
+      </div>
+
+      <!-- File Upload & Direct Paste Input -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+        <div>
+          <label class="form-label" style="font-size:11.5px; font-weight:600; display:block; margin-bottom:4px;">Upload CSV / TSV File:</label>
+          <input type="file" id="sheetFileInput" accept=".csv,.tsv,.txt" style="font-size:11.5px; color:var(--text-secondary, #94a3b8); width:100%;" onchange="handleSheetFileUpload(event)">
+        </div>
+        <div style="display:flex; align-items:flex-end;">
+          <button class="btn btn-secondary btn-sm" onclick="previewSheetRowsCount()" style="width:100%; font-size:11.5px; padding:6px 10px;">🔍 Check & Count Rows</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label class="form-label" style="font-size:11.5px; font-weight:600; display:block; margin-bottom:4px;">Or Paste Copied Sheet Rows / CSV Data:</label>
+        <textarea id="sheetPasteTextarea" rows="4" class="form-input" placeholder="Rank\tX Username\tX Profile Link\tSorsa Score\tWallchain Score\tTier\n1\t@cz_binance\thttps://x.com/cz_binance\t99.5\t95\tTier 1..." style="width:100%; font-family:monospace; font-size:11px; resize:vertical; padding:8px 10px; background:var(--bg-canvas, #0f172a);"></textarea>
+        <div id="sheetRowCountBadge" style="display:none; font-size:11.5px; color:var(--status-success, #22c55e); margin-top:4px; font-weight:600;"></div>
+      </div>
+
+      <!-- ADMIN DECISION CONFIGURATION FORM -->
+      <div style="background:var(--bg-canvas, #0f172a); border:1px solid var(--border-subtle, #334155); border-radius:8px; padding:14px; margin-bottom:16px;">
+        <div style="font-size:12px; font-weight:700; color:var(--blue-primary, #38bdf8); text-transform:uppercase; margin-bottom:12px; border-bottom:1px solid var(--border-subtle, #334155); padding-bottom:6px;">
+          ⚙️ Admin Import Configuration (Your Decision)
+        </div>
+
+        <!-- 1. Destination List -->
+        <div style="margin-bottom:12px;">
+          <label style="font-size:11.5px; font-weight:700; display:block; margin-bottom:4px;">1. Destination List:</label>
+          <div style="display:flex; gap:16px; margin-bottom:8px; font-size:12px;">
+            <label style="cursor:pointer; display:flex; align-items:center; gap:5px;">
+              <input type="radio" name="importDestType" value="new" checked onchange="toggleImportDestView()"> Create New List
+            </label>
+            <label style="cursor:pointer; display:flex; align-items:center; gap:5px;">
+              <input type="radio" name="importDestType" value="existing" onchange="toggleImportDestView()"> Overwrite / Append Existing List
+            </label>
+          </div>
+
+          <div id="destNewListWrap">
+            <input type="text" id="importNewListName" class="form-input" placeholder="e.g. Sorsa Mid-Tier KOLs (Rank 21-99)" value="Imported Creator List" style="font-size:12px; padding:6px 10px; width:100%;">
+          </div>
+
+          <div id="destExistingListWrap" style="display:none;">
+            <select id="importExistingListSelect" class="form-input" style="font-size:12px; padding:6px 10px; width:100%;">
+              ${listKeys.map(k => `<option value="${k}">${currentLists[k].name} (${(currentLists[k].targets || []).length} current targets)</option>`).join('')}
+            </select>
+            <div style="display:flex; gap:12px; margin-top:6px; font-size:11.5px;">
+              <label style="cursor:pointer;"><input type="radio" name="existingAction" value="replace" checked> Replace existing targets</label>
+              <label style="cursor:pointer;"><input type="radio" name="existingAction" value="append"> Append to existing targets</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Rank Range Selection (e.g. 21 to 99, 550 to 1000) -->
+        <div style="margin-bottom:12px; background:rgba(56, 189, 248, 0.05); padding:10px 12px; border-radius:6px; border:1px solid rgba(56, 189, 248, 0.25);">
+          <label style="font-size:11.5px; font-weight:700; color:var(--blue-primary); display:block; margin-bottom:5px;">
+            2. Rank / Row Range Selection (e.g. Rank 21–99 or 550–1000):
+          </label>
+          <div style="display:flex; gap:16px; margin-bottom:8px; font-size:12px;">
+            <label style="cursor:pointer; display:flex; align-items:center; gap:5px;">
+              <input type="radio" name="importRankMode" value="all" checked onchange="toggleImportRankRangeView()"> All Ranks / Rows
+            </label>
+            <label style="cursor:pointer; display:flex; align-items:center; gap:5px;">
+              <input type="radio" name="importRankMode" value="range" onchange="toggleImportRankRangeView()"> Custom Rank Range
+            </label>
+          </div>
+          <div id="importRankRangeInputs" style="display:none; align-items:center; gap:8px;">
+            <span style="font-size:11.5px; color:var(--text-secondary);">From Rank:</span>
+            <input type="number" id="importFromRankInput" class="form-input" value="21" min="1" max="10000" style="width:75px; font-size:12px; padding:4px 8px;">
+            <span style="font-size:11.5px; color:var(--text-secondary);">To Rank:</span>
+            <input type="number" id="importToRankInput" class="form-input" value="99" min="1" max="10000" style="width:75px; font-size:12px; padding:4px 8px;">
+            <span style="font-size:11px; color:var(--text-secondary);">(inclusive)</span>
+          </div>
+        </div>
+
+        <!-- 3. Target Agent, Access Plan & Status (3 Columns) -->
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:12px;">
+          <div>
+            <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">3. Target Agent:</label>
+            <select id="importTargetAgentSelect" class="form-input" style="font-size:11.5px; padding:6px 8px; width:100%;">
+              <option value="Audience Builder">Audience Builder</option>
+              <option value="Increase Sorsa Score" selected>Increase Sorsa Score</option>
+              <option value="Followers Increase">Followers Growth</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">4. Access Plan:</label>
+            <select id="importAccessTierSelect" class="form-input" style="font-size:11.5px; padding:6px 8px; width:100%; font-weight:600;">
+              <option value="free" selected>🔓 Free (All Users)</option>
+              <option value="paid">🔒 Paid / Pro Only</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">5. Visibility Status:</label>
+            <select id="importStatusSelect" class="form-input" style="font-size:11.5px; padding:6px 8px; width:100%; font-weight:700;">
+              <option value="published" selected>🟢 Published (Live)</option>
+              <option value="draft">🟡 Draft (Hidden)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 6. Filter by Tier & 7. Max ID Count Limit -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div>
+            <label style="font-size:11.5px; font-weight:700; display:block; margin-bottom:4px;">6. Filter by Tier from Sheet (Optional):</label>
+            <select id="importTierFilterSelect" class="form-input" style="font-size:12px; padding:6px 10px; width:100%;">
+              <option value="all">Include All Tiers</option>
+              <option value="tier1">Only Tier 1</option>
+              <option value="tier2">Only Tier 2</option>
+              <option value="tier3">Only Tier 3</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:700; display:block; margin-bottom:4px;">7. Max ID Limit (0 for all in range):</label>
+            <div style="display:flex; gap:6px;">
+              <input type="number" id="importIdLimitInput" class="form-input" value="0" min="0" max="5000" placeholder="0 = All" style="font-size:12px; padding:6px 10px; width:90px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('importIdLimitInput').value=50" style="padding:4px 6px; font-size:10px;">50</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('importIdLimitInput').value=100" style="padding:4px 6px; font-size:10px;">100</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('importIdLimitInput').value=500" style="padding:4px 6px; font-size:10px;">500</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('importIdLimitInput').value=0" style="padding:4px 6px; font-size:10px;">All</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="importSummaryCard" style="display:none; background:rgba(34, 197, 94, 0.1); border:1px solid #22c55e; border-radius:8px; padding:12px; margin-bottom:14px; font-size:12px;">
+        <div id="importSummaryContent" style="color:#22c55e; font-weight:600;"></div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sheetImportModal').remove()">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="executeAdminCustomSheetImport()">✓ Save List With Selected Rules</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+}
+
+function toggleImportDestView() {
+  const destType = document.querySelector('input[name="importDestType"]:checked')?.value || 'new';
+  const newWrap = document.getElementById('destNewListWrap');
+  const exWrap = document.getElementById('destExistingListWrap');
+  if (newWrap) newWrap.style.display = destType === 'new' ? 'block' : 'none';
+  if (exWrap) exWrap.style.display = destType === 'existing' ? 'block' : 'none';
+}
+
+function toggleImportRankRangeView() {
+  const rankMode = document.querySelector('input[name="importRankMode"]:checked')?.value || 'all';
+  const rangeInputs = document.getElementById('importRankRangeInputs');
+  if (rangeInputs) rangeInputs.style.display = rankMode === 'range' ? 'flex' : 'none';
+}
+
+function previewSheetRowsCount() {
+  const textarea = document.getElementById('sheetPasteTextarea');
+  const rawText = (textarea?.value || '').trim();
+  const badge = document.getElementById('sheetRowCountBadge');
+  if (!rawText) {
+    alert('Please paste rows or upload a file first.');
+    return;
+  }
+  const users = parseSheetText(rawText);
+  if (badge) {
+    badge.style.display = 'block';
+    badge.textContent = `✓ Found ${users.length} valid creator accounts in sheet data.`;
+  }
+}
+
+function handleSheetFileUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const text = e.target.result;
+    const textarea = document.getElementById('sheetPasteTextarea');
+    if (textarea) textarea.value = text;
+    previewSheetRowsCount();
+  };
+  reader.readAsText(file);
+}
+
+function parseSheetText(content) {
+  const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headerLine = lines[0];
+  let delimiter = ',';
+  if (headerLine.includes('\t')) delimiter = '\t';
+  else if (headerLine.includes(';') && !headerLine.includes(',')) delimiter = ';';
+
+  function splitLine(line) {
+    if (delimiter === '\t') return line.split('\t').map(c => c.trim().replace(/^["']|["']$/g, ''));
+    const pattern = new RegExp(`(?:^|${delimiter})(?:"([^"]*)"|([^"${delimiter}]*))`, 'g');
+    const result = [];
+    let match;
+    while ((match = pattern.exec(line)) !== null) {
+      result.push((match[1] !== undefined ? match[1] : match[2] || '').trim());
+      if (pattern.lastIndex === 0 && line.length > 0) break;
+    }
+    return result;
+  }
+
+  const headers = splitLine(headerLine).map(h => h.toLowerCase());
+  const usernameIdx = headers.findIndex(h => h.includes('username') || h.includes('handle') || h === 'x username');
+  const linkIdx = headers.findIndex(h => h.includes('profile') || h.includes('link') || h.includes('url'));
+  const tierIdx = headers.findIndex(h => h.includes('tier'));
+  const sorsaIdx = headers.findIndex(h => h.includes('sorsa'));
+  const rankIdx = headers.findIndex(h => h.includes('rank'));
+
+  const parsed = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitLine(lines[i]);
+    if (!cols || cols.length === 0 || cols.every(c => !c)) continue;
+
+    let handle = '';
+    if (usernameIdx !== -1 && cols[usernameIdx]) {
+      handle = cols[usernameIdx].trim();
+    }
+    if (!handle && linkIdx !== -1 && cols[linkIdx]) {
+      const match = cols[linkIdx].match(/(?:twitter\.com|x\.com)\/([A-Za-z0-9_]{1,25})/);
+      if (match) handle = match[1];
+    }
+    if (!handle) continue;
+
+    handle = handle.replace(/^@/, '').trim();
+    if (!/^[A-Za-z0-9_]{1,25}$/.test(handle)) continue;
+
+    const tier = (tierIdx !== -1 && cols[tierIdx]) ? cols[tierIdx].trim() : 'Tier 1';
+    const sorsaScore = (sorsaIdx !== -1 && cols[sorsaIdx]) ? cols[sorsaIdx].trim() : '';
+    const rawRank = (rankIdx !== -1 && cols[rankIdx]) ? cols[rankIdx].trim() : i.toString();
+    const rankNum = parseInt(rawRank.replace(/[^0-9]/g, ''), 10) || i;
+
+    parsed.push({ handle: '@' + handle, tier, sorsaScore, rank: rankNum });
+  }
+  return parsed;
+}
+
+async function executeAdminCustomSheetImport() {
+  const textarea = document.getElementById('sheetPasteTextarea');
+  const rawText = (textarea?.value || '').trim();
+  if (!rawText) {
+    alert('⚠️ Please paste sheet rows or upload a CSV file first.');
+    return;
+  }
+
+  const users = parseSheetText(rawText);
+  if (users.length === 0) {
+    alert('⚠️ Could not parse any valid creator handles. Please verify columns: Rank | X Username | X Profile Link | Sorsa Score | Wallchain Score | Tier');
+    return;
+  }
+
+  // 1. Admin Decision: Rank Range (e.g. 21 to 99, 550 to 1000)
+  const rankMode = document.querySelector('input[name="importRankMode"]:checked')?.value || 'all';
+  let filteredUsers = users;
+  let rangeLabel = 'All Ranks';
+
+  if (rankMode === 'range') {
+    const fromRank = parseInt(document.getElementById('importFromRankInput')?.value || '1', 10);
+    const toRank = parseInt(document.getElementById('importToRankInput')?.value || '100', 10);
+    rangeLabel = `Rank ${fromRank}–${toRank}`;
+    filteredUsers = users.filter((u, idx) => {
+      const effectiveRank = typeof u.rank === 'number' ? u.rank : (idx + 1);
+      return effectiveRank >= fromRank && effectiveRank <= toRank;
+    });
+  }
+
+  // 2. Admin Decision: Filter by Tier (Optional)
+  const tierFilter = document.getElementById('importTierFilterSelect')?.value || 'all';
+  if (tierFilter === 'tier1') {
+    filteredUsers = filteredUsers.filter(u => u.tier.toLowerCase().includes('1'));
+  } else if (tierFilter === 'tier2') {
+    filteredUsers = filteredUsers.filter(u => u.tier.toLowerCase().includes('2'));
+  } else if (tierFilter === 'tier3') {
+    filteredUsers = filteredUsers.filter(u => u.tier.toLowerCase().includes('3'));
+  }
+
+  // 3. Admin Decision: ID Limit (0 for all in range)
+  const limitInput = parseInt(document.getElementById('importIdLimitInput')?.value || '0', 10);
+  const targetHandles = (limitInput > 0 ? filteredUsers.slice(0, limitInput) : filteredUsers).map(u => u.handle);
+
+  if (targetHandles.length === 0) {
+    alert('⚠️ No accounts matched the selected Rank range and Tier filter.');
+    return;
+  }
+
+  // 4. Admin Decision: Destination List, Agent, Access Plan, Status
+  const destType = document.querySelector('input[name="importDestType"]:checked')?.value || 'new';
+  const targetAgent = document.getElementById('importTargetAgentSelect')?.value || 'Increase Sorsa Score';
+  const targetAccess = document.getElementById('importAccessTierSelect')?.value || 'free';
+  const targetStatus = document.getElementById('importStatusSelect')?.value || 'published';
+
+  if (!AtomXState.curatedLists) AtomXState.curatedLists = {};
+
+  let targetListKey = '';
+  if (destType === 'new') {
+    const customName = document.getElementById('importNewListName')?.value.trim() || `Imported List (${rangeLabel})`;
+    targetListKey = 'custom_' + Date.now();
+    AtomXState.curatedLists[targetListKey] = {
+      id: targetListKey,
+      name: customName,
+      category: targetAgent,
+      status: targetStatus,
+      accessTier: targetAccess,
+      rankRange: rangeLabel,
+      description: `Admin imported list with ${targetHandles.length} verified creators (${rangeLabel}).`,
+      listUrl: '',
+      targets: targetHandles
+    };
+  } else {
+    targetListKey = document.getElementById('importExistingListSelect')?.value;
+    if (!targetListKey || !AtomXState.curatedLists[targetListKey]) {
+      alert('⚠️ Selected existing list not found.');
+      return;
+    }
+    const action = document.querySelector('input[name="existingAction"]:checked')?.value || 'replace';
+    const existing = AtomXState.curatedLists[targetListKey];
+    existing.category = targetAgent;
+    existing.status = targetStatus;
+    existing.accessTier = targetAccess;
+
+    if (action === 'append') {
+      const merged = new Set([...(existing.targets || []), ...targetHandles]);
+      existing.targets = Array.from(merged);
+    } else {
+      existing.targets = targetHandles;
+    }
+  }
+
+  // Save to server
+  await saveCuratedListsToServer();
+
+  // Update Screen 20
+  renderAdminCuratedLists(document.getElementById('mainContentArea'));
+
+  const summaryCard = document.getElementById('importSummaryCard');
+  const summaryContent = document.getElementById('importSummaryContent');
+  if (summaryCard && summaryContent) {
+    summaryCard.style.display = 'block';
+    summaryContent.innerHTML = `
+      🎉 Success! Inserted ${targetHandles.length} accounts into "${AtomXState.curatedLists[targetListKey].name}".<br>
+      • Agent: <strong>${targetAgent}</strong><br>
+      • Plan Access: <strong>${targetAccess.toUpperCase()}</strong><br>
+      • Status: <strong>${targetStatus.toUpperCase()}</strong> (${rangeLabel})<br>
+      • Synced to server and broadcasted!
+    `;
+  }
+
+  setTimeout(() => {
+    const modal = document.getElementById('sheetImportModal');
+    if (modal) modal.remove();
+  }, 2200);
 }
 
 // -------------------------------------------------------------
@@ -3270,14 +4210,34 @@ async function saveAdminActiveModel() {
 // Real-time server sync for admin datasets
 async function loadAdminServerData() {
   try {
-    const [statsRes, usersRes, reqsRes, ledgerRes, engRes, modelRes] = await Promise.all([
+    const [statsRes, usersRes, reqsRes, ledgerRes, engRes, modelRes, logsRes, tonesRes, keysRes] = await Promise.all([
       fetch(`${API_BASE}/api/admin/stats`).catch(() => null),
       fetch(`${API_BASE}/api/admin/users`).catch(() => null),
       fetch(`${API_BASE}/api/admin/access-requests`).catch(() => null),
       fetch(`${API_BASE}/api/admin/ledger`).catch(() => null),
       fetch(`${API_BASE}/api/tweets/engaged`).catch(() => null),
-      fetch(`${API_BASE}/api/admin/active-model`).catch(() => null)
+      fetch(`${API_BASE}/api/admin/active-model`).catch(() => null),
+      fetch(`${API_BASE}/api/admin/api-logs`).catch(() => null),
+      fetch(`${API_BASE}/api/tone-styles`).catch(() => null),
+      fetch(`${API_BASE}/api/admin/api-keys`).catch(() => null)
     ]);
+
+    if (keysRes && keysRes.ok) {
+      const kd = await keysRes.json();
+      AtomXState.adminApiKeys = kd.keys || {};
+    }
+
+    if (tonesRes && tonesRes.ok) {
+      const d = await tonesRes.json();
+      if (d && Array.isArray(d.defaultTones)) {
+        AtomXState.toneStylesData = d;
+      }
+    }
+
+    if (logsRes && logsRes.ok) {
+      const d = await logsRes.json();
+      AtomXState.adminApiLogs = d.logs || [];
+    }
 
     if (modelRes && modelRes.ok) {
       const modelData = await modelRes.json();

@@ -1316,5 +1316,31 @@ body.dark .ext-toast-banner {
   box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.6);
 }
 
+/* Dedicated Agent Workspaces Styles */
+.agent-workspace-panels {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.agent-panel-content {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-panel-content.active {
+  display: flex !important;
+}
+
+.agent-panel-content label.opt-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
 
 

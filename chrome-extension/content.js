@@ -86,7 +86,23 @@ function extractTweetData(article) {
     authorHandle = handleMatch ? handleMatch[0] : '';
   }
 
-  return { text, authorName, authorHandle };
+  let tweetUrl = '';
+  let tweetId = '';
+  const statusLink = article.querySelector('a[href*="/status/"]');
+  if (statusLink) {
+    const href = statusLink.getAttribute('href');
+    if (href) {
+      const match = href.match(/\/([a-zA-Z0-9_]+)\/status\/(\d+)/);
+      if (match) {
+        tweetId = match[2];
+        tweetUrl = `https://x.com/${match[1]}/status/${match[2]}`;
+      } else {
+        tweetUrl = href.startsWith('http') ? href : `https://x.com${href}`;
+      }
+    }
+  }
+
+  return { text, authorName, authorHandle, tweetUrl, tweetId };
 }
 
 let isWorkflowAborted = false;
@@ -347,6 +363,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true; // Keep message channel open for async response
   }
+
+  // Agent 1: Audience Builder — Scan active profiles on Twitter list
+  if (message.type === 'SCAN_ACTIVE_PROFILES_FROM_LIST' || message.type === 'AUDIENCE_BUILDER_HUNT_USERS') {
+    huntAudienceUsers(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // Agent 1: Audience Builder — Collect repliers from tweet discussion thread
+  if (message.type === 'COLLECT_REPLIERS_FROM_TWEET_THREAD') {
+    collectRepliersFromTweetThread(message.targetCount || 10)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, profiles: [] }));
+    return true;
+  }
+
+  // Agent 1: Audience Builder — Follow & engage user on page
+  if (message.type === 'FOLLOW_USER_ON_PAGE' || message.type === 'AUDIENCE_ENGAGE_AND_FOLLOW') {
+    engageAndFollowProfile(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // Agent 2: Reply Back Loop — Scan and reply to comments
+  if (message.type === 'EXECUTE_REPLY_BACK_CYCLE') {
+    executeReplyBackCycle(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 // Wait for element helper with timeout
@@ -497,30 +545,29 @@ async function executeAutonomousTweetWorkflow(params) {
 
       let commentToPost = params.replyText;
 
-      // Generate reply using the REAL tweet content from the page DOM
+      // Generate reply using the REAL tweet content from the page DOM via background service worker
       if (!commentToPost || params.generateContextual !== false) {
-        const backendUrl = params.backendUrl || 'http://localhost:5000';
         try {
-          console.log('[ATOMX] Generating live contextual AI reply for post:', liveTweetText.slice(0, 100));
-          const aiResp = await fetch(`${backendUrl}/api/generate-reply`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+          console.log('[ATOMX] Asking background worker for live contextual AI reply for post:', liveTweetText.slice(0, 100));
+          const aiResp = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+              type: 'GENERATE_AI_REPLY',
               tweetText: liveTweetText || params.tweetUrl || '',
               tweetAuthor: liveAuthor,
+              tweetAuthorName: tweetData.authorName || '',
               style: params.style || 'CT Human Reply',
               stylePrompt: params.stylePrompt || null
-            })
+            }, resolve);
           });
-          if (aiResp.ok) {
-            const aiData = await aiResp.json();
-            if (aiData.reply) {
-              commentToPost = aiData.reply;
-              console.log('[ATOMX] Live AI reply received:', commentToPost);
-            }
+
+          if (aiResp && aiResp.success && aiResp.reply) {
+            commentToPost = aiResp.reply;
+            console.log('[ATOMX] Live AI reply received via background service worker:', commentToPost);
+          } else {
+            console.warn('[ATOMX] Background worker reply generation failed:', aiResp?.error);
           }
         } catch (genErr) {
-          console.warn('[ATOMX] Error calling backend for live reply:', genErr);
+          console.warn('[ATOMX] Error communicating with background worker:', genErr);
         }
       }
 
@@ -572,3 +619,539 @@ async function executeAutonomousTweetWorkflow(params) {
     isAlreadyCommented
   };
 }
+
+/**
+ * Robust numerical metric parser for Twitter (handles "1.2K", "500", "2M", aria-labels)
+ */
+function extractTwitterMetric(element) {
+  if (!element) return 0;
+  const rawText = (element.innerText || element.getAttribute('aria-label') || '').trim();
+  if (!rawText) return 0;
+  const match = rawText.match(/([\d,.]+)\s*([kKmMbB])?/);
+  if (!match) return 0;
+  let val = parseFloat(match[1].replace(/,/g, ''));
+  const unit = (match[2] || '').toLowerCase();
+  if (unit === 'k') val *= 1000;
+  else if (unit === 'm') val *= 1000000;
+  else if (unit === 'b') val *= 1000000000;
+  return Math.round(val) || 0;
+}
+
+/**
+ * Agent 1: Audience Builder Profile Scanner & Tweet Hunter (Phase B & C)
+ * Performs DEEP SCAN across the target timeline dynamically,
+ * indexes tweets with full engagement metrics (replies, retweets, likes),
+ * filters by date range, ranks them to find genuine busy tweets, and extracts candidate profiles.
+ * Dynamically scales scanning cycles to reliably collect 10, 25, 50, or 100 profiles.
+ */
+async function huntAudienceUsers(options = {}) {
+  isWorkflowAborted = false;
+  const targetCount = Number(options.targetCount) || 10;
+  const dateRange = options.dateRange || '24h';
+  const sortBy = options.sortBy || 'replies';
+
+  const tweetMap = new Map();
+  const directProfiles = [];
+  const seenHandles = new Set();
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
+
+  let maxAgeMs = Infinity;
+  if (dateRange === '24h') maxAgeMs = 24 * 3600 * 1000;
+  else if (dateRange === '3d') maxAgeMs = 3 * 24 * 3600 * 1000;
+  else if (dateRange === '7d') maxAgeMs = 7 * 24 * 3600 * 1000;
+
+  console.log(`[ATOMX AUDIENCE] Starting deep timeline scan (Target: ${targetCount}, Date: ${dateRange}, Sort: ${sortBy})...`);
+
+  // Dynamically scale scan cycles: for 10 -> 15 cycles; 25 -> 32 cycles; 50 -> 60 cycles; 100 -> 90 cycles
+  const maxScanCycles = Math.min(100, Math.max(15, Math.ceil(targetCount * 1.25)));
+  let consecutiveStalls = 0;
+  let prevDiscoveredCount = 0;
+
+  for (let cycle = 0; cycle < maxScanCycles; cycle++) {
+    if (isWorkflowAborted) break;
+
+    const visibleArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    for (const article of visibleArticles) {
+      const data = extractTweetData(article);
+      const cleanHandle = (data.authorHandle || '').replace('@', '').toLowerCase();
+      if (!cleanHandle || cleanHandle === loggedInHandle) continue;
+
+      const tweetKey = data.tweetId || `${cleanHandle}_${(data.text || '').slice(0, 30)}`;
+      if (tweetMap.has(tweetKey)) continue;
+
+      // Parse timestamp from <time>
+      const timeEl = article.querySelector('time');
+      const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+      const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
+      const ageMs = Date.now() - timestamp;
+
+      // Date range filter
+      if (maxAgeMs !== Infinity && ageMs > maxAgeMs) {
+        continue;
+      }
+
+      // Parse full engagement metrics
+      const replyBtn = article.querySelector('button[data-testid="reply"]');
+      const likeBtn = article.querySelector('button[data-testid="like"], button[data-testid="unlike"]');
+      const rtBtn = article.querySelector('button[data-testid="retweet"], button[data-testid="unretweet"]');
+
+      const repliesCount = extractTwitterMetric(replyBtn);
+      const likesCount = extractTwitterMetric(likeBtn);
+      const retweetsCount = extractTwitterMetric(rtBtn);
+      const engagementScore = (repliesCount * 5) + (retweetsCount * 3) + likesCount;
+
+      const tweetObj = {
+        tweetId: data.tweetId,
+        tweetUrl: data.tweetUrl,
+        authorHandle: data.authorHandle || `@${cleanHandle}`,
+        cleanHandle,
+        authorName: data.authorName || cleanHandle,
+        text: data.text,
+        timestamp,
+        repliesCount,
+        likesCount,
+        retweetsCount,
+        engagementScore
+      };
+
+      tweetMap.set(tweetKey, tweetObj);
+
+      // Index creator handle
+      if (!seenHandles.has(cleanHandle)) {
+        seenHandles.add(cleanHandle);
+        directProfiles.push({
+          handle: data.authorHandle || `@${cleanHandle}`,
+          cleanHandle,
+          name: data.authorName || cleanHandle,
+          tweetSnippet: (data.text || '').slice(0, 90),
+          repliesCount,
+          likesCount,
+          timestamp
+        });
+      }
+    }
+
+    // Early termination buffer: if we have indexed more than enough creators and tweets, stop scrolling
+    if (directProfiles.length >= Math.max(targetCount * 1.5, targetCount + 20) && tweetMap.size >= 15) {
+      console.log(`[ATOMX AUDIENCE DEEP SCAN] Target buffer satisfied (${directProfiles.length} profiles). Stopping scan early at cycle ${cycle + 1}.`);
+      break;
+    }
+
+    // Stall check: if no new tweets discovered for 4 consecutive cycles, break
+    if (tweetMap.size === prevDiscoveredCount) {
+      consecutiveStalls++;
+      if (consecutiveStalls >= 4) {
+        console.log(`[ATOMX AUDIENCE DEEP SCAN] Feed reached end or stalled at ${tweetMap.size} tweets.`);
+        break;
+      }
+    } else {
+      consecutiveStalls = 0;
+      prevDiscoveredCount = tweetMap.size;
+    }
+
+    // Smooth scroll down to load next batch of timeline posts
+    window.scrollBy({ top: 1050, behavior: 'smooth' });
+    await sleep(700);
+  }
+
+  const allDiscovered = Array.from(tweetMap.values());
+  console.log(`[ATOMX AUDIENCE DEEP SCAN] Completed scan: indexed ${allDiscovered.length} tweets, ${directProfiles.length} unique creators.`);
+
+  // Sort tweets and post-authors based on user setting
+  if (sortBy === 'replies') {
+    allDiscovered.sort((a, b) => (b.repliesCount - a.repliesCount) || (b.engagementScore - a.engagementScore));
+    directProfiles.sort((a, b) => (b.repliesCount - a.repliesCount) || (b.likesCount - a.likesCount));
+  } else {
+    allDiscovered.sort((a, b) => b.timestamp - a.timestamp);
+    directProfiles.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }
+
+  // Provide candidate busy tweets (with replies)
+  let topTweets = allDiscovered.filter(t => t.repliesCount > 0 && t.tweetUrl);
+  if (topTweets.length === 0 && allDiscovered.length > 0) {
+    topTweets = allDiscovered.filter(t => t.tweetUrl).slice(0, 15);
+  } else {
+    topTweets = topTweets.slice(0, Math.min(25, Math.max(10, Math.ceil(targetCount / 2))));
+  }
+
+  if (topTweets.length > 0) {
+    console.log(`[ATOMX TOP BUSY TWEETS] Found ${topTweets.length} active candidate threads for reply extraction.`);
+  }
+
+  return {
+    success: true,
+    targetCount,
+    topTweets,
+    profiles: directProfiles,
+    directProfiles: directProfiles,
+    totalScanned: allDiscovered.length,
+    aborted: isWorkflowAborted
+  };
+}
+
+// Backward compatibility alias
+const scanActiveProfilesFromList = (count) => huntAudienceUsers({ targetCount: count });
+
+/**
+ * Agent 1: Collect active repliers/commenters from a busy tweet discussion thread (Phase C)
+ * Extracts the real community members who participated and replied to the busy tweet.
+ * Dynamically scrolls until targetCount is met or thread replies are exhausted.
+ */
+async function collectRepliersFromTweetThread(targetCount = 10) {
+  isWorkflowAborted = false;
+  const numTarget = Number(targetCount) || 10;
+  const collected = [];
+  const seenHandles = new Set();
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
+
+  // Dynamically scroll discussion thread up to 25 cycles or until target reached
+  const maxThreadScrolls = Math.min(25, Math.max(6, Math.ceil(numTarget * 1.2)));
+  let consecutiveNoNew = 0;
+
+  for (let s = 0; s < maxThreadScrolls; s++) {
+    if (isWorkflowAborted || collected.length >= numTarget) break;
+
+    const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    // Replies are articles after index 0 (index 0 is focal post)
+    const replyArticles = allArticles.length > 1 ? allArticles.slice(1) : allArticles;
+
+    let newInThisScroll = 0;
+    for (const art of replyArticles) {
+      if (collected.length >= numTarget || isWorkflowAborted) break;
+
+      const data = extractTweetData(art);
+      const cleanHandle = (data.authorHandle || '').replace('@', '').toLowerCase();
+      if (!cleanHandle || cleanHandle === loggedInHandle || seenHandles.has(cleanHandle)) {
+        continue;
+      }
+
+      seenHandles.add(cleanHandle);
+      newInThisScroll++;
+      console.log(`[ATOMX THREAD REPLIER] Collected engaged user: @${cleanHandle}`);
+      collected.push({
+        handle: data.authorHandle || `@${cleanHandle}`,
+        cleanHandle,
+        name: data.authorName || cleanHandle,
+        tweetSnippet: (data.text || '').slice(0, 90)
+      });
+    }
+
+    if (collected.length >= numTarget || isWorkflowAborted) break;
+
+    if (newInThisScroll === 0) {
+      consecutiveNoNew++;
+      if (consecutiveNoNew >= 3) {
+        // Thread replies exhausted
+        break;
+      }
+    } else {
+      consecutiveNoNew = 0;
+    }
+
+    window.scrollBy({ top: 900, behavior: 'smooth' });
+    await sleep(750);
+  }
+
+  return {
+    success: true,
+    targetCount: numTarget,
+    collectedCount: collected.length,
+    profiles: collected,
+    aborted: isWorkflowAborted
+  };
+}
+
+/**
+ * Agent 1: Audience Builder Per-Profile Interaction (Phase D)
+ * Smoothly deep-scrolls profile page past header/bio/tabs, skips pinned posts,
+ * centers the creator's real recent post on screen, likes it, generates AI reply adhering
+ * to "Tone & Style (Applied Globally)", and follows the user.
+ */
+async function engageAndFollowProfile(options = {}) {
+  isWorkflowAborted = false;
+  const targetHandle = typeof options === 'string' ? options : (options.handle || '');
+  const likePosts = options.likePosts !== false;
+  const replyPosts = !!options.replyPosts;
+  const style = options.style || 'Bullish (5-10 words)';
+  const stylePrompt = options.stylePrompt || null;
+  const backendUrl = options.backendUrl || 'http://localhost:5000';
+
+  let likesDone = 0;
+  let replyDone = 0;
+
+  try {
+    // Step 1: Check if already followed on page
+    const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+    const alreadyBtn = buttons.find(b => {
+      const txt = (b.innerText || '').trim();
+      const testId = b.getAttribute('data-testid') || '';
+      return txt === 'Following' || testId.includes('unfollow') || txt.includes('Following');
+    });
+
+    if (alreadyBtn) {
+      return { success: true, alreadyFollowing: true, handle: targetHandle, message: 'Already Following' };
+    }
+
+    // Step 2: DEEP SCROLL past profile header banner, avatar, bio & tabs to load recent posts
+    window.scrollBy({ top: 700, behavior: 'smooth' });
+    await sleep(1100);
+    window.scrollBy({ top: 500, behavior: 'smooth' });
+    await sleep(1000);
+
+    // Step 3: Find Recent Posts and SKIP Pinned Tweets & Reposts
+    const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    const validRecentArticles = allArticles.filter(art => {
+      const socialCtx = art.querySelector('div[data-testid="socialContext"]')?.innerText?.toLowerCase() || '';
+      return !socialCtx.includes('pinned') && !socialCtx.includes('pin');
+    });
+
+    // The topmost non-pinned post is the creator's recent post
+    const targetRecentPost = validRecentArticles[0] || allArticles[0];
+
+    // Scroll that target post directly into center of screen so user sees the bot working on it!
+    if (targetRecentPost) {
+      targetRecentPost.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(900);
+    }
+
+    // Step 4: Like recent posts on user's profile timeline (max 2 non-pinned)
+    if (likePosts) {
+      const postsToLike = (validRecentArticles.length > 0 ? validRecentArticles : allArticles).slice(0, 2);
+      for (const art of postsToLike) {
+        if (isWorkflowAborted) break;
+        const likeBtn = art.querySelector('button[data-testid="like"]');
+        if (likeBtn) {
+          likeBtn.click();
+          likesDone++;
+          await sleep(650);
+        }
+      }
+    }
+
+    // Step 5: Generate AI Reply adhering to "Tone & Style (Applied Globally)" and comment on centered recent post
+    if (replyPosts && targetRecentPost && !isWorkflowAborted) {
+      try {
+        const tweetData = extractTweetData(targetRecentPost);
+        const tweetText = tweetData.text || '';
+        const authorName = tweetData.authorName || targetHandle;
+        const authorHandle = tweetData.authorHandle || `@${targetHandle}`;
+
+        console.log(`[ATOMX AUDIENCE] Generating contextual AI reply for @${targetHandle}'s recent post: "${tweetText.slice(0, 60)}..." Style: ${style}`);
+
+        let commentToPost = '';
+
+        // Call background worker with active tone and prompt
+        try {
+          const aiRes = await chrome.runtime.sendMessage({
+            type: 'GENERATE_INLINE_REPLY',
+            tweetText,
+            tweetAuthor: authorHandle,
+            tweetAuthorName: authorName,
+            style,
+            stylePrompt
+          });
+          if (aiRes?.reply) {
+            commentToPost = aiRes.reply.trim();
+          }
+        } catch (mErr) {
+          console.warn('[ATOMX] Background worker message error:', mErr);
+        }
+
+        // Direct fetch fallback if background worker failed
+        if (!commentToPost) {
+          try {
+            const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tweetText,
+                tweetAuthor: authorHandle,
+                tweetAuthorName: authorName,
+                style,
+                stylePrompt
+              })
+            });
+            if (directRes.ok) {
+              const dJson = await directRes.json();
+              commentToPost = dJson?.reply?.trim();
+            }
+          } catch (dErr) {
+            console.warn('[ATOMX] Direct fetch reply error:', dErr);
+          }
+        }
+
+        // Clean quotes and preambles
+        if (commentToPost) {
+          commentToPost = commentToPost.replace(/^["']|["']$/g, '').trim();
+        }
+
+        if (commentToPost) {
+          const replyBtn = targetRecentPost.querySelector('button[data-testid="reply"]');
+          if (replyBtn) {
+            replyBtn.click();
+            await sleep(700);
+            const textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 3500);
+            if (textarea) {
+              await typeTextHumanLike(textarea, commentToPost);
+              await sleep(600);
+              const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
+                                document.querySelector('button[data-testid="tweetButton"]');
+              if (submitBtn) {
+                submitBtn.removeAttribute('disabled');
+                submitBtn.click();
+                replyDone++;
+                console.log(`[ATOMX] Successfully posted AI Reply on @${targetHandle}: "${commentToPost}"`);
+                await sleep(1100);
+              }
+            }
+          }
+        }
+      } catch (rErr) {
+        console.warn('Could not post profile reply:', rErr);
+      }
+    }
+
+    if (isWorkflowAborted) {
+      return { success: false, aborted: true };
+    }
+
+    // Step 6: Click Follow button
+    const refreshedButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+    const followBtn = refreshedButtons.find(b => {
+      const txt = (b.innerText || '').trim();
+      const testId = b.getAttribute('data-testid') || '';
+      return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
+    });
+
+    if (!followBtn) {
+      const nowFollowing = refreshedButtons.some(b => (b.innerText || '').trim() === 'Following');
+      if (nowFollowing) {
+        return { success: true, alreadyFollowing: true, handle: targetHandle, likesDone, replyDone };
+      }
+      return { success: false, error: 'Follow button not found', likesDone, replyDone };
+    }
+
+    followBtn.click();
+    await sleep(750);
+
+    return {
+      success: true,
+      alreadyFollowing: false,
+      followed: true,
+      handle: targetHandle,
+      likesDone,
+      replyDone
+    };
+  } catch (err) {
+    return { success: false, error: err.message, likesDone, replyDone };
+  }
+}
+
+// Backward compatibility alias
+const followUserOnPage = (handle) => engageAndFollowProfile({ handle, likePosts: false, replyPosts: false });
+
+/**
+ * Agent 2: Reply Back Loop Execution on Current Post
+ * Iterates through all comments on your tweet, auto-likes, and replies with AI + human typing.
+ */
+async function executeReplyBackCycle(params = {}) {
+  isWorkflowAborted = false;
+  const mainArticle = getMainPostArticle();
+  const loggedInHandle = getLoggedInUserHandle();
+  const style = params.style || 'Natural & Concise';
+  const delaySec = Number(params.delaySec || 12);
+
+  // Collect all comments below the main post
+  const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+  const commentArticles = allArticles.filter(a => a !== mainArticle);
+
+  const results = [];
+  let doneCount = 0;
+
+  for (let i = 0; i < commentArticles.length; i++) {
+    if (isWorkflowAborted) break;
+
+    const commentArt = commentArticles[i];
+    const commentData = extractTweetData(commentArt);
+    const commenterHandle = (commentData.authorHandle || '').toLowerCase().replace('@', '');
+
+    // Skip your own comments
+    if (commenterHandle && loggedInHandle && commenterHandle === loggedInHandle.toLowerCase()) {
+      continue;
+    }
+
+    // Scroll comment into view
+    commentArt.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await sleep(600);
+
+    // 1. Auto-Like the comment (❤️)
+    try {
+      const likeBtn = commentArt.querySelector('button[data-testid="like"]');
+      if (likeBtn) {
+        likeBtn.click();
+        await sleep(400);
+      }
+    } catch (e) {}
+
+    // 2. Generate Contextual AI reply for this comment via background worker
+    let replyText = '';
+    try {
+      const aiResp = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          type: 'GENERATE_AI_REPLY',
+          tweetText: commentData.text || 'Great comment!',
+          tweetAuthor: commentData.authorHandle || '@user',
+          style
+        }, resolve);
+      });
+      if (aiResp && aiResp.success && aiResp.reply) {
+        replyText = aiResp.reply;
+      }
+    } catch (e) {}
+
+    if (!replyText) {
+      replyText = 'Appreciate you sharing this perspective!';
+    }
+
+    // 3. Click reply button on the comment
+    const replyBtn = commentArt.querySelector('button[data-testid="reply"]');
+    if (replyBtn) {
+      replyBtn.click();
+      await sleep(600);
+    }
+
+    // 4. Focus textarea and type letter-by-letter with intentional typo and correction
+    const textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 4000);
+    if (textarea) {
+      await typeTextHumanLike(textarea, replyText);
+
+      if (isWorkflowAborted) break;
+      await sleep(600);
+
+      // 5. Click submit reply button
+      const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
+                        document.querySelector('button[data-testid="tweetButton"]');
+      if (submitBtn) {
+        submitBtn.removeAttribute('disabled');
+        submitBtn.click();
+        doneCount++;
+        results.push({ commenter: commentData.authorHandle, reply: replyText });
+        await sleep(800);
+      }
+    }
+
+    // 6. Safe delay before next comment
+    if (i < commentArticles.length - 1 && !isWorkflowAborted) {
+      await sleep(delaySec * 1000);
+    }
+  }
+
+  return {
+    success: true,
+    totalComments: commentArticles.length,
+    repliedCount: doneCount,
+    results,
+    aborted: isWorkflowAborted
+  };
+}
+

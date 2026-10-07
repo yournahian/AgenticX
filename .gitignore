@@ -14,6 +14,7 @@ backend/.env
 # Databases & logs
 *.db
 backend/atomx.db
+backend/data/apiTelemetryLogs.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

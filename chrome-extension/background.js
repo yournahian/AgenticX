@@ -67,4 +67,47 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
+
+  // Handle live AI reply requests from content script (bypasses page-level HTTPS mixed-content blocks)
+  if (request.type === 'GENERATE_AI_REPLY' || request.type === 'GENERATE_INLINE_REPLY') {
+    (async () => {
+      try {
+        const [storedSync, storedLocal] = await Promise.all([
+          chrome.storage.sync.get(['backendUrl']).catch(() => ({})),
+          chrome.storage.local.get(['selectedTone', 'selectedTonePrompt', 'selectedToneId']).catch(() => ({}))
+        ]);
+        const backendUrl = storedSync?.backendUrl || DEFAULT_BACKEND_URL;
+
+        const tweetText = request.tweetText || request.tweet?.text || '';
+        const tweetAuthor = request.tweetAuthor || request.tweet?.authorHandle || '@user';
+        const tweetAuthorName = request.tweetAuthorName || request.tweet?.authorName || '';
+        const style = request.style || storedLocal?.selectedTone || 'Bullish (5-10 words)';
+        const stylePrompt = request.stylePrompt || storedLocal?.selectedTonePrompt || null;
+
+        console.log('[Background Service Worker] Generating live AI reply for post:', tweetText.slice(0, 50), 'Style:', style);
+        const res = await fetch(`${backendUrl}/api/generate-reply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tweetText,
+            tweetAuthor,
+            tweetAuthorName,
+            style,
+            stylePrompt
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          sendResponse({ success: true, reply: data.reply });
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          sendResponse({ success: false, error: errData.error || `HTTP ${res.status}` });
+        }
+      } catch (err) {
+        console.error('[Background Worker] Fetch error:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true; // Keep channel open for async response
+  }
 });
