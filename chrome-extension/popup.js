@@ -141,6 +141,136 @@ function filterTweetLinks(extractedLinks, options = {}) {
   };
 }
 
+// ==============================================================
+// LUXURY IN-EXTENSION NOTIFICATION & TOAST ENGINE
+// Replaces default browser alert() with sleek native in-extension UI
+// ==============================================================
+function showExtNotification(message, options = {}) {
+  const overlay = document.getElementById('extNotificationOverlay');
+  const titleEl = document.getElementById('extNotifyTitle');
+  const iconEl = document.getElementById('extNotifyIcon');
+  const bodyEl = document.getElementById('extNotifyBody');
+  const okBtn = document.getElementById('extNotifyOkBtn');
+  if (!overlay || !bodyEl) {
+    console.log('[ATOMX Notification]', message);
+    return;
+  }
+
+  const str = String(message || '');
+  let title = options.title || 'ATOMX Notification';
+  let icon = options.icon || '✨';
+  let iconClass = '';
+
+  if (str.includes('⚠️') || str.toLowerCase().includes('limit') || str.toLowerCase().includes('insufficient') || str.toLowerCase().includes('error')) {
+    title = options.title || 'Attention Needed';
+    icon = '⚠️';
+    iconClass = 'warning';
+  } else if (str.includes('✓') || str.toLowerCase().includes('finish') || str.toLowerCase().includes('complete') || str.toLowerCase().includes('success')) {
+    title = options.title || 'Engagement Completed';
+    icon = '🚀';
+    iconClass = 'success';
+  }
+
+  if (titleEl) titleEl.textContent = title;
+  if (iconEl) {
+    iconEl.textContent = icon;
+    iconEl.className = `ext-notify-icon-box ${iconClass}`;
+  }
+
+  // Parse lines: extract stats / bullet points into sleek styled stat boxes
+  const lines = str.split('\n');
+  let formattedHtml = '';
+  const bulletItems = [];
+  const textParas = [];
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    if (trimmed.startsWith('•') || trimmed.startsWith('-')) {
+      const clean = trimmed.replace(/^[•\-]\s*/, '');
+      const colonIdx = clean.indexOf(':');
+      if (colonIdx !== -1) {
+        bulletItems.push({
+          label: clean.substring(0, colonIdx).trim(),
+          val: clean.substring(colonIdx + 1).trim()
+        });
+      } else {
+        bulletItems.push({ label: clean, val: '' });
+      }
+    } else {
+      textParas.push(trimmed.replace(/^[✓⚠️ℹ️🚀]\s*/, ''));
+    }
+  });
+
+  if (textParas.length > 0) {
+    formattedHtml += `<div style="font-weight:700; color:var(--text-primary); font-size:13px; margin-bottom:8px;">${textParas[0]}</div>`;
+  }
+
+  if (bulletItems.length > 0) {
+    formattedHtml += `<div class="stat-badge-row">`;
+    bulletItems.forEach(b => {
+      let valColor = 'var(--text-primary)';
+      const l = b.label.toLowerCase();
+      if (l.includes('engaged') || l.includes('fresh')) valColor = '#10B981';
+      else if (l.includes('skip') || l.includes('ignored')) valColor = '#9CA3AF';
+      else if (l.includes('total') || l.includes('found')) valColor = '#3B82F6';
+
+      formattedHtml += `
+        <div class="stat-badge-item">
+          <span style="color:var(--text-secondary);">${b.label}:</span>
+          <strong style="color:${valColor};">${b.val}</strong>
+        </div>`;
+    });
+    formattedHtml += `</div>`;
+  }
+
+  if (textParas.length > 1) {
+    formattedHtml += `<div style="color:var(--text-muted); font-size:11px; margin-top:6px; line-height:1.4;">${textParas.slice(1).join('<br>')}</div>`;
+  }
+
+  if (!formattedHtml) {
+    formattedHtml = `<div>${str}</div>`;
+  }
+
+  bodyEl.innerHTML = formattedHtml;
+  overlay.style.display = 'flex';
+
+  const closeNotification = () => {
+    overlay.style.display = 'none';
+  };
+
+  const closeBtn = document.getElementById('extNotifyCloseBtn');
+  if (closeBtn) closeBtn.onclick = closeNotification;
+  if (okBtn) okBtn.onclick = closeNotification;
+  overlay.onclick = (e) => {
+    if (e.target === overlay) closeNotification();
+  };
+}
+
+let toastTimer = null;
+function showExtToast(text, icon = '✓') {
+  const toast = document.getElementById('extToastBanner');
+  const iconEl = document.getElementById('extToastIcon');
+  const textEl = document.getElementById('extToastText');
+  if (!toast) return;
+
+  if (iconEl) iconEl.textContent = icon;
+  if (textEl) textEl.textContent = text;
+
+  toast.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 2600);
+}
+
+// Redirect global window.alert to sleek native in-extension notification
+if (typeof window !== 'undefined') {
+  window.alert = function(msg) {
+    showExtNotification(msg);
+  };
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   initExtTheme();
   initTabs();

@@ -666,6 +666,27 @@
       </div>
       <span style="font-size:10px; color:var(--text-muted); font-weight:600; letter-spacing:0.3px;">ATOMX ENGAGE v1.0.0</span>
     </footer>
+
+    <!-- In-Extension Luxury Notification Modal -->
+    <div id="extNotificationOverlay" class="ext-modal-overlay" style="display:none;">
+      <div class="ext-notify-card">
+        <div class="ext-notify-header">
+          <div class="ext-notify-icon-box" id="extNotifyIcon">✨</div>
+          <div class="ext-notify-title" id="extNotifyTitle">ATOMX Notification</div>
+          <button type="button" class="ext-notify-close-btn" id="extNotifyCloseBtn">✕</button>
+        </div>
+        <div class="ext-notify-body" id="extNotifyBody"></div>
+        <div class="ext-notify-footer">
+          <button type="button" class="ext-notify-ok-btn" id="extNotifyOkBtn">Got It</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-Extension Floating Quick Toast -->
+    <div id="extToastBanner" class="ext-toast-banner">
+      <span id="extToastIcon">✓</span>
+      <span id="extToastText">Notification text</span>
+    </div>
   </div>
 
   <script src="popup.js"></script>

@@ -1128,4 +1128,193 @@ body {
 [data-theme="dark"] .badge-mini.ai, body.dark .badge-mini.ai { background: rgba(219, 39, 119, 0.2); color: #F472B6; }
 [data-theme="dark"] .badge-mini.saved, body.dark .badge-mini.saved { background: rgba(180, 83, 9, 0.2); color: #FDE047; }
 
+/* ==============================================================
+   LUXURY IN-EXTENSION NOTIFICATION MODAL & TOAST
+   ============================================================== */
+.ext-modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(8, 10, 15, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: extFadeIn 0.2s ease-out forwards;
+}
+
+@keyframes extFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes extPopIn {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.ext-notify-card {
+  width: 100%;
+  max-width: 335px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: extPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ext-notify-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.ext-notify-icon-box {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--blue-soft);
+  color: var(--blue-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.ext-notify-icon-box.success {
+  background: rgba(34, 160, 107, 0.15);
+  color: #22A06B;
+}
+
+.ext-notify-icon-box.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+}
+
+.ext-notify-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex: 1;
+  letter-spacing: -0.2px;
+}
+
+.ext-notify-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.ext-notify-close-btn:hover {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+}
+
+.ext-notify-body {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  white-space: pre-line;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ext-notify-body .stat-badge-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--bg-canvas);
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+}
+
+.ext-notify-body .stat-badge-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+}
+
+.ext-notify-footer {
+  margin-top: 4px;
+}
+
+.ext-notify-ok-btn {
+  width: 100%;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--blue-primary);
+  color: #FFFFFF;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ext-notify-ok-btn:hover {
+  background: var(--blue-hover);
+  transform: translateY(-1px);
+}
+
+/* Floating Quick Toast */
+.ext-toast-banner {
+  position: absolute;
+  bottom: 46px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #111318;
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 8px 16px;
+  font-size: 11.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.ext-toast-banner.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+[data-theme="dark"] .ext-toast-banner,
+body.dark .ext-toast-banner {
+  background: #1A2234;
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.6);
+}
+
+
 
