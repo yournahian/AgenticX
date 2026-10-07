@@ -157,22 +157,79 @@ function hasUserAlreadyCommented(myHandle) {
   });
 }
 
+// QWERTY keyboard adjacent keys map for realistic typo simulation
+const QWERTY_NEIGHBORS = {
+  a: ['s', 'q', 'z'],
+  b: ['v', 'g', 'h', 'n'],
+  c: ['x', 'd', 'v'],
+  d: ['s', 'e', 'r', 'f', 'c', 'x'],
+  e: ['w', 'r', 'd', 's'],
+  f: ['d', 'r', 't', 'g', 'v', 'c'],
+  g: ['f', 't', 'y', 'h', 'b', 'v'],
+  h: ['g', 'y', 'u', 'j', 'n', 'b'],
+  i: ['u', 'o', 'k', 'j'],
+  j: ['h', 'u', 'i', 'k', 'm', 'n'],
+  k: ['j', 'i', 'o', 'l', 'm'],
+  l: ['k', 'o', 'p'],
+  m: ['n', 'j', 'k'],
+  n: ['b', 'h', 'j', 'm'],
+  o: ['i', 'p', 'k', 'l'],
+  p: ['o', 'l'],
+  q: ['w', 'a'],
+  r: ['e', 't', 'f', 'd'],
+  s: ['a', 'w', 'e', 'd', 'x', 'z'],
+  t: ['r', 'y', 'g', 'f'],
+  u: ['y', 'i', 'j', 'h'],
+  v: ['c', 'f', 'g', 'b'],
+  w: ['q', 'e', 's', 'a'],
+  x: ['z', 's', 'd', 'c'],
+  y: ['t', 'u', 'h', 'g'],
+  z: ['a', 's', 'x']
+};
+
 /**
- * Human-like letter-by-letter typing into Twitter/X Lexical comment box.
- * Types one character at a time with realistic human jitter without duplicate synthetic events.
+ * Human-like letter-by-letter typing with intentional typos & backspace corrections.
+ * Simulates real human typing with natural cadence, blinking cursor, and accidental mistakes.
  */
 async function typeTextHumanLike(editor, text) {
   if (!editor || !text) return;
 
+  // 1. Focus editor and place blinking cursor in comment box
   editor.focus();
-  await sleep(100);
+  try {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (e) {}
 
-  // 1. Clean editor first using selectAll and delete
-  document.execCommand('selectAll', false, null);
-  document.execCommand('delete', false, null);
   await sleep(150);
 
-  // 2. Type character by character cleanly
+  // 2. Clean editor first using selectAll and delete
+  document.execCommand('selectAll', false, null);
+  document.execCommand('delete', false, null);
+  await sleep(200);
+
+  // 3. Plan 1 intentional typo for realism (if text is long enough, e.g. > 15 chars)
+  let typoIndices = [];
+  if (text.length >= 15) {
+    const eligibleIndices = [];
+    for (let i = 5; i < text.length - 5; i++) {
+      const ch = text[i].toLowerCase();
+      if (QWERTY_NEIGHBORS[ch]) {
+        eligibleIndices.push(i);
+      }
+    }
+    if (eligibleIndices.length > 0) {
+      // Pick 1 random position for intentional typo
+      const picked = eligibleIndices[Math.floor(Math.random() * eligibleIndices.length)];
+      typoIndices.push(picked);
+    }
+  }
+
+  // 4. Type character by character with realistic speed & typos
   for (let i = 0; i < text.length; i++) {
     if (isWorkflowAborted) {
       console.log('[ATOMX] Typing aborted by user.');
@@ -180,33 +237,67 @@ async function typeTextHumanLike(editor, text) {
     }
 
     const char = text[i];
-    // Native execCommand inserts char at caret and triggers browser's native beforeinput & input
-    document.execCommand('insertText', false, char);
+    const lower = char.toLowerCase();
 
-    let delay = Math.floor(Math.random() * 25) + 18; // 18ms - 43ms natural human speed
+    // Intentional typo simulation: type adjacent key, pause, backspace, type correct
+    if (typoIndices.includes(i) && QWERTY_NEIGHBORS[lower]) {
+      const neighbors = QWERTY_NEIGHBORS[lower];
+      const wrongChar = neighbors[Math.floor(Math.random() * neighbors.length)];
+      const isUpper = char !== lower;
+      const typoTyped = isUpper ? wrongChar.toUpperCase() : wrongChar;
+
+      // Type the mistaken character
+      document.execCommand('insertText', false, typoTyped);
+      
+      // Human reaction pause: notice the mistake
+      const reactionDelay = Math.floor(Math.random() * 160) + 200; // 200ms - 360ms
+      await sleep(reactionDelay);
+
+      if (isWorkflowAborted) return;
+
+      // Backspace to erase mistake
+      document.execCommand('delete', false, null);
+      
+      // Pause before correcting
+      await sleep(Math.floor(Math.random() * 90) + 110); // 110ms - 200ms
+
+      if (isWorkflowAborted) return;
+
+      // Now type the correct letter
+      document.execCommand('insertText', false, char);
+    } else {
+      // Normal typing
+      document.execCommand('insertText', false, char);
+    }
+
+    // Realistic human cadence & pauses
+    let delay = Math.floor(Math.random() * 40) + 40; // 40ms - 80ms human keystroke
     if (char === '.' || char === '!' || char === '?') {
-      delay += 110;
-    } else if (char === ',' || char === ' ') {
-      delay += 35;
+      delay += Math.floor(Math.random() * 150) + 220; // 220ms - 370ms sentence end pause
+    } else if (char === ',' || char === ';') {
+      delay += Math.floor(Math.random() * 80) + 120; // 120ms - 200ms comma pause
+    } else if (char === ' ') {
+      delay += Math.floor(Math.random() * 45) + 35; // word pause
     } else if (char === '\n') {
-      delay += 120;
+      delay += 250;
     }
 
     await sleep(delay);
   }
 
-  // 3. Safety check: ensure editor text was not corrupted by 3rd party autocomplete extensions
+  // 5. Final check to ensure entire text is intact
   if (!isWorkflowAborted && editor.innerText) {
     const current = editor.innerText.trim();
     const target = text.trim();
-    if (current.length > target.length + 10 || current.length < target.length - 10) {
+    if (Math.abs(current.length - target.length) > 5) {
       document.execCommand('selectAll', false, null);
       document.execCommand('insertText', false, text);
     }
   }
 
-  // 4. Fire final input event to guarantee Twitter's React/Lexical submit button is enabled
+  // 6. Dispatch events for Twitter Lexical editor
   editor.dispatchEvent(new Event('input', { bubbles: true }));
+  editor.dispatchEvent(new Event('change', { bubbles: true }));
   await sleep(400);
 }
 
@@ -396,10 +487,48 @@ async function executeAutonomousTweetWorkflow(params) {
 
   if (isWorkflowAborted) return { success: false, aborted: true, performed };
 
-  // 7. Auto-Comment Action with Human-Like Typing
-  if (shouldComment && replyText && !isWorkflowAborted) {
+  // 7. Auto-Comment Action with Live Contextual AI Generation & Human-Like Typing
+  if (shouldComment && !isWorkflowAborted) {
     try {
-      // Look for reply input or click reply button on MAIN post
+      // Step A: Extract the REAL TWEET TEXT directly from Twitter DOM
+      const tweetData = extractTweetData(mainArticle);
+      const liveTweetText = (tweetData.text || '').trim();
+      const liveAuthor = tweetData.authorHandle || tweetData.authorName || params.tweetAuthor || '@user';
+
+      let commentToPost = params.replyText;
+
+      // Generate reply using the REAL tweet content from the page DOM
+      if (!commentToPost || params.generateContextual !== false) {
+        const backendUrl = params.backendUrl || 'http://localhost:5000';
+        try {
+          console.log('[ATOMX] Generating live contextual AI reply for post:', liveTweetText.slice(0, 100));
+          const aiResp = await fetch(`${backendUrl}/api/generate-reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tweetText: liveTweetText || params.tweetUrl || '',
+              tweetAuthor: liveAuthor,
+              style: params.style || 'CT Human Reply',
+              stylePrompt: params.stylePrompt || null
+            })
+          });
+          if (aiResp.ok) {
+            const aiData = await aiResp.json();
+            if (aiData.reply) {
+              commentToPost = aiData.reply;
+              console.log('[ATOMX] Live AI reply received:', commentToPost);
+            }
+          }
+        } catch (genErr) {
+          console.warn('[ATOMX] Error calling backend for live reply:', genErr);
+        }
+      }
+
+      if (!commentToPost) {
+        commentToPost = 'Spot on insight. Focused execution is key.';
+      }
+
+      // Step B: Look for reply input or click reply button on MAIN post
       let textarea = document.querySelector('div[data-testid="tweetTextarea_0"]');
       if (!textarea) {
         const replyBtn = mainArticle.querySelector('button[data-testid="reply"]') || document.querySelector('button[data-testid="reply"]');
@@ -411,23 +540,23 @@ async function executeAutonomousTweetWorkflow(params) {
 
       textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 5000);
       if (textarea) {
-        // Human-like letter-by-letter typing animation into the reply box
-        await typeTextHumanLike(textarea, replyText);
+        // Step C: Focus textarea, place cursor, and type letter-by-letter with typo and backspace correction
+        await typeTextHumanLike(textarea, commentToPost);
 
         if (isWorkflowAborted) {
           return { success: false, aborted: true, performed };
         }
 
-        await sleep(500);
+        await sleep(700);
 
-        // Click Tweet / Reply submit button
+        // Step D: Click Tweet / Reply submit button
         const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
                           document.querySelector('button[data-testid="tweetButton"]');
         if (submitBtn) {
           submitBtn.removeAttribute('disabled');
           submitBtn.click();
-          performed.push('Human Typed & Commented 💬');
-          await sleep(900);
+          performed.push(`Human Typed & Commented: "${commentToPost}" 💬`);
+          await sleep(1000);
         }
       }
     } catch (e) {

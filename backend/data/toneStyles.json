@@ -2,6 +2,12 @@
   "maxCustomTemplatesPerUser": 2,
   "defaultTones": [
     {
+      "id": "ct-human",
+      "name": "CT Human Reply",
+      "description": "Authentic Crypto Twitter peer reply: highly contextual, genuine, adapts to milestones or banter",
+      "prompt": "Write a highly authentic, natural human reply to the post as a Crypto Twitter (CT) community member.\nCRITICAL CONTEXT ADAPTATION: If the post is personal (birthday, milestone, achievement, or struggle), congratulate or empathize genuinely based on what they actually wrote. If technical/crypto, provide relatable builder thoughts.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 12 words.\nLANGUAGE: Match the post's language exactly.\nSTYLE: Sound like an authentic human friend/peer. Zero robotic AI clichés, no generic hype, no irrelevant market talk on personal posts.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no preamble."
+    },
+    {
       "id": "bullish-short",
       "name": "Bullish (5-10 words)",
       "description": "Strictly 5-10 words positive bullish community comment, matching language, zero clichés or emojis",

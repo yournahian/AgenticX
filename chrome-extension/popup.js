@@ -13,6 +13,11 @@ let state = {
   selectedToneId: 'bullish-short',
   defaultTones: [
     {
+      id: 'ct-human',
+      name: 'CT Human Reply',
+      prompt: 'Write a highly authentic, natural human reply to the post as a Crypto Twitter (CT) community member.\nCRITICAL CONTEXT ADAPTATION: If the post is personal (birthday, milestone, achievement, or struggle), congratulate or empathize genuinely based on what they actually wrote. If technical/crypto, provide relatable builder thoughts.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 12 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human friend/peer. Zero robotic AI clichés, no generic hype, no irrelevant market talk on personal posts.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no preamble.'
+    },
+    {
       id: 'bullish-short',
       name: 'Bullish (5-10 words)',
       prompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no dashes, no preamble, no exclamation marks (!).'
@@ -1497,35 +1502,19 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
       const indexStr = `[${i + 1}/${total}]`;
       logger(`Processing ${indexStr}`, `Visiting ${t.canonicalUrl}... Checking actions.`, `${i + 1}/${total}`);
 
-      let replyText = '';
-      if (actions.comment) {
-        try {
-          const resp = await fetch(`${backendUrl}/api/generate-reply`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              tweetText: t.canonicalUrl,
-              tweetAuthor: t.handle,
-              style: state.selectedTone,
-              stylePrompt: state.selectedTonePrompt
-            })
-          });
-          if (resp.ok) {
-            const d = await resp.json();
-            replyText = d.reply;
-          }
-        } catch (e) {
-          replyText = 'High-signal insight. Execution velocity and clarity are key.';
-        }
-      }
-
       if (state.isAborted) {
         logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
         break;
       }
 
       try {
-        const outcome = await runAutonomousActionOnTweet(t.canonicalUrl, actions, replyText);
+        const outcome = await runAutonomousActionOnTweet(t.canonicalUrl, actions, {
+          backendUrl,
+          style: state.selectedTone,
+          stylePrompt: state.selectedTonePrompt,
+          tweetAuthor: t.handle,
+          generateContextual: actions.comment
+        });
 
         if (state.isAborted) {
           logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
@@ -1596,7 +1585,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
 }
 
 // Opens tab (or targets active tab) and sends command to content script
-async function runAutonomousActionOnTweet(tweetUrl, actions, replyText) {
+async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
   let targetTabId = null;
   let shouldClose = false;
 
@@ -1617,11 +1606,24 @@ async function runAutonomousActionOnTweet(tweetUrl, actions, replyText) {
     throw new Error('No valid tweet URL or active Twitter tab found.');
   }
 
+  const replyText = typeof options === 'string' ? options : (options.replyText || '');
+  const style = typeof options === 'object' ? (options.style || state.selectedTone) : state.selectedTone;
+  const stylePrompt = typeof options === 'object' ? (options.stylePrompt || state.selectedTonePrompt) : state.selectedTonePrompt;
+  const backendUrl = typeof options === 'object' ? (options.backendUrl || await getBackendUrl()) : await getBackendUrl();
+  const tweetAuthor = typeof options === 'object' ? (options.tweetAuthor || '') : '';
+  const generateContextual = typeof options === 'object' ? (options.generateContextual !== false && !replyText) : false;
+
   const result = await new Promise((resolve) => {
     chrome.tabs.sendMessage(targetTabId, {
       type: 'EXECUTE_AUTONOMOUS_ENGAGEMENT',
       actions,
-      replyText
+      replyText,
+      style,
+      stylePrompt,
+      backendUrl,
+      tweetAuthor,
+      tweetUrl,
+      generateContextual
     }, (response) => {
       if (chrome.runtime?.lastError) {
         resolve({ success: false, error: chrome.runtime.lastError.message });
