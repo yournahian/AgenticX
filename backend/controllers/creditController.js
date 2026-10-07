@@ -4,29 +4,37 @@
  */
 const db = require('../config/db');
 
-exports.getBalance = (req, res) => {
-  const userId = Number(req.headers['x-user-id'] || 1);
-  const user = db.getUserById(userId);
+exports.getBalance = async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const user = await db.getUserById(userId);
 
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      userId: user.id,
+      credits: user.credits || 0,
+      maxCredits: user.credits || 10000,
+      plan: user.plan_tier || 'Growth Plan',
+      rule: '1 Credit = 1 AI Reply'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  res.json({
-    userId: user.id,
-    credits: user.credits,
-    maxCredits: user.max_credits,
-    plan: user.plan_tier,
-    rule: '1 Credit = 1 AI Reply'
-  });
 };
 
-exports.getLedger = (req, res) => {
-  const userId = Number(req.headers['x-user-id'] || 1);
-  const ledger = db.getLedger(userId);
+exports.getLedger = async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const ledger = await db.getLedger(userId);
 
-  res.json({
-    userId,
-    ledger
-  });
+    res.json({
+      userId,
+      ledger
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };

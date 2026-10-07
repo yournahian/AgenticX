@@ -48,7 +48,7 @@ exports.generateReply = async (req, res) => {
   }
 
   // 1. Check user status & credits server-side
-  const user = db.getUserById(userId);
+  const user = await db.getUserById(userId);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
@@ -57,7 +57,7 @@ exports.generateReply = async (req, res) => {
     return res.status(403).json({ error: 'Account suspended. AI generation disabled.' });
   }
 
-  if (user.credits < 1) {
+  if ((user.credits || 0) < 1) {
     return res.status(402).json({
       error: 'Insufficient credits',
       message: 'You have 0 credits remaining. Upgrade to Growth ($12/mo) or Pro ($29/mo) to continue generating.',
@@ -95,7 +95,7 @@ exports.generateReply = async (req, res) => {
     });
 
     // 3. Atomically deduct 1 Credit and write to Credits Ledger
-    const remainingCredits = db.deductCredit(
+    const remainingCredits = await db.deductCredit(
       userId,
       1,
       'AI Reply',

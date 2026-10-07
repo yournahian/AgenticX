@@ -1,321 +1,274 @@
 /**
- * ATOMX ENGAGE — EMBEDDED PERSISTENT DATABASE ENGINE
- * Implements atomic credit math, ledger auditing, and relational storage.
+ * ATOMX ENGAGE — DATABASE ENGINE (SUPABASE POSTGRESQL)
+ * Completely eliminates SQLite dependency for 100% serverless Vercel compatibility.
+ * All math, ledger logging, and operations are cloud-persisted in Supabase.
  */
 
-const { DatabaseSync } = require('node:sqlite');
-const path = require('path');
-const fs = require('fs');
+const supabase = require('./supabase');
 
-const dbPath = path.join(__dirname, '..', 'atomx.db');
-const db = new DatabaseSync(dbPath);
-
-// Enable WAL mode & foreign keys for high reliability
-db.exec('PRAGMA foreign_keys = ON;');
-
-// Initialize Tables
-function initDatabase() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      full_name TEXT NOT NULL,
-      handle TEXT,
-      role TEXT DEFAULT 'USER',
-      status TEXT DEFAULT 'ACTIVE',
-      plan_tier TEXT DEFAULT 'Growth Plan',
-      credits INTEGER DEFAULT 10000,
-      max_credits INTEGER DEFAULT 10000,
-      avatar_initials TEXT DEFAULT 'AC',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS credits_ledger (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      amount INTEGER NOT NULL,
-      balance_after INTEGER NOT NULL,
-      action TEXT NOT NULL,
-      admin_source TEXT DEFAULT 'System',
-      reason TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS access_requests (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      full_name TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      use_case TEXT,
-      status TEXT DEFAULT 'PENDING',
-      initial_credits_granted INTEGER DEFAULT 100,
-      requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      reviewed_at DATETIME
-    );
-
-    CREATE TABLE IF NOT EXISTS campaigns (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      provider TEXT DEFAULT 'OpenAI',
-      reply_style TEXT DEFAULT 'Natural & Concise',
-      pacing_delay_sec INTEGER DEFAULT 12,
-      break_after_count INTEGER DEFAULT 30,
-      break_duration_sec INTEGER DEFAULT 60,
-      is_running INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS reply_queue (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      campaign_id INTEGER,
-      user_id INTEGER NOT NULL,
-      tweet_author TEXT NOT NULL,
-      tweet_handle TEXT NOT NULL,
-      tweet_content TEXT NOT NULL,
-      reply_content TEXT,
-      status TEXT DEFAULT 'WAITING',
-      credit_cost INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      completed_at DATETIME,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS plans (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      price_monthly REAL NOT NULL,
-      credits_monthly INTEGER NOT NULL,
-      is_popular INTEGER DEFAULT 0,
-      features_json TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      plan_id TEXT NOT NULL,
-      amount_usd REAL NOT NULL,
-      credits_added INTEGER NOT NULL,
-      status TEXT DEFAULT 'COMPLETED',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS engaged_tweets (
-      tweet_id TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      handle TEXT,
-      canonical_url TEXT,
-      action_type TEXT DEFAULT 'REPLY',
-      engaged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-  `);
-
-  seedInitialData();
-}
-
-// Seed baseline data if fresh
-function seedInitialData() {
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-  if (userCount === 0) {
-    console.log('[DB] Initializing database with Admin account and plans...');
-
-    // Single Root Admin User (Evan Jawad)
-    const insertUser = db.prepare(`
-      INSERT INTO users (email, password_hash, full_name, handle, role, status, plan_tier, credits, max_credits, avatar_initials)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    insertUser.run('evan@atomx.io', 'hashed_pass_evan', 'Evan Jawad', '@evanjawadx', 'ADMIN', 'ACTIVE', 'Admin', 10000, 10000, 'EJ');
-
-    // Real System Pricing Plans
-    const insertPlan = db.prepare(`
-      INSERT INTO plans (id, name, price_monthly, credits_monthly, is_popular, features_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    insertPlan.run('free', 'FREE', 0, 100, 0, JSON.stringify(['100 AI replies', 'Basic reply styles', 'Reply queue', 'Basic history']));
-    insertPlan.run('growth', 'GROWTH', 12, 10000, 1, JSON.stringify(['10,000 AI replies', 'All reply styles', 'Advanced queue', 'Full history', 'Priority generation']));
-    insertPlan.run('pro', 'PRO', 29, 25000, 0, JSON.stringify(['25,000 AI replies', 'Premium AI models', 'Advanced agents', 'Priority generation', 'Advanced analytics']));
-
-    console.log('[DB] Initialization completed (clean, zero dummy data).');
+// Helper to resolve user UUID from either UUID or numeric fallback (e.g. 1)
+async function resolveUser(userIdOrId) {
+  if (!supabase) return null;
+  
+  // If valid UUID format
+  const isUuid = typeof userIdOrId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userIdOrId);
+  if (isUuid) {
+    const { data } = await supabase.from('users').select('*').eq('id', userIdOrId).maybeSingle();
+    if (data) return data;
   }
-}
 
-initDatabase();
+  // Fallback: Default to admin or first user
+  const { data } = await supabase.from('users').select('*').order('created_at', { ascending: true }).limit(1);
+  return data?.[0] || null;
+}
 
 module.exports = {
-  db,
-  
+  // Direct client access if needed
+  db: supabase,
+
   // User Helpers
-  getUserById(id) {
-    return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  },
-  
-  getUserByEmail(email) {
-    return db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  async getUserById(id) {
+    return await resolveUser(id);
   },
 
-  getAllUsers() {
-    return db.prepare('SELECT id, full_name, email, handle, role, status, plan_tier, credits, max_credits, avatar_initials, created_at FROM users ORDER BY id ASC').all();
+  async getUserByEmail(email) {
+    if (!supabase) return null;
+    const { data } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+    return data || null;
   },
 
-  updateUserStatus(userId, status) {
-    return db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, userId);
+  async getAllUsers() {
+    if (!supabase) return [];
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, full_name, email, handle, role, status, plan_tier, credits, avatar_initials, created_at')
+      .order('created_at', { ascending: true });
+    return data || [];
+  },
+
+  async updateUserStatus(userId, status) {
+    const user = await resolveUser(userId);
+    if (!user) throw new Error('User not found');
+    const { data, error } = await supabase.from('users').update({ status }).eq('id', user.id).select();
+    if (error) throw new Error(error.message);
+    return data?.[0];
   },
 
   // Atomic Server-Side Credit Math (Rule: 1 Credit = 1 AI reply)
-  deductCredit(userId, amount = 1, action = 'AI Reply', reason = 'Generated reply') {
-    const user = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
+  async deductCredit(userId, amount = 1, action = 'AI Reply', reason = 'Generated reply') {
+    const user = await resolveUser(userId);
     if (!user) throw new Error('User not found');
-    if (user.credits < amount) throw new Error('Insufficient credits');
+    if ((user.credits || 0) < amount) throw new Error('Insufficient credits');
 
     const newBalance = user.credits - amount;
-    db.prepare('UPDATE users SET credits = ? WHERE id = ?').run(newBalance, userId);
+    const { error: updateErr } = await supabase.from('users').update({ credits: newBalance }).eq('id', user.id);
+    if (updateErr) throw new Error(updateErr.message);
 
-    db.prepare(`
-      INSERT INTO credits_ledger (user_id, amount, balance_after, action, admin_source, reason)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(userId, -amount, newBalance, action, 'Server System', reason);
+    // Record immutable audit ledger entry
+    await supabase.from('credits_ledger').insert({
+      user_id: user.id,
+      amount: -amount,
+      balance_after: newBalance,
+      action,
+      admin_source: 'Server System',
+      reason
+    });
 
     return newBalance;
   },
 
-  addCredits(userId, amount, action = 'Bonus', adminSource = 'Admin', reason = 'Credit adjustment') {
-    const user = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
+  async addCredits(userId, amount, action = 'Bonus', adminSource = 'Admin', reason = 'Credit adjustment') {
+    const user = await resolveUser(userId);
     if (!user) throw new Error('User not found');
 
-    const newBalance = user.credits + amount;
-    db.prepare('UPDATE users SET credits = ? WHERE id = ?').run(newBalance, userId);
+    const newBalance = (user.credits || 0) + amount;
+    const { error: updateErr } = await supabase.from('users').update({ credits: newBalance }).eq('id', user.id);
+    if (updateErr) throw new Error(updateErr.message);
 
-    db.prepare(`
-      INSERT INTO credits_ledger (user_id, amount, balance_after, action, admin_source, reason)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(userId, amount, newBalance, action, adminSource, reason);
+    await supabase.from('credits_ledger').insert({
+      user_id: user.id,
+      amount,
+      balance_after: newBalance,
+      action,
+      admin_source: adminSource,
+      reason
+    });
 
     return newBalance;
   },
 
-  getLedger(userId) {
-    return db.prepare('SELECT * FROM credits_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 50').all(userId);
+  async getLedger(userId) {
+    const user = await resolveUser(userId);
+    if (!user) return [];
+    const { data } = await supabase
+      .from('credits_ledger')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    return data || [];
   },
 
-  getAllLedger() {
-    return db.prepare(`
-      SELECT l.*, u.full_name as user_name, u.email as user_email
-      FROM credits_ledger l
-      JOIN users u ON l.user_id = u.id
-      ORDER BY l.id DESC
-      LIMIT 100
-    `).all();
+  async getAllLedger() {
+    if (!supabase) return [];
+    const { data } = await supabase
+      .from('credits_ledger')
+      .select('*, users(full_name, email)')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    return (data || []).map(l => ({
+      ...l,
+      user_name: l.users?.full_name || 'System User',
+      user_email: l.users?.email || 'user@atomx.io'
+    }));
   },
 
   // Access Requests & Approval
-  getAccessRequests() {
-    return db.prepare('SELECT * FROM access_requests ORDER BY requested_at DESC').all();
+  async getAccessRequests() {
+    if (!supabase) return [];
+    const { data } = await supabase.from('access_requests').select('*').order('requested_at', { ascending: false });
+    return data || [];
   },
 
-  createAccessRequest(fullName, email, useCase) {
-    return db.prepare(`
-      INSERT INTO access_requests (full_name, email, use_case, status, initial_credits_granted)
-      VALUES (?, ?, ?, 'PENDING', 100)
-    `).run(fullName, email, useCase);
+  async createAccessRequest(fullName, email, useCase) {
+    if (!supabase) throw new Error('Database not connected');
+    const { data, error } = await supabase.from('access_requests').insert({
+      full_name: fullName,
+      email,
+      use_case: useCase,
+      status: 'PENDING',
+      initial_credits_granted: 100
+    }).select();
+    if (error) throw new Error(error.message);
+    return data?.[0];
   },
 
-  approveAccessRequest(requestId) {
-    const req = db.prepare('SELECT * FROM access_requests WHERE id = ?').get(requestId);
+  async approveAccessRequest(requestId) {
+    if (!supabase) throw new Error('Database not connected');
+    const { data: req } = await supabase.from('access_requests').select('*').eq('id', requestId).maybeSingle();
     if (!req) throw new Error('Access request not found');
 
     // Create user with 100 initial free credits
     const initials = req.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'US';
-    const result = db.prepare(`
-      INSERT INTO users (email, password_hash, full_name, handle, role, status, plan_tier, credits, max_credits, avatar_initials)
-      VALUES (?, ?, ?, ?, 'USER', 'ACTIVE', 'Free Plan', 100, 100, ?)
-    `).run(req.email, 'approved_hash', req.full_name, '@' + req.email.split('@')[0], initials);
+    const { data: newUser, error: userErr } = await supabase.from('users').insert({
+      email: req.email,
+      password_hash: 'approved_hash',
+      full_name: req.full_name,
+      handle: '@' + req.email.split('@')[0],
+      role: 'USER',
+      status: 'ACTIVE',
+      plan_tier: 'Free Plan',
+      credits: 100,
+      avatar_initials: initials
+    }).select().single();
 
-    const newUserId = result.lastInsertRowid;
+    if (userErr) throw new Error(userErr.message);
 
     // Record initial grant in ledger
-    db.prepare(`
-      INSERT INTO credits_ledger (user_id, amount, balance_after, action, admin_source, reason)
-      VALUES (?, 100, 100, 'Initial Grant', 'Admin Approval', 'Approved free onboarding: 100 free credits')
-    `).run(newUserId);
+    await supabase.from('credits_ledger').insert({
+      user_id: newUser.id,
+      amount: 100,
+      balance_after: 100,
+      action: 'Initial Grant',
+      admin_source: 'Admin Approval',
+      reason: 'Approved free onboarding: 100 free credits'
+    });
 
     // Update request status
-    db.prepare(`
-      UPDATE access_requests
-      SET status = 'APPROVED', reviewed_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(requestId);
+    await supabase.from('access_requests').update({
+      status: 'APPROVED',
+      reviewed_at: new Date().toISOString()
+    }).eq('id', requestId);
 
-    return { userId: newUserId, credits: 100 };
+    return { userId: newUser.id, credits: 100 };
   },
 
   // Campaigns & Queue
-  getCampaigns(userId) {
-    return db.prepare('SELECT * FROM campaigns WHERE user_id = ?').all(userId);
+  async getCampaigns(userId) {
+    const user = await resolveUser(userId);
+    if (!user) return [];
+    const { data } = await supabase.from('campaigns').select('*').eq('user_id', user.id);
+    return data || [];
   },
 
-  getQueue(userId) {
-    return db.prepare('SELECT * FROM reply_queue WHERE user_id = ? ORDER BY id DESC').all(userId);
+  async getQueue(userId) {
+    const user = await resolveUser(userId);
+    if (!user) return [];
+    const { data } = await supabase.from('reply_queue').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+    return data || [];
   },
 
-  addToQueue(userId, campaignId, author, handle, content) {
-    return db.prepare(`
-      INSERT INTO reply_queue (campaign_id, user_id, tweet_author, tweet_handle, tweet_content, status)
-      VALUES (?, ?, ?, ?, ?, 'WAITING')
-    `).run(campaignId, userId, author, handle, content);
+  async addToQueue(userId, campaignId, author, handle, content) {
+    const user = await resolveUser(userId);
+    if (!user) throw new Error('User not found');
+    const { data, error } = await supabase.from('reply_queue').insert({
+      campaign_id: campaignId || null,
+      user_id: user.id,
+      tweet_author: author,
+      tweet_handle: handle,
+      tweet_content: content,
+      status: 'WAITING'
+    }).select();
+    if (error) throw new Error(error.message);
+    return data?.[0];
   },
 
   // Plans & Transactions
-  getPlans() {
-    return db.prepare('SELECT * FROM plans').all();
+  async getPlans() {
+    if (!supabase) return [];
+    const { data } = await supabase.from('plans').select('*');
+    return (data || []).map(p => ({
+      ...p,
+      features_json: JSON.stringify(p.features || [])
+    }));
   },
 
-  getTransactions() {
-    return db.prepare(`
-      SELECT t.*, u.full_name as user_name, u.email as user_email
-      FROM transactions t
-      JOIN users u ON t.user_id = u.id
-      ORDER BY t.created_at DESC
-    `).all();
+  async getTransactions() {
+    if (!supabase) return [];
+    const { data } = await supabase.from('transactions').select('*, users(full_name, email)').order('created_at', { ascending: false });
+    return (data || []).map(t => ({
+      ...t,
+      user_name: t.users?.full_name || 'Customer',
+      user_email: t.users?.email || 'customer@atomx.io'
+    }));
   },
 
-  // Engaged Tweets Tracking
-  getEngagedTweetIds(userId = 1) {
-    const rows = db.prepare('SELECT tweet_id FROM engaged_tweets WHERE user_id = ?').all(userId);
-    return rows.map(r => r.tweet_id);
+  // Engaged Tweets Tracking (Anti-Duplicate & 2nd Account Isolation)
+  async getEngagedTweetIds(userId = '1') {
+    if (!supabase) return [];
+    const { data } = await supabase.from('engaged_tweets').select('tweet_id').eq('user_id', String(userId));
+    return (data || []).map(r => r.tweet_id);
   },
 
-  isTweetEngaged(tweetId, userId = 1) {
-    const row = db.prepare('SELECT tweet_id FROM engaged_tweets WHERE tweet_id = ? AND user_id = ?').get(String(tweetId), userId);
-    return !!row;
+  async isTweetEngaged(tweetId, userId = '1') {
+    if (!supabase) return false;
+    const { data } = await supabase.from('engaged_tweets').select('tweet_id').eq('tweet_id', String(tweetId)).eq('user_id', String(userId)).maybeSingle();
+    return !!data;
   },
 
-  markTweetsEngaged(tweets, userId = 1) {
-    const stmt = db.prepare(`
-      INSERT OR IGNORE INTO engaged_tweets (tweet_id, user_id, handle, canonical_url, action_type)
-      VALUES (?, ?, ?, ?, ?)
-    `);
+  async markTweetsEngaged(tweets, userId = '1') {
+    if (!supabase) return;
     const list = Array.isArray(tweets) ? tweets : [tweets];
+    const rows = [];
     for (const t of list) {
       const id = t?.tweetId || t?.tweet_id || t?.id;
       if (!id) continue;
-      stmt.run(
-        String(id),
-        userId,
-        t.handle || '@creator',
-        t.canonicalUrl || t.canonical_url || '',
-        t.actionType || t.action_type || 'REPLY'
-      );
+      rows.push({
+        tweet_id: String(id),
+        user_id: String(userId),
+        handle: t.handle || '@creator',
+        canonical_url: t.canonicalUrl || t.canonical_url || '',
+        action_type: t.actionType || t.action_type || 'REPLY'
+      });
+    }
+    if (rows.length > 0) {
+      await supabase.from('engaged_tweets').upsert(rows, { onConflict: 'tweet_id' });
     }
   },
 
-  clearEngagedTweets(userId = 1) {
-    db.prepare('DELETE FROM engaged_tweets WHERE user_id = ?').run(userId);
+  async clearEngagedTweets(userId = '1') {
+    if (!supabase) return;
+    await supabase.from('engaged_tweets').delete().eq('user_id', String(userId));
   }
 };

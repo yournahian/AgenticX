@@ -1,37 +1,49 @@
 /**
- * ATOMX ENGAGE — ADMIN CONTROL CENTER CONTROLLER
+ * ATOMX ENGAGE — ADMIN CONTROL CENTER CONTROLLER (SUPABASE PERSISTENT)
  * Screens 12, 13, 14, 15, 16, 17
  */
 const db = require('../config/db');
 
-exports.getUsers = (req, res) => {
-  const users = db.getAllUsers();
-  res.json({ users });
+exports.getUsers = async (req, res) => {
+  try {
+    const users = await db.getAllUsers();
+    res.json({ users });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-exports.toggleUserStatus = (req, res) => {
+exports.toggleUserStatus = async (req, res) => {
   const { userId, status } = req.body;
   if (!userId || !['ACTIVE', 'SUSPENDED'].includes(status)) {
     return res.status(400).json({ error: 'Valid userId and status (ACTIVE/SUSPENDED) required' });
   }
 
-  db.updateUserStatus(Number(userId), status);
-  res.json({ message: `User status updated to ${status}`, userId, status });
+  try {
+    await db.updateUserStatus(userId, status);
+    res.json({ message: `User status updated to ${status}`, userId, status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-exports.getAccessRequests = (req, res) => {
-  const requests = db.getAccessRequests();
-  res.json({ requests });
+exports.getAccessRequests = async (req, res) => {
+  try {
+    const requests = await db.getAccessRequests();
+    res.json({ requests });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-exports.approveRequest = (req, res) => {
+exports.approveRequest = async (req, res) => {
   const { requestId } = req.body;
   if (!requestId) {
     return res.status(400).json({ error: 'requestId is required' });
   }
 
   try {
-    const result = db.approveAccessRequest(Number(requestId));
+    const result = await db.approveAccessRequest(requestId);
     res.json({
       message: 'Access request approved! User created and 100 free credits automatically allocated.',
       userId: result.userId,
@@ -42,14 +54,14 @@ exports.approveRequest = (req, res) => {
   }
 };
 
-exports.adjustCredits = (req, res) => {
+exports.adjustCredits = async (req, res) => {
   const { userId, amount, action = 'Admin Adjustment', reason = 'Manual credit update' } = req.body;
   if (!userId || typeof amount !== 'number') {
     return res.status(400).json({ error: 'Valid userId and numeric amount required' });
   }
 
   try {
-    const newBalance = db.addCredits(Number(userId), amount, action, 'Admin Control Panel', reason);
+    const newBalance = await db.addCredits(userId, amount, action, 'Admin Control Panel', reason);
     res.json({
       message: 'Credit adjustment successful',
       userId,
@@ -60,33 +72,46 @@ exports.adjustCredits = (req, res) => {
   }
 };
 
-exports.getPlans = (req, res) => {
-  const plans = db.getPlans().map(p => ({
-    ...p,
-    features: JSON.parse(p.features_json)
-  }));
-  res.json({ plans });
+exports.getPlans = async (req, res) => {
+  try {
+    const rawPlans = await db.getPlans();
+    const plans = rawPlans.map(p => ({
+      ...p,
+      features: typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || JSON.parse(p.features_json || '[]'))
+    }));
+    res.json({ plans });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-exports.getGlobalLedger = (req, res) => {
-  const ledger = db.getAllLedger();
-  res.json({ ledger });
+exports.getGlobalLedger = async (req, res) => {
+  try {
+    const ledger = await db.getAllLedger();
+    res.json({ ledger });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-exports.getStats = (req, res) => {
-  const users = db.getAllUsers();
-  const requests = db.getAccessRequests();
-  const ledger = db.getAllLedger();
+exports.getStats = async (req, res) => {
+  try {
+    const users = await db.getAllUsers();
+    const requests = await db.getAccessRequests();
+    const ledger = await db.getAllLedger();
 
-  res.json({
-    totalUsers: users.length,
-    activeUsers: users.filter(u => u.status === 'ACTIVE').length,
-    suspendedUsers: users.filter(u => u.status === 'SUSPENDED').length,
-    pendingRequests: requests.filter(r => r.status === 'PENDING').length,
-    totalCreditsCirculating: users.reduce((acc, u) => acc + (u.credits || 0), 0),
-    totalAIGenerations: ledger.filter(l => l.action === 'AI Reply').length,
-    mrr: '$0'
-  });
+    res.json({
+      totalUsers: users.length,
+      activeUsers: users.filter(u => u.status === 'ACTIVE').length,
+      suspendedUsers: users.filter(u => u.status === 'SUSPENDED').length,
+      pendingRequests: requests.filter(r => r.status === 'PENDING').length,
+      totalCreditsCirculating: users.reduce((acc, u) => acc + (u.credits || 0), 0),
+      totalAIGenerations: ledger.filter(l => l.action === 'AI Reply').length,
+      mrr: '$0'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 const fs = require('fs');

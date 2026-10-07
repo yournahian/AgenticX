@@ -1,54 +1,62 @@
 /**
- * ATOMX ENGAGE — AUTH CONTROLLER
+ * ATOMX ENGAGE — AUTH CONTROLLER (SUPABASE PERSISTENT)
  */
 const db = require('../config/db');
 
-exports.login = (req, res) => {
-  const { email = 'alex@atomx.io', password } = req.body;
-  let user = db.getUserByEmail(email);
+exports.login = async (req, res) => {
+  try {
+    const { email = 'evan@atomx.io', password } = req.body;
+    let user = await db.getUserByEmail(email);
 
-  if (!user) {
-    // Default fallback to first active user
-    user = db.getUserById(1);
-  }
-
-  if (user.status === 'SUSPENDED') {
-    return res.status(403).json({
-      error: 'Account Suspended',
-      message: 'Your account is currently suspended. Please contact support@atomx.io to appeal.'
-    });
-  }
-
-  res.json({
-    token: `atomx_session_${user.id}_${Date.now()}`,
-    user: {
-      id: user.id,
-      email: user.email,
-      fullName: user.full_name,
-      handle: user.handle,
-      role: user.role,
-      status: user.status,
-      plan: user.plan_tier,
-      credits: user.credits,
-      maxCredits: user.max_credits,
-      avatar: user.avatar_initials
+    if (!user) {
+      // Default fallback to first active user
+      user = await db.getUserById(1);
     }
-  });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.status === 'SUSPENDED') {
+      return res.status(403).json({
+        error: 'Account Suspended',
+        message: 'Your account is currently suspended. Please contact support@atomx.io to appeal.'
+      });
+    }
+
+    res.json({
+      token: `atomx_session_${user.id}_${Date.now()}`,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        handle: user.handle,
+        role: user.role,
+        status: user.status,
+        plan: user.plan_tier,
+        credits: user.credits,
+        maxCredits: user.credits,
+        avatar: user.avatar_initials
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-exports.requestAccess = (req, res) => {
+exports.requestAccess = async (req, res) => {
   const { fullName, email, useCase } = req.body;
   if (!fullName || !email) {
     return res.status(400).json({ error: 'Full name and email are required' });
   }
 
   try {
-    const existing = db.getUserByEmail(email);
+    const existing = await db.getUserByEmail(email);
     if (existing) {
       return res.status(400).json({ error: 'An account with this email already exists' });
     }
 
-    db.createAccessRequest(fullName, email, useCase || 'Engagement automation');
+    await db.createAccessRequest(fullName, email, useCase || 'Engagement automation');
     res.status(201).json({
       message: 'Access request submitted successfully. You will receive 100 free credits upon approval.',
       status: 'PENDING'
@@ -58,27 +66,30 @@ exports.requestAccess = (req, res) => {
   }
 };
 
-exports.getCurrentUser = (req, res) => {
-  // Session: user 1 (Evan Jawad - Admin Owner)
-  const userId = req.headers['x-user-id'] || 1;
-  const user = db.getUserById(Number(userId));
+exports.getCurrentUser = async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const user = await db.getUserById(userId);
 
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      handle: user.handle,
+      role: user.role,
+      status: user.status,
+      plan: user.plan_tier,
+      credits: user.credits,
+      maxCredits: user.credits,
+      avatar: user.avatar_initials
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  res.json({
-    id: user.id,
-    email: user.email,
-    fullName: user.full_name,
-    handle: user.handle,
-    role: user.role,
-    status: user.status,
-    plan: user.plan_tier,
-    credits: user.credits,
-    maxCredits: user.max_credits,
-    avatar: user.avatar_initials
-  });
 };
 
 // Admin Login using Master Access Key from .env
@@ -93,7 +104,6 @@ exports.adminLogin = (req, res) => {
     });
   }
 
-  // Generate Admin Session
   res.json({
     success: true,
     token: `atomx_admin_token_${Date.now()}`,
@@ -115,4 +125,3 @@ exports.verifyAdminKey = (req, res) => {
   const isValid = Boolean(key && key.trim() === configuredKey.trim());
   res.json({ valid: isValid });
 };
-
