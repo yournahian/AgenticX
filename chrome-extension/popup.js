@@ -974,12 +974,20 @@ function renderCreatorChips() {
 // AGENT 1: AUDIENCE BUILDER WORKFLOW ENGINE (A2, GROWTH, FULLY AUTO)
 // =========================================================================
 
-// Fallback curated lists if backend offline
+// Global Plan Check Helper
+function isUserPaidPlan(plan) {
+  const p = (plan || state.userPlan || 'Free').toLowerCase();
+  return p.includes('pro') || p.includes('growth') || p.includes('paid') || p.includes('elite') || p.includes('premium') || p.includes('tier 1') || p.includes('unlimited');
+}
+
+// Fallback curated lists if backend offline or cold start
 const FALLBACK_CURATED_LISTS = {
   audienceList1: {
     id: 'audienceList1',
     name: 'Web3 & Crypto Alpha Hunters',
     category: 'Audience Builder',
+    status: 'published',
+    accessTier: 'free',
     listUrl: '',
     targets: ['@vitalikbuterin', '@sassal0x', '@cobie', '@inversebrah', '@brian_armstrong', '@zachxbt', '@balajis']
   },
@@ -987,67 +995,117 @@ const FALLBACK_CURATED_LISTS = {
     id: 'audienceList2',
     name: 'Tech Founders & Angel VCs',
     category: 'Audience Builder',
+    status: 'published',
+    accessTier: 'paid',
     listUrl: '',
     targets: ['@elonmusk', '@sama', '@paulg', '@balajis', '@brian_armstrong']
+  },
+  sorsaTier1: {
+    id: 'sorsaTier1',
+    name: 'Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)',
+    category: 'Increase Sorsa Score',
+    status: 'published',
+    accessTier: 'paid',
+    listUrl: '',
+    targets: ['@cz_binance', '@brian_armstrong', '@aeyakovenko', '@staniKulechov', '@haydenzadams']
+  },
+  sorsaTier2: {
+    id: 'sorsaTier2',
+    name: 'Tier 2: High-Volume Ecosystem Projects',
+    category: 'Increase Sorsa Score',
+    status: 'published',
+    accessTier: 'free',
+    listUrl: '',
+    targets: ['@ethereum', '@solana', '@base', '@arbitrum', '@ton_blockchain']
+  },
+  followerList1: {
+    id: 'followerList1',
+    name: 'Viral Community Discussion Hubs',
+    category: 'Followers Increase',
+    status: 'published',
+    accessTier: 'free',
+    listUrl: '',
+    targets: ['@CryptoTownHall', '@web3comm', '@SolanaDaily', '@VitalikButerin']
   }
 };
 
-async function initAudienceBuilderSystem() {
-  const backendUrl = await getBackendUrl();
-  let lists = FALLBACK_CURATED_LISTS;
+function populateAudienceSelect() {
+  const select = document.getElementById('audienceListSelect');
+  if (!select) return;
 
-  // 1. Fetch live curated lists from Backend API
+  const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
+  select.innerHTML = '';
+  const keys = Object.keys(lists);
+  let foundAny = false;
+
+  keys.forEach((k) => {
+    const item = lists[k];
+    const isPublished = (item.status || 'published') === 'published';
+    if (item.category === 'Audience Builder' && isPublished) {
+      foundAny = true;
+      const isPaid = (item.accessTier || 'free') === 'paid';
+      const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+      const opt = document.createElement('option');
+      opt.value = k;
+      const targetCount = (item.targets || []).length;
+      opt.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
+      select.appendChild(opt);
+    }
+  });
+
+  if (!foundAny) {
+    select.innerHTML = `
+      <option value="audienceList1">⭐ Web3 & Crypto Alpha Hunters (Curated)</option>
+      <option value="audienceList2">🔒 [PRO ONLY] Tech Founders & Angel VCs (Curated · Pro)</option>
+    `;
+  }
+
+  const customOpt = document.createElement('option');
+  customOpt.value = 'custom';
+  customOpt.textContent = '➕ Add Your Own Custom Twitter List URL or Handles';
+  select.appendChild(customOpt);
+}
+
+async function initAudienceBuilderSystem() {
+  // 1. Immediately read cached lists from chrome.storage.local for instant zero-latency render
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    try {
+      const stored = await chrome.storage.local.get(['atomx_curated_lists']);
+      if (stored.atomx_curated_lists && typeof stored.atomx_curated_lists === 'object' && Object.keys(stored.atomx_curated_lists).length > 0) {
+        state.curatedLists = stored.atomx_curated_lists;
+      }
+    } catch (e) {}
+  }
+
+  if (!state.curatedLists) {
+    state.curatedLists = FALLBACK_CURATED_LISTS;
+  }
+
+  // Populate all 3 dropdowns immediately so user sees them right away
+  populateAudienceSelect();
+  initSorsaScoreSystem();
+  initFollowersListsSystem();
+
+  // 2. Fetch live curated lists from Backend API in background and refresh dropdowns
   try {
+    const backendUrl = await getBackendUrl();
     const res = await fetch(`${backendUrl}/api/curated-lists`);
     if (res.ok) {
       const data = await res.json();
       if (data && data.lists && Object.keys(data.lists).length > 0) {
-        lists = data.lists;
+        state.curatedLists = data.lists;
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({ atomx_curated_lists: data.lists });
+        }
+        // Re-render UI with fresh backend data
+        populateAudienceSelect();
+        initSorsaScoreSystem();
+        initFollowersListsSystem();
       }
     }
   } catch (e) {
     console.warn('[ATOMX] Could not sync curated lists from backend, using cache/fallback', e);
   }
-
-  state.curatedLists = lists;
-  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    chrome.storage.local.set({ atomx_curated_lists: lists });
-  }
-
-function isUserPaidPlan(plan) {
-  const p = (plan || state.userPlan || 'Free').toLowerCase();
-  return p.includes('pro') || p.includes('growth') || p.includes('paid') || p.includes('elite') || p.includes('premium') || p.includes('tier 1') || p.includes('unlimited');
-}
-
-  // 2. Populate Audience Target List Dropdown (Only Published + Category: Audience Builder)
-  const select = document.getElementById('audienceListSelect');
-  if (select) {
-    select.innerHTML = '';
-    const keys = Object.keys(lists);
-    keys.forEach((k) => {
-      const item = lists[k];
-      const isPublished = (item.status || 'published') === 'published';
-      if (item.category === 'Audience Builder' && isPublished) {
-        const isPaid = (item.accessTier || 'free') === 'paid';
-        const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
-        const opt = document.createElement('option');
-        opt.value = k;
-        const targetCount = (item.targets || []).length;
-        opt.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
-        select.appendChild(opt);
-      }
-    });
-
-    const customOpt = document.createElement('option');
-    customOpt.value = 'custom';
-    customOpt.textContent = '➕ Add Your Own Custom Twitter List URL or Handles';
-    select.appendChild(customOpt);
-  }
-
-  // Populate Sorsa Score Lists (Only Published + Category: Increase Sorsa Score)
-  await initSorsaScoreSystem();
-  // Populate Followers Increase Lists (Only Published + Category: Followers Increase)
-  await initFollowersListsSystem();
 
   // 3. Restore persisted counters, settings & queue state
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -1105,7 +1163,7 @@ function isUserPaidPlan(plan) {
   }
 }
 
-async function initSorsaScoreSystem() {
+function initSorsaScoreSystem() {
   const select = document.getElementById('sorsaTierSelect');
   if (!select) return;
 
@@ -1131,13 +1189,13 @@ async function initSorsaScoreSystem() {
 
   if (!hasPublished) {
     select.innerHTML = `
-      <option value="sorsaTier1">⭐ Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
+      <option value="sorsaTier1">🔒 [PRO ONLY] Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x · Pro)</option>
       <option value="sorsaTier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
     `;
   }
 }
 
-async function initFollowersListsSystem() {
+function initFollowersListsSystem() {
   const select = document.getElementById('followerNicheSelect');
   if (!select) return;
 
@@ -2125,6 +2183,15 @@ function openAgentDetailView(agentId) {
   const detailView = document.getElementById('agentDetailView');
   if (bentoView) bentoView.style.display = 'none';
   if (detailView) detailView.style.display = 'flex';
+
+  // Refresh dropdowns with latest lists when entering workspace
+  if (agentId === 'audience') {
+    populateAudienceSelect();
+  } else if (agentId === 'sorsa') {
+    initSorsaScoreSystem();
+  } else if (agentId === 'followers') {
+    initFollowersListsSystem();
+  }
 
   updateAgentConsole('Ready to Launch', `Workspace loaded for ${meta.title}. Set parameters above.`);
 }
