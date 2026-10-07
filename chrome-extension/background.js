@@ -3,7 +3,7 @@
  * Orchestrates extension events, context menus, and Chrome Side Panel.
  */
 
-const DEFAULT_BACKEND_URL = 'http://localhost:5000';
+const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('ATOMX ENGAGE Extension Installed successfully.');
@@ -74,9 +74,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       try {
         const [storedSync, storedLocal] = await Promise.all([
           chrome.storage.sync.get(['backendUrl']).catch(() => ({})),
-          chrome.storage.local.get(['selectedTone', 'selectedTonePrompt', 'selectedToneId']).catch(() => ({}))
+          chrome.storage.local.get(['backendUrl', 'selectedTone', 'selectedTonePrompt', 'selectedToneId']).catch(() => ({}))
         ]);
-        const backendUrl = storedSync?.backendUrl || DEFAULT_BACKEND_URL;
+        const rawBackendUrl = storedSync?.backendUrl || storedLocal?.backendUrl || DEFAULT_BACKEND_URL;
+        const backendUrl = (rawBackendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
 
         const tweetText = request.tweetText || request.tweet?.text || '';
         const tweetAuthor = request.tweetAuthor || request.tweet?.authorHandle || '@user';

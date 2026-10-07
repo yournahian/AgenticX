@@ -277,6 +277,10 @@ if (typeof window !== 'undefined') {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({ backendUrl: DEFAULT_BACKEND_URL });
+    chrome.storage.sync?.set({ backendUrl: DEFAULT_BACKEND_URL });
+  }
   initExtTheme();
   initTabs();
   await initToneSystem();

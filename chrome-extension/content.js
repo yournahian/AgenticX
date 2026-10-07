@@ -874,7 +874,7 @@ async function engageAndFollowProfile(options = {}) {
   const replyPosts = !!options.replyPosts;
   const style = options.style || 'Bullish (5-10 words)';
   const stylePrompt = options.stylePrompt || null;
-  const backendUrl = options.backendUrl || 'http://localhost:5000';
+  const backendUrl = (options.backendUrl || 'https://agenticx-two.vercel.app').replace(/\/+$/, '');
 
   let likesDone = 0;
   let replyDone = 0;

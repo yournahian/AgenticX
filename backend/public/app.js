@@ -4225,6 +4225,7 @@ async function loadAdminServerData() {
     if (keysRes && keysRes.ok) {
       const kd = await keysRes.json();
       AtomXState.adminApiKeys = kd.keys || {};
+      updateAdminApiKeyUI(AtomXState.currentProvider);
     }
 
     if (tonesRes && tonesRes.ok) {
