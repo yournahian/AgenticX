@@ -2,6 +2,8 @@
  * ATOMX ENGAGE — ADMIN CONTROL CENTER CONTROLLER (SUPABASE PERSISTENT)
  * Screens 12, 13, 14, 15, 16, 17
  */
+const fs = require('fs');
+const path = require('path');
 const db = require('../config/db');
 
 exports.getUsers = async (req, res) => {
@@ -158,8 +160,6 @@ exports.getStats = async (req, res) => {
   }
 };
 
-const fs = require('fs');
-const path = require('path');
 const curatedPath = path.join(__dirname, '../data/curatedLists.json');
 
 exports.getCuratedLists = (req, res) => {
