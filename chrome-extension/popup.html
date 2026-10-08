@@ -1084,12 +1084,16 @@
                     <span>🔁 Auto-Repost</span>
                   </label>
                   <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="tgLiveOptComment" checked>
+                    <span>💬 Auto-Comment</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
                     <input type="checkbox" id="tgLiveOptBookmark">
                     <span>🔖 Auto-Bookmark</span>
                   </label>
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer; grid-column: span 2;">
                     <input type="checkbox" id="tgLiveOptGlow" checked>
-                    <span>✨ Recording Glow</span>
+                    <span>✨ Recording Glow Effect</span>
                   </label>
                 </div>
               </div>
@@ -1122,7 +1126,7 @@
                   </div>
                   <span class="badge-mini popular" id="tgLiveTabStatus">TAB OPEN</span>
                 </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; text-align:center;">
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px; text-align:center;">
                   <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
                     <div style="font-size:10px; color:var(--text-muted);">Liked</div>
                     <div style="font-weight:800; font-size:14px; color:#EF4444;" id="tgLiveCountLiked">0</div>
@@ -1130,6 +1134,10 @@
                   <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
                     <div style="font-size:10px; color:var(--text-muted);">Reposted</div>
                     <div style="font-weight:800; font-size:14px; color:#10B981;" id="tgLiveCountReposted">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
+                    <div style="font-size:10px; color:var(--text-muted);">Commented</div>
+                    <div style="font-weight:800; font-size:14px; color:#8B5CF6;" id="tgLiveCountCommented">0</div>
                   </div>
                   <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
                     <div style="font-size:10px; color:var(--text-muted);">Bookmarked</div>

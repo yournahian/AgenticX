@@ -1413,6 +1413,7 @@ async function startTgLiveRaidWorkflow() {
   const actions = {
     like: document.getElementById('tgLiveOptLike')?.checked ?? true,
     repost: document.getElementById('tgLiveOptRepost')?.checked ?? true,
+    comment: document.getElementById('tgLiveOptComment')?.checked ?? false,
     bookmark: document.getElementById('tgLiveOptBookmark')?.checked ?? false,
     glow: document.getElementById('tgLiveOptGlow')?.checked ?? true
   };
@@ -1425,6 +1426,7 @@ async function startTgLiveRaidWorkflow() {
   const statusText = document.getElementById('tgLiveStatusText');
   const countLiked = document.getElementById('tgLiveCountLiked');
   const countReposted = document.getElementById('tgLiveCountReposted');
+  const countCommented = document.getElementById('tgLiveCountCommented');
   const countBookmarked = document.getElementById('tgLiveCountBookmarked');
 
   if (startBtn) startBtn.style.display = 'none';
@@ -1432,7 +1434,7 @@ async function startTgLiveRaidWorkflow() {
   if (statusCard) statusCard.style.display = 'block';
   if (statusText) statusText.textContent = `Starting Live Raid (Target 1 of ${tweetLinks.length})...`;
 
-  let totalLiked = 0, totalReposted = 0, totalBookmarked = 0;
+  let totalLiked = 0, totalReposted = 0, totalCommented = 0, totalBookmarked = 0;
   state.isAborted = false;
 
   updateAgentConsole('Live Raid Active', 'Recording-friendly tab created. Tab will stay open for proof recording.');
@@ -1461,7 +1463,9 @@ async function startTgLiveRaidWorkflow() {
         chrome.tabs.sendMessage(tgLiveWorkingTabId, {
           type: 'EXECUTE_LIVE_RAID_ENGAGEMENT',
           actions,
-          delay: pacingMs
+          delay: pacingMs,
+          style: state.selectedTone || 'Bullish (5-10 words)',
+          stylePrompt: state.selectedTonePrompt || null
         }, (res) => resolve(res || { success: false }));
       });
 
@@ -1469,13 +1473,15 @@ async function startTgLiveRaidWorkflow() {
         deductCredits(1);
         if (raidRes.liked) totalLiked++;
         if (raidRes.reposted) totalReposted++;
+        if (raidRes.commented) totalCommented++;
         if (raidRes.bookmarked) totalBookmarked++;
 
         if (countLiked) countLiked.textContent = String(totalLiked);
         if (countReposted) countReposted.textContent = String(totalReposted);
+        if (countCommented) countCommented.textContent = String(totalCommented);
         if (countBookmarked) countBookmarked.textContent = String(totalBookmarked);
 
-        updateAgentConsole('Raid Executed', `Live action completed on tweet ${i + 1}. Liked: ${raidRes.liked}, Reposted: ${raidRes.reposted}`);
+        updateAgentConsole('Raid Executed', `Live action completed on tweet ${i + 1}. Liked: ${raidRes.liked}, Reposted: ${raidRes.reposted}, Commented: ${raidRes.commented || false}`);
       }
 
       // Safe pacing delay so screen recording captures the full interaction
@@ -4606,7 +4612,7 @@ async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
   } else if (tweetUrl && activeTab && activeTab.url && activeTab.url.includes(tweetUrl.split('?')[0])) {
     targetTabId = activeTab.id;
   } else if (tweetUrl) {
-    const newTab = await chrome.tabs.create({ url: tweetUrl, active: false });
+    const newTab = await chrome.tabs.create({ url: tweetUrl, active: true });
     targetTabId = newTab.id;
     shouldClose = true;
     await waitForTabComplete(targetTabId);

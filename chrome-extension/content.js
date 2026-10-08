@@ -266,28 +266,33 @@ const QWERTY_NEIGHBORS = {
 
 /**
  * Human-like letter-by-letter typing with intentional typos & backspace corrections.
- * Simulates real human typing with natural cadence, blinking cursor, and accidental mistakes.
+ * Fully compatible with modern X (Twitter) DraftJS & Lexical rich-text editors.
  */
 async function typeTextHumanLike(editor, text) {
-  if (!editor || !text) return;
+  if (!editor || !text) return false;
 
   // 1. Focus editor and place blinking cursor in comment box
+  editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  await sleep(200);
+
+  editor.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+  editor.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
   editor.focus();
+  editor.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+  editor.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+  editor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  await sleep(150);
+
+  // 2. Clear editor first using Selection range and delete
   try {
     const sel = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(editor);
-    range.collapse(false);
     sel.removeAllRanges();
     sel.addRange(range);
+    document.execCommand('delete', false, null);
   } catch (e) {}
-
   await sleep(150);
-
-  // 2. Clean editor first using selectAll and delete
-  document.execCommand('selectAll', false, null);
-  document.execCommand('delete', false, null);
-  await sleep(200);
 
   // 3. Plan 1 intentional typo for realism (if text is long enough, e.g. > 15 chars)
   let typoIndices = [];
@@ -295,87 +300,239 @@ async function typeTextHumanLike(editor, text) {
     const eligibleIndices = [];
     for (let i = 5; i < text.length - 5; i++) {
       const ch = text[i].toLowerCase();
-      if (QWERTY_NEIGHBORS[ch]) {
-        eligibleIndices.push(i);
-      }
+      if (QWERTY_NEIGHBORS[ch]) eligibleIndices.push(i);
     }
     if (eligibleIndices.length > 0) {
-      // Pick 1 random position for intentional typo
-      const picked = eligibleIndices[Math.floor(Math.random() * eligibleIndices.length)];
-      typoIndices.push(picked);
+      typoIndices.push(eligibleIndices[Math.floor(Math.random() * eligibleIndices.length)]);
     }
   }
+
+  let typedOk = false;
 
   // 4. Type character by character with realistic speed & typos
-  for (let i = 0; i < text.length; i++) {
-    if (isWorkflowAborted) {
-      console.log('[ATOMX] Typing aborted by user.');
-      return;
+  try {
+    for (let i = 0; i < text.length; i++) {
+      if (isWorkflowAborted) {
+        console.log('[ATOMX] Typing aborted by user.');
+        return false;
+      }
+
+      const char = text[i];
+      const lower = char.toLowerCase();
+
+      // Intentional typo simulation: type adjacent key, pause, backspace, type correct
+      if (typoIndices.includes(i) && QWERTY_NEIGHBORS[lower]) {
+        const neighbors = QWERTY_NEIGHBORS[lower];
+        const wrongChar = neighbors[Math.floor(Math.random() * neighbors.length)];
+        const isUpper = char !== lower;
+        const typoTyped = isUpper ? wrongChar.toUpperCase() : wrongChar;
+
+        document.execCommand('insertText', false, typoTyped);
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: typoTyped }));
+
+        const reactionDelay = Math.floor(Math.random() * 120) + 160;
+        await sleep(reactionDelay);
+        if (isWorkflowAborted) return false;
+
+        document.execCommand('delete', false, null);
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
+        await sleep(Math.floor(Math.random() * 80) + 90);
+        if (isWorkflowAborted) return false;
+
+        document.execCommand('insertText', false, char);
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: char }));
+      } else {
+        document.execCommand('insertText', false, char);
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: char }));
+      }
+
+      // Realistic human cadence & pauses
+      let delay = Math.floor(Math.random() * 30) + 25;
+      if (char === '.' || char === '!' || char === '?') {
+        delay += Math.floor(Math.random() * 120) + 150;
+      } else if (char === ',' || char === ';') {
+        delay += Math.floor(Math.random() * 60) + 80;
+      } else if (char === ' ') {
+        delay += Math.floor(Math.random() * 30) + 25;
+      }
+      await sleep(delay);
     }
 
-    const char = text[i];
-    const lower = char.toLowerCase();
-
-    // Intentional typo simulation: type adjacent key, pause, backspace, type correct
-    if (typoIndices.includes(i) && QWERTY_NEIGHBORS[lower]) {
-      const neighbors = QWERTY_NEIGHBORS[lower];
-      const wrongChar = neighbors[Math.floor(Math.random() * neighbors.length)];
-      const isUpper = char !== lower;
-      const typoTyped = isUpper ? wrongChar.toUpperCase() : wrongChar;
-
-      // Type the mistaken character
-      document.execCommand('insertText', false, typoTyped);
-      
-      // Human reaction pause: notice the mistake
-      const reactionDelay = Math.floor(Math.random() * 160) + 200; // 200ms - 360ms
-      await sleep(reactionDelay);
-
-      if (isWorkflowAborted) return;
-
-      // Backspace to erase mistake
-      document.execCommand('delete', false, null);
-      
-      // Pause before correcting
-      await sleep(Math.floor(Math.random() * 90) + 110); // 110ms - 200ms
-
-      if (isWorkflowAborted) return;
-
-      // Now type the correct letter
-      document.execCommand('insertText', false, char);
-    } else {
-      // Normal typing
-      document.execCommand('insertText', false, char);
+    if ((editor.innerText || editor.textContent || '').trim().length > 0) {
+      typedOk = true;
     }
-
-    // Realistic human cadence & pauses
-    let delay = Math.floor(Math.random() * 40) + 40; // 40ms - 80ms human keystroke
-    if (char === '.' || char === '!' || char === '?') {
-      delay += Math.floor(Math.random() * 150) + 220; // 220ms - 370ms sentence end pause
-    } else if (char === ',' || char === ';') {
-      delay += Math.floor(Math.random() * 80) + 120; // 120ms - 200ms comma pause
-    } else if (char === ' ') {
-      delay += Math.floor(Math.random() * 45) + 35; // word pause
-    } else if (char === '\n') {
-      delay += 250;
-    }
-
-    await sleep(delay);
+  } catch (err) {
+    console.warn('[ATOMX] Letter typing warning:', err);
   }
 
-  // 5. Final check to ensure entire text is intact
-  if (!isWorkflowAborted && editor.innerText) {
-    const current = editor.innerText.trim();
-    const target = text.trim();
-    if (Math.abs(current.length - target.length) > 5) {
-      document.execCommand('selectAll', false, null);
-      document.execCommand('insertText', false, text);
+  // 5. Robust Fallback via ClipboardEvent (Paste) if editor is still empty
+  if (!typedOk || !(editor.innerText || editor.textContent || '').trim()) {
+    console.log('[ATOMX] Fallback to ClipboardEvent paste for DraftJS editor...');
+    try {
+      editor.focus();
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      const pasteEvt = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt
+      });
+      editor.dispatchEvent(pasteEvt);
+      await sleep(250);
+      if ((editor.innerText || editor.textContent || '').trim().length > 0) {
+        typedOk = true;
+      }
+    } catch (pe) {
+      console.warn('[ATOMX] Paste fallback error:', pe);
     }
   }
 
-  // 6. Dispatch events for Twitter Lexical editor
+  // 6. Final fallback: direct assignment
+  if (!typedOk || !(editor.innerText || editor.textContent || '').trim()) {
+    try {
+      editor.focus();
+      editor.textContent = text;
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
+      editor.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (e) {}
+  }
+
   editor.dispatchEvent(new Event('input', { bubbles: true }));
   editor.dispatchEvent(new Event('change', { bubbles: true }));
-  await sleep(400);
+  await sleep(300);
+  return true;
+}
+
+/**
+ * Universal, rock-solid Twitter / X Comment & Reply Engine
+ * Works with both inline reply boxes and modal dialogs on modern X (Twitter).
+ */
+async function postCommentOnTargetArticle(targetArticle, commentText) {
+  if (!commentText || isWorkflowAborted) return { success: false, error: 'Empty text or aborted' };
+
+  console.log('[ATOMX COMMENT ENGINE] Posting comment:', commentText);
+
+  // 1. Locate Reply button on the target article
+  let replyBtn = targetArticle?.querySelector('button[data-testid="reply"], div[data-testid="reply"]') ||
+                 document.querySelector('button[data-testid="reply"]');
+
+  // Check if reply box is already visible on page without clicking reply button
+  let textarea = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+
+  if (!textarea && replyBtn) {
+    replyBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await sleep(400);
+    replyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    replyBtn.click();
+    await sleep(800);
+  }
+
+  // 2. Wait for textarea in dialog OR inline
+  textarea = await waitForElement('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 5000);
+
+  if (!textarea) {
+    if (replyBtn) {
+      replyBtn.click();
+      await sleep(1000);
+      textarea = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+    }
+  }
+
+  if (!textarea) {
+    console.warn('[ATOMX COMMENT ENGINE] Reply textarea not found!');
+    return { success: false, error: 'Textarea not found' };
+  }
+
+  // 3. Type human-like into the editor
+  await typeTextHumanLike(textarea, commentText);
+
+  if (isWorkflowAborted) return { success: false, aborted: true };
+
+  await sleep(600);
+
+  // 4. Find Submit Reply Button
+  const getSubmitBtn = () => {
+    const dialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
+    const scope = dialog || document;
+    let btn = scope.querySelector('button[data-testid="tweetButtonInline"]') ||
+              scope.querySelector('button[data-testid="tweetButton"]') ||
+              document.querySelector('div[role="dialog"] button[data-testid="tweetButton"]') ||
+              document.querySelector('button[data-testid="tweetButtonInline"]') ||
+              document.querySelector('button[data-testid="tweetButton"]');
+
+    if (!btn) {
+      const allBtns = Array.from(scope.querySelectorAll('button, div[role="button"]'));
+      btn = allBtns.find(b => {
+        const txt = (b.innerText || '').trim().toLowerCase();
+        return (txt === 'reply' || txt === 'post') && !txt.includes('post your reply');
+      });
+    }
+    return btn;
+  };
+
+  let submitBtn = getSubmitBtn();
+
+  // If button is still disabled or missing, force DraftJS state update via native paste
+  if (!submitBtn || submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled) {
+    try {
+      textarea.focus();
+      const dt = new DataTransfer();
+      dt.setData('text/plain', commentText);
+      const pasteEvt = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: dt
+      });
+      textarea.dispatchEvent(pasteEvt);
+      await sleep(350);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+    } catch (e) {
+      console.warn('[ATOMX COMMENT ENGINE] DraftJS paste activation warning:', e);
+    }
+    submitBtn = getSubmitBtn();
+  }
+
+  if (!submitBtn) {
+    console.warn('[ATOMX COMMENT ENGINE] Submit reply button not found!');
+    return { success: false, error: 'Submit button not found' };
+  }
+
+  // Force-enable button attributes
+  submitBtn.removeAttribute('disabled');
+  submitBtn.setAttribute('aria-disabled', 'false');
+  await sleep(150);
+
+  // 5. Click Submit with full pointer and mouse event sequence
+  submitBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  await sleep(200);
+
+  const eventOpts = { bubbles: true, cancelable: true, view: window };
+  submitBtn.dispatchEvent(new PointerEvent('pointerdown', eventOpts));
+  submitBtn.dispatchEvent(new MouseEvent('mousedown', eventOpts));
+  submitBtn.dispatchEvent(new PointerEvent('pointerup', eventOpts));
+  submitBtn.dispatchEvent(new MouseEvent('mouseup', eventOpts));
+  submitBtn.dispatchEvent(new MouseEvent('click', eventOpts));
+  submitBtn.click();
+
+  console.log('[ATOMX COMMENT ENGINE] Clicked Submit button successfully!');
+  await sleep(1400);
+
+  // Verify dialog or textarea was submitted; retry click once if modal remains
+  const remainingDialog = document.querySelector('div[role="dialog"]');
+  if (remainingDialog) {
+    const retryBtn = remainingDialog.querySelector('button[data-testid="tweetButton"]');
+    if (retryBtn) {
+      retryBtn.removeAttribute('disabled');
+      retryBtn.setAttribute('aria-disabled', 'false');
+      retryBtn.dispatchEvent(new MouseEvent('click', eventOpts));
+      retryBtn.click();
+      await sleep(1000);
+    }
+  }
+
+  return { success: true, commentPosted: true, commentText };
 }
 
 async function insertIntoTwitterInput(text) {
@@ -808,36 +965,12 @@ function sanitizeClientComment(text, maxWords = 10) {
       // Enforce strict client-side sanitization (5-10 words, zero emojis, zero $, zero —, zero quotes, zero !)
       commentToPost = sanitizeClientComment(commentToPost, 10);
 
-      // Step B: Look for reply input or click reply button on MAIN post
-      let textarea = document.querySelector('div[data-testid="tweetTextarea_0"]');
-      if (!textarea) {
-        const replyBtn = mainArticle.querySelector('button[data-testid="reply"]') || document.querySelector('button[data-testid="reply"]');
-        if (replyBtn) {
-          replyBtn.click();
-          await sleep(600);
-        }
-      }
-
-      textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 5000);
-      if (textarea) {
-        // Step C: Focus textarea, place cursor, and type letter-by-letter with typo and backspace correction
-        await typeTextHumanLike(textarea, commentToPost);
-
-        if (isWorkflowAborted) {
-          return { success: false, aborted: true, performed };
-        }
-
-        await sleep(700);
-
-        // Step D: Click Tweet / Reply submit button
-        const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
-                          document.querySelector('button[data-testid="tweetButton"]');
-        if (submitBtn) {
-          submitBtn.removeAttribute('disabled');
-          submitBtn.click();
-          performed.push(`Human Typed & Commented: "${commentToPost}" 💬`);
-          await sleep(1000);
-        }
+      // Step B: Post comment via universal comment engine
+      const commentRes = await postCommentOnTargetArticle(mainArticle, commentToPost);
+      if (commentRes && commentRes.success) {
+        performed.push(`Human Typed & Commented: "${commentToPost}" 💬`);
+      } else {
+        console.warn('[ATOMX] Comment posting error:', commentRes?.error);
       }
     } catch (e) {
       console.warn('Comment action error:', e);
@@ -1159,7 +1292,8 @@ async function engageAndFollowProfile(options = {}) {
       return txt === 'Following' || testId.includes('unfollow') || txt.includes('Following');
     });
 
-    if (alreadyBtn) {
+    // If already followed and neither like nor reply is requested, exit early
+    if (alreadyBtn && !likePosts && !replyPosts) {
       return { success: true, alreadyFollowing: true, handle: targetHandle, message: 'Already Following' };
     }
 
@@ -1201,26 +1335,8 @@ async function engageAndFollowProfile(options = {}) {
       }
     }
 
-    // Step 5: Generate AI Reply adhering to "Tone & Style (Applied Globally)" and comment on centered recent post
-    // Strict Freshness Check: Determine post age from <time> tag to skip old posts (12-16h old posts)
-    let isPostFresh = false;
-    let postAgeHours = 999;
-    if (targetRecentPost) {
-      const timeEl = targetRecentPost.querySelector('time');
-      const dt = timeEl ? timeEl.getAttribute('datetime') : null;
-      if (dt) {
-        const postTimestamp = new Date(dt).getTime();
-        postAgeHours = (Date.now() - postTimestamp) / (1000 * 60 * 60);
-        // Only comment if the post was made within the last 4 hours (Strict Freshness Rule!)
-        isPostFresh = postAgeHours <= 4;
-      }
-    }
-
-    const shouldCommentThisProfile = replyPosts && isPostFresh && (options.forceComment ? true : Math.random() > 0.25);
-    if (!isPostFresh && replyPosts) {
-      console.log(`[ATOMX AUDIENCE] Post is ${Math.round(postAgeHours)}h old (exceeds 4h freshness limit). Skipping comment to ensure high relevance.`);
-    }
-    if (shouldCommentThisProfile && targetRecentPost && !isWorkflowAborted) {
+    // Step 5: Generate AI Reply and comment on centered recent post
+    if (replyPosts && targetRecentPost && !isWorkflowAborted) {
       try {
         const tweetData = extractTweetData(targetRecentPost);
         const tweetText = tweetData.text || '';
@@ -1271,41 +1387,42 @@ async function engageAndFollowProfile(options = {}) {
           }
         }
 
-        // Enforce strict client-side sanitization (5-10 words, zero emojis, zero $, zero —, zero quotes, zero !)
-        if (commentToPost) {
-          commentToPost = sanitizeClientComment(commentToPost, 10);
+        if (!commentToPost) {
+          commentToPost = 'Spot on insight. Keep building!';
         }
 
+        // Enforce strict client-side sanitization
+        commentToPost = sanitizeClientComment(commentToPost, 10);
+
         if (commentToPost) {
-          const replyBtn = targetRecentPost.querySelector('button[data-testid="reply"]');
-          if (replyBtn) {
-            replyBtn.click();
-            await sleep(700);
-            const textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 3500);
-            if (textarea) {
-              await typeTextHumanLike(textarea, commentToPost);
-              await sleep(600);
-              const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
-                                document.querySelector('button[data-testid="tweetButton"]');
-              if (submitBtn) {
-                submitBtn.removeAttribute('disabled');
-                submitBtn.click();
-                replyDone++;
-                console.log(`[ATOMX] Successfully posted AI Reply on @${targetHandle}: "${commentToPost}"`);
-                await sleep(1100);
-              }
-            }
+          const commentRes = await postCommentOnTargetArticle(targetRecentPost, commentToPost);
+          if (commentRes && commentRes.success) {
+            replyDone++;
+            console.log(`[ATOMX] Successfully posted AI Reply on @${targetHandle}: "${commentToPost}"`);
+            await sleep(1000);
+          } else {
+            console.warn('[ATOMX] postCommentOnTargetArticle returned error:', commentRes?.error);
           }
         }
       } catch (rErr) {
         console.warn('Could not post profile reply:', rErr);
       }
-    } else if (replyPosts && !shouldCommentThisProfile) {
-      console.log(`[ATOMX] Strategy variance: skipped comment on @${targetHandle} to follow naturally without comment.`);
     }
 
     if (isWorkflowAborted) {
       return { success: false, aborted: true };
+    }
+
+    // If already following, we are done with actions
+    if (alreadyBtn) {
+      return {
+        success: true,
+        alreadyFollowing: true,
+        followed: false,
+        handle: targetHandle,
+        likesDone,
+        replyDone
+      };
     }
 
     // Step 6: Click Follow button
@@ -1466,31 +1583,14 @@ async function executeReplyBackCycle(params = {}) {
       replyText = 'Appreciate you sharing this perspective!';
     }
 
-    // 3. Click reply button on the comment
-    const replyBtn = commentArt.querySelector('button[data-testid="reply"]');
-    if (replyBtn) {
-      replyBtn.click();
-      await sleep(600);
-    }
-
-    // 4. Focus textarea and type letter-by-letter with intentional typo and correction
-    const textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 4000);
-    if (textarea) {
-      await typeTextHumanLike(textarea, replyText);
-
-      if (isWorkflowAborted) break;
-      await sleep(600);
-
-      // 5. Click submit reply button
-      const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
-                        document.querySelector('button[data-testid="tweetButton"]');
-      if (submitBtn) {
-        submitBtn.removeAttribute('disabled');
-        submitBtn.click();
-        doneCount++;
-        results.push({ commenter: commentData.authorHandle, reply: replyText, commentKey });
-        await sleep(800);
-      }
+    // 3. Post reply using universal robust posting engine
+    const commentRes = await postCommentOnTargetArticle(commentArt, replyText);
+    if (commentRes && commentRes.success) {
+      doneCount++;
+      results.push({ commenter: commentData.authorHandle, reply: replyText, commentKey });
+      await sleep(800);
+    } else {
+      console.warn('[ATOMX REPLY LOOP] Could not post reply to comment:', commentRes?.error);
     }
 
     // 6. Safe delay before next comment
@@ -1720,6 +1820,43 @@ async function executeLiveRaidEngagement(params = {}) {
     }
   }
 
+  // 4. Auto Comment & AI Reply
+  let commented = false;
+  let commentText = '';
+  if (actions.comment && !isWorkflowAborted) {
+    commentText = params.replyText || '';
+    if (!commentText) {
+      try {
+        const tweetData = extractTweetData(tweetArticle);
+        const liveTweetText = (tweetData.text || '').trim();
+        const liveAuthor = tweetData.authorHandle || tweetData.authorName || '@user';
+
+        const aiResp = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({
+            type: 'GENERATE_AI_REPLY',
+            tweetText: liveTweetText,
+            tweetAuthor: liveAuthor,
+            style: params.style || 'Bullish (5-10 words)',
+            stylePrompt: params.stylePrompt || null
+          }, resolve);
+        });
+        if (aiResp && aiResp.success && aiResp.reply) {
+          commentText = aiResp.reply;
+        }
+      } catch (e) {}
+    }
+
+    if (!commentText) {
+      commentText = 'Spot on insight. Focused execution is key.';
+    }
+
+    commentText = sanitizeClientComment(commentText, 10);
+    const commentRes = await postCommentOnTargetArticle(tweetArticle, commentText);
+    if (commentRes && commentRes.success) {
+      commented = true;
+    }
+  }
+
   // Clean outline gently after actions
   setTimeout(() => {
     if (tweetArticle) {
@@ -1732,7 +1869,9 @@ async function executeLiveRaidEngagement(params = {}) {
     success: true,
     liked,
     reposted,
-    bookmarked
+    bookmarked,
+    commented,
+    commentText
   };
 }
 
@@ -1855,37 +1994,15 @@ async function executeReciprocalProfileEngagement(params = {}) {
     // Sanitize comment (5-10 words, crisp, authentic)
     replyText = sanitizeClientComment(replyText, 12);
 
-    // 5. Click reply button on the target post
-    const replyBtn = targetArticle.querySelector('button[data-testid="reply"]');
-    if (!replyBtn) {
-      return { success: false, reason: 'REPLY_BTN_NOT_FOUND', error: 'Reply button not found on post', likeDone };
+    // 5. Post AI reply on target post using universal robust posting engine
+    const commentRes = await postCommentOnTargetArticle(targetArticle, replyText);
+    if (commentRes && commentRes.success) {
+      replyDone = true;
+      console.log(`[ATOMX RECIPROCAL] Successfully posted reply on @${targetHandle}: "${replyText}"`);
+      await sleep(1000);
+    } else {
+      console.warn('[ATOMX RECIPROCAL] Could not post reply:', commentRes?.error);
     }
-
-    replyBtn.click();
-    await sleep(750);
-
-    // 6. Focus textarea & type letter-by-letter with human variation
-    const textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 4000);
-    if (!textarea) {
-      return { success: false, reason: 'TEXTAREA_NOT_FOUND', error: 'Reply textarea did not open', likeDone };
-    }
-
-    await typeTextHumanLike(textarea, replyText);
-    await sleep(700);
-
-    if (isWorkflowAborted) return { success: false, aborted: true, likeDone };
-
-    // 7. Click submit button
-    const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
-                      document.querySelector('button[data-testid="tweetButton"]');
-    if (!submitBtn) {
-      return { success: false, reason: 'SUBMIT_BTN_NOT_FOUND', error: 'Submit button not found', likeDone };
-    }
-
-    submitBtn.removeAttribute('disabled');
-    submitBtn.click();
-    await sleep(1200);
-    replyDone = true;
 
     // 8. Optional Follow user
     if (followUser) {
