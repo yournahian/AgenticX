@@ -643,6 +643,12 @@ function initListeners() {
   document.getElementById('extSaveNewPasswordSubmitBtn')?.addEventListener('click', handleExtSetPassword);
   document.getElementById('extLoginSubmitBtn')?.addEventListener('click', handleExtLogin);
   document.getElementById('extLogoutBtn')?.addEventListener('click', handleExtLogout);
+  document.getElementById('extForceResetBtn')?.addEventListener('click', async () => {
+    if (confirm('Clear all local extension session cache and return to request access?')) {
+      await purgeExtLocalUserSession();
+      alert('✓ Local cache cleared successfully.');
+    }
+  });
   document.getElementById('extSyncAccountBtn')?.addEventListener('click', async () => {
     await loadServerState();
     alert('✓ Account details & credit balance synchronized with server.');
@@ -3220,18 +3226,41 @@ function handleVerifyCryptoTx() {
   document.getElementById('extTxHashInput').value = '';
 }
 
+// Purge entire local user session and return to clean slate
+async function purgeExtLocalUserSession() {
+  state.user = null;
+  state.verifiedXHandle = '';
+  state.activeTwitterHandle = null;
+  state.credits = 0;
+  state.userPlan = 'Free Plan';
+  state.pendingRequest = null;
+
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    try {
+      await chrome.storage.local.remove([
+        'currentUser', 'user', 'authToken', 'verifiedXHandle', 'pendingRequest', 'credits', 'userPlan'
+      ]);
+    } catch (e) {}
+  }
+
+  updateCreditUI();
+  await checkAccountVerificationLock();
+  switchExtTab('access');
+  showAccessSubView('request');
+}
+
 // Load credits & server state
 async function loadServerState() {
   try {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const stored = await chrome.storage.local.get([
         'credits', 'accessKey', 'creators', 'engagedTweetIds', 'userPlan',
-        'currentUser', 'authToken', 'verifiedXHandle', 'pendingRequest'
+        'currentUser', 'user', 'authToken', 'verifiedXHandle', 'pendingRequest'
       ]).catch(() => ({}));
       if (stored?.credits !== undefined) state.credits = stored.credits;
       if (stored?.accessKey) state.accessKey = stored.accessKey;
       if (stored?.userPlan) state.userPlan = stored.userPlan;
-      if (stored?.currentUser) state.user = stored.currentUser;
+      if (stored?.currentUser || stored?.user) state.user = stored.currentUser || stored.user;
       if (stored?.pendingRequest) state.pendingRequest = stored.pendingRequest;
       if (stored?.verifiedXHandle) {
         state.verifiedXHandle = stored.verifiedXHandle;
@@ -3248,44 +3277,107 @@ async function loadServerState() {
   // Instant UI render from local cache
   updateCreditUI();
   renderCreatorChips();
-  await checkAccountVerificationLock();
 
-  if (!state.user && !state.pendingRequest) {
+  // If there's an alleged user session or pending request, verify directly with server!
+  if (state.user || state.verifiedXHandle || state.pendingRequest) {
+    await syncServerStateNetwork();
+  } else {
+    await checkAccountVerificationLock();
     switchExtTab('access');
   }
-
-  // Non-blocking parallel network sync
-  syncServerStateNetwork();
 }
 
 async function syncServerStateNetwork() {
   try {
     const backendUrl = await getBackendUrl();
-    const [balRes, stRes, engRes] = await Promise.allSettled([
-      fetch(`${backendUrl}/api/credits/balance`, { credentials: 'omit' }),
-      (state.user && (state.user.handle || state.user.email))
-        ? fetch(`${backendUrl}/api/auth/check-status?handle=${encodeURIComponent(state.user.handle || '')}&email=${encodeURIComponent(state.user.email || '')}`, { credentials: 'omit' })
-        : Promise.resolve(null),
-      fetch(`${backendUrl}/api/tweets/engaged`, { credentials: 'omit' })
-    ]);
+    const cleanHandle = (state.verifiedXHandle || state.user?.handle || state.pendingRequest?.handle || '').replace(/^@/, '').trim();
+    const email = (state.user?.email || state.pendingRequest?.email || '').trim();
 
-    if (balRes.status === 'fulfilled' && balRes.value?.ok) {
-      const data = await balRes.value.json().catch(() => ({}));
-      if (typeof data.credits === 'number') state.credits = data.credits;
-      if (data.plan) {
-        state.userPlan = data.plan;
-        chrome.storage?.local.set({ userPlan: data.plan });
+    // Check live status on server
+    let stData = null;
+    if (cleanHandle || email) {
+      try {
+        const stRes = await fetch(`${backendUrl}/api/auth/check-status?handle=${encodeURIComponent(cleanHandle)}&email=${encodeURIComponent(email)}`, { credentials: 'omit' });
+        if (stRes.ok) {
+          stData = await stRes.json();
+        } else if (stRes.status === 404) {
+          stData = { status: 'NOT_FOUND' };
+        }
+      } catch (e) {
+        console.warn('Failed to verify user status with server:', e);
       }
     }
 
-    if (stRes.status === 'fulfilled' && stRes.value?.ok) {
-      const stData = await stRes.value.json().catch(() => ({}));
-      if (stData.status && state.user) {
-        state.user.status = stData.status;
-        if (typeof stData.credits === 'number') state.credits = stData.credits;
-        if (stData.plan) state.userPlan = stData.plan;
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-          chrome.storage.local.set({ user: state.user, credits: state.credits, userPlan: state.userPlan });
+    // IF SERVER CONFIRMS USER IS NOT FOUND (DATA WIPED FRESH), PURGE LOCAL CACHE IMMEDIATELY!
+    if (!stData || stData.status === 'NOT_FOUND' || stData.status === 'REJECTED') {
+      console.warn('User account not found on server (wiped/fresh). Resetting extension session.');
+      await purgeExtLocalUserSession();
+      return;
+    }
+
+    if (stData.status === 'PENDING') {
+      state.user = null;
+      state.verifiedXHandle = '';
+      state.pendingRequest = { handle: stData.handle || `@${cleanHandle}`, email: stData.email || email };
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        await chrome.storage.local.remove(['currentUser', 'user', 'authToken', 'verifiedXHandle']);
+        await chrome.storage.local.set({ pendingRequest: state.pendingRequest });
+      }
+      updateCreditUI();
+      await checkAccountVerificationLock();
+      return;
+    }
+
+    if (stData.status === 'ACTIVE' || stData.status === 'APPROVED') {
+      if (!state.user) {
+        state.user = {
+          handle: stData.handle || `@${cleanHandle}`,
+          email: stData.email || email,
+          fullName: stData.fullName || 'Verified Member',
+          status: 'ACTIVE',
+          credits: stData.credits !== undefined ? stData.credits : 100,
+          plan: stData.plan || 'Free Plan'
+        };
+      } else {
+        state.user.status = 'ACTIVE';
+        if (typeof stData.credits === 'number') state.user.credits = stData.credits;
+        if (stData.plan) state.user.plan = stData.plan;
+      }
+      state.credits = state.user.credits || 0;
+      state.userPlan = state.user.plan || 'Free Plan';
+      state.verifiedXHandle = state.user.handle || `@${cleanHandle}`;
+
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({
+          user: state.user,
+          currentUser: state.user,
+          credits: state.credits,
+          userPlan: state.userPlan,
+          verifiedXHandle: state.verifiedXHandle
+        });
+      }
+    }
+
+    // Parallel balance and engaged tweets sync
+    const [balRes, engRes] = await Promise.allSettled([
+      fetch(`${backendUrl}/api/credits/balance`, { credentials: 'omit' }),
+      fetch(`${backendUrl}/api/tweets/engaged`, { credentials: 'omit' })
+    ]);
+
+    if (balRes.status === 'fulfilled') {
+      if (balRes.value?.status === 404 && state.user) {
+        await purgeExtLocalUserSession();
+        return;
+      }
+      if (balRes.value?.ok) {
+        const data = await balRes.value.json().catch(() => ({}));
+        if (typeof data.credits === 'number') {
+          state.credits = data.credits;
+          chrome.storage?.local.set({ credits: state.credits });
+        }
+        if (data.plan) {
+          state.userPlan = data.plan;
+          chrome.storage?.local.set({ userPlan: data.plan });
         }
       }
     }
@@ -3301,9 +3393,11 @@ async function syncServerStateNetwork() {
     }
 
     updateCreditUI();
-    checkAccountVerificationLock();
+    await checkAccountVerificationLock();
   } catch (err) {
-    console.warn('Background server sync offline, keeping cached state', err);
+    console.warn('Background server sync offline:', err);
+    updateCreditUI();
+    await checkAccountVerificationLock();
   }
 }
 
@@ -3358,8 +3452,9 @@ async function checkAccountVerificationLock() {
     return { isAllowed: false, reason: 'ACCOUNT_SUSPENDED' };
   }
 
-  // Case 1: User is NOT authenticated
-  if (!state.user && !verifiedHandle) {
+  // Case 1: User is NOT authenticated or user does not exist on server
+  const isInvalidUser = !state.user || state.user.status === 'NOT_FOUND' || !verifiedHandle;
+  if (isInvalidUser) {
     if (tabsNav) tabsNav.style.display = 'none';
     if (verifiedBar) verifiedBar.style.display = 'none';
     if (mismatchBanner) mismatchBanner.style.display = 'none';
@@ -3819,17 +3914,8 @@ async function handleExtLogin() {
 
 async function handleExtLogout() {
   if (!confirm('Are you sure you want to log out from this extension?')) return;
-
-  state.user = null;
-  state.verifiedXHandle = '';
-  state.activeTwitterHandle = null;
-
-  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    await chrome.storage.local.remove(['currentUser', 'authToken', 'verifiedXHandle']);
-  }
-
-  await checkAccountVerificationLock();
-  alert('You have logged out. Sign in with your approved X ID and password to use the extension.');
+  await purgeExtLocalUserSession();
+  alert('You have logged out. All cached user data has been cleared.');
 }
 
 function updateTgParseSummaryUI() {
