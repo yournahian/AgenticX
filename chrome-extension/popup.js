@@ -2190,17 +2190,17 @@ async function startAudienceBuilderWorkflow() {
         const listIdMatch = rawCustomUrl.match(/\/lists\/(\d+)/) || rawCustomUrl.match(/^(\d{15,25})$/);
         if (listIdMatch) {
           const listId = listIdMatch[1];
-          targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets`)}&f=live`;
+          targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies`)}&f=live`;
         } else if (rawCustomUrl.includes('x.com') || rawCustomUrl.includes('twitter.com')) {
           targetUrl = rawCustomUrl;
         } else {
-          targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR tech) -filter:retweets') + '&f=live';
+          targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR tech) -filter:retweets -filter:replies') + '&f=live';
         }
       } else if (listSelect === 'audienceList2') {
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public" OR #buildinpublic OR "tech founder") -filter:retweets') + '&f=live';
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public" OR #buildinpublic OR "tech founder") -filter:retweets -filter:replies') + '&f=live';
       } else {
-        // Default: Web3 & Crypto active creators
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR #crypto OR #web3) -filter:retweets') + '&f=live';
+        // Default: Web3 & Crypto active creators (Strictly posts only, zero replies)
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR #crypto OR #web3) -filter:retweets -filter:replies') + '&f=live';
       }
 
       if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
@@ -2727,16 +2727,16 @@ async function startFollowersIncreaseWorkflow() {
     if (curatedFollower.listUrl) {
       targetUrl = curatedFollower.listUrl;
     } else {
-      targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR solana) -filter:retweets') + '&f=live';
+      targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR solana) -filter:retweets -filter:replies') + '&f=live';
     }
   } else if (niche === 'ai') {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(ai agents OR autonomous agents) -filter:retweets') + '&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(ai agents OR autonomous agents) -filter:retweets -filter:replies') + '&f=live';
   } else if (niche === 'founders') {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public") -filter:retweets') + '&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public") -filter:retweets -filter:replies') + '&f=live';
   } else if (niche === 'solana') {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(solana OR sol) -filter:retweets') + '&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(solana OR sol) -filter:retweets -filter:replies') + '&f=live';
   } else {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) -filter:retweets') + '&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) -filter:retweets -filter:replies') + '&f=live';
   }
 
   let shouldCloseWorkingTab = false;

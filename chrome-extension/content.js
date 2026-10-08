@@ -1339,6 +1339,18 @@ async function huntAudienceUsers(options = {}) {
     }
 
     for (const article of visibleArticles) {
+      // STRICT FILTER: Post-Authors Only (Zero Replies, Zero Reposts)
+      const socialCtx = (article.querySelector('div[data-testid="socialContext"]')?.innerText || '').toLowerCase();
+      if (socialCtx.includes('reposted') || socialCtx.includes('retweeted')) continue;
+
+      const artText = article.innerText || '';
+      if (artText.includes('Replying to @') || artText.includes('Replying to')) continue;
+      const isReplyElement = Array.from(article.querySelectorAll('div, span, a')).some(el => {
+        const t = (el.innerText || '').trim();
+        return t.startsWith('Replying to @') || t.startsWith('Replying to');
+      });
+      if (isReplyElement) continue;
+
       const data = extractTweetData(article);
       const cleanHandle = (data.authorHandle || '').replace('@', '').toLowerCase();
       if (!cleanHandle || cleanHandle === loggedInHandle) continue;
