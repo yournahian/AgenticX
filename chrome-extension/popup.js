@@ -3304,13 +3304,13 @@ async function syncServerStateNetwork() {
           stData = { status: 'NOT_FOUND' };
         }
       } catch (e) {
-        console.warn('Failed to verify user status with server:', e);
+        console.log('[ATOMX] Status verify notice:', e);
       }
     }
 
     // IF SERVER CONFIRMS USER IS NOT FOUND (DATA WIPED FRESH), PURGE LOCAL CACHE IMMEDIATELY!
     if (!stData || stData.status === 'NOT_FOUND' || stData.status === 'REJECTED') {
-      console.warn('User account not found on server (wiped/fresh). Resetting extension session.');
+      console.log('[ATOMX] User account not found on server (wiped/fresh). Resetting extension session.');
       await purgeExtLocalUserSession();
       return;
     }
