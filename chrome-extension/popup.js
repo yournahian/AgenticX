@@ -4365,6 +4365,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
   const total = tweets.length;
   let successCount = 0;
   let ignoredCount = 0;
+  let skippedCommentsCount = 0;
   const backendUrl = await getBackendUrl();
 
   const logger = (st, log, prog = '') => {
@@ -4402,10 +4403,24 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
           break;
         }
 
-        // Auto-ignore rule: post already liked & commented
-        if (outcome && outcome.result && outcome.result.ignored) {
+        // Auto-ignore rule: post already liked & commented OR comment already completed
+        const res = outcome && outcome.result;
+        const isIgnored = res && (res.ignored || res.commentSkipped);
+
+        if (isIgnored) {
           ignoredCount++;
-          logger(`Skipped ${indexStr}`, `Auto-ignored: ${outcome.result.reason || 'Already completed'} (0 credits used)`, `${i + 1}/${total}`);
+          if (res.commentSkipped) {
+            skippedCommentsCount++;
+          }
+          const reasonStr = res.reason || (res.commentSkipped ? 'Already commented previously' : 'Already completed');
+          logger(`Skipped ${indexStr}`, `Auto-ignored: ${reasonStr} (0 credits used)`, `${i + 1}/${total}`);
+
+          // Cache so future raids skip this tweet locally
+          state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
+          }
+
           if (outcome.shouldClose && outcome.targetTabId) {
             chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
           }
@@ -4456,8 +4471,13 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
     }
 
     if (!state.isAborted) {
-      logger('Engagement Completed', `Finished: ${successCount} engaged, ${ignoredCount} auto-ignored of ${total} tweet(s).`, `${successCount}/${total}`);
-      alert(`✓ Autonomous Engagement Finished!\n\n• Engaged: ${successCount}\n• Auto-Ignored (Already completed): ${ignoredCount}\n• Total Processed: ${total}\n\nHuman-like typing and selective action rules applied.`);
+      logger('Engagement Completed', `Finished: ${successCount} engaged, ${ignoredCount} auto-ignored (${skippedCommentsCount} comments skipped) of ${total} tweet(s).`, `${successCount}/${total}`);
+      let summaryMsg = `✓ Autonomous Engagement Finished!\n\n• Engaged: ${successCount}\n• Auto-Ignored (Already completed): ${ignoredCount}`;
+      if (skippedCommentsCount > 0) {
+        summaryMsg += `\n• Comments Skipped: ${skippedCommentsCount}`;
+      }
+      summaryMsg += `\n• Total Processed: ${total}\n\nHuman-like typing and selective action rules applied. 0 credits used for skipped posts.`;
+      alert(summaryMsg);
     }
   } finally {
     setAutomationRunningUI(false);

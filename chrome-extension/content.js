@@ -554,14 +554,41 @@ async function executeAutonomousTweetWorkflow(params) {
 
   console.log(`[ATOMX STATUS CHECK] isAlreadyLiked: ${isAlreadyLiked}, isAlreadyCommented: ${isAlreadyCommented} (user: @${loggedInHandle || 'unknown'})`);
 
-  // USER RULE: If both like and comment are already done -> IGNORE AUTOMATICALLY!
+  // USER RULE 1: If both like and comment are already done -> IGNORE AUTOMATICALLY!
   if (isAlreadyLiked && isAlreadyCommented) {
     console.log('[ATOMX] Both like and comment already completed on this post. Auto-ignoring.');
     return {
       success: true,
       ignored: true,
+      commentSkipped: true,
+      likeSkipped: true,
       reason: 'Both like and comment already completed on this post.',
       performed: ['Auto-Ignored (Already Liked & Commented)']
+    };
+  }
+
+  // USER RULE 2: If user already commented on this post, AUTO-IGNORE!
+  // In engagement raids, commenting is the core task. Never post duplicate comments on the same tweet!
+  if (actions.comment && isAlreadyCommented) {
+    console.log('[ATOMX] User already commented on this post previously. Auto-ignoring.');
+    // If like was also requested and not yet liked, give a quick free courtesy like
+    if (actions.like && !isAlreadyLiked) {
+      try {
+        const likeBtn = mainArticle.querySelector('button[data-testid="like"]');
+        if (likeBtn) {
+          likeBtn.click();
+          performed.push('Liked Main Post ❤️ (Free courtesy)');
+        }
+      } catch (e) {
+        console.log('[ATOMX] Courtesy like notice:', e);
+      }
+    }
+    return {
+      success: true,
+      ignored: true,
+      commentSkipped: true,
+      reason: 'Already commented on this post previously.',
+      performed: ['Auto-Ignored (Already Commented)']
     };
   }
 
@@ -581,6 +608,8 @@ async function executeAutonomousTweetWorkflow(params) {
     return {
       success: true,
       ignored: true,
+      commentSkipped: isAlreadyCommented,
+      likeSkipped: isAlreadyLiked,
       reason: 'Requested actions were already satisfied on this post.',
       performed
     };
@@ -820,7 +849,9 @@ function sanitizeClientComment(text, maxWords = 10) {
     success: true,
     performed,
     isAlreadyLiked,
-    isAlreadyCommented
+    isAlreadyCommented,
+    commentSkipped: isAlreadyCommented,
+    commentPosted: performed.some(p => p.includes('Commented:'))
   };
 }
 
