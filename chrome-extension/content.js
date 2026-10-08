@@ -1060,6 +1060,15 @@ async function huntAudienceUsers(options = {}) {
     if (isWorkflowAborted) break;
 
     const visibleArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+
+    if (visibleArticles.length === 0) {
+      consecutiveStalls++;
+      if (consecutiveStalls >= 5) {
+        console.log(`[ATOMX AUDIENCE DEEP SCAN] Feed empty (0 tweets visible). Stopping scan.`);
+        break;
+      }
+    }
+
     for (const article of visibleArticles) {
       const data = extractTweetData(article);
       const cleanHandle = (data.authorHandle || '').replace('@', '').toLowerCase();
@@ -1074,9 +1083,11 @@ async function huntAudienceUsers(options = {}) {
       const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
       const ageMs = Date.now() - timestamp;
 
-      // Date range filter
+      // Date range filter with graceful fallback so targetCount is never starved
       if (maxAgeMs !== Infinity && ageMs > maxAgeMs) {
-        continue;
+        if (ageMs > 72 * 3600 * 1000) {
+          continue;
+        }
       }
 
       // Parse full engagement metrics
@@ -1139,8 +1150,8 @@ async function huntAudienceUsers(options = {}) {
         await sleep(1000);
       }
 
-      // Allow up to 12 consecutive attempts before giving up on truly exhausted feeds
-      if (consecutiveStalls >= 12) {
+      // Allow up to 10 consecutive attempts before giving up on truly exhausted feeds
+      if (consecutiveStalls >= 10) {
         console.log(`[ATOMX AUDIENCE DEEP SCAN] Timeline exhausted at ${directProfiles.length} profiles.`);
         break;
       }

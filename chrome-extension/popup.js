@@ -67,6 +67,14 @@ let state = {
   }
 };
 
+// Global working tabs tracking for bulletproof stop / cancel execution across all workflows
+let audienceWorkingTabId = null;
+let sorsaWorkingTabId = null;
+let followerWorkingTabId = null;
+let replyBackWorkingTabId = null;
+let autoUnfollowWorkingTabId = null;
+let reciprocatorWorkingTabId = null;
+
 // =============================================================
 // ROBUST X / TWITTER LINK EXTRACTOR & DEDUPLICATION ENGINE
 // Handles: standard URLs, intent/like, Telegram chats, timestamps, labels
@@ -914,9 +922,11 @@ function initAgentListeners() {
 
   document.getElementById('stopAudienceBuilderBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
-      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    });
+    if (audienceWorkingTabId) {
+      chrome.tabs.sendMessage(audienceWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      chrome.tabs.remove(audienceWorkingTabId).catch(() => null);
+      audienceWorkingTabId = null;
+    }
     updateAgentConsole('⏹️ Stopped', 'Audience Builder stopped by user.');
     const startBtn = document.getElementById('runAudienceBuilderBtn');
     const stopBtn = document.getElementById('stopAudienceBuilderBtn');
@@ -928,6 +938,7 @@ function initAgentListeners() {
     if (countdownEl) countdownEl.style.display = 'none';
     const badge = document.getElementById('audienceStateBadge');
     if (badge) badge.textContent = 'STOPPED';
+    showExtToast('Audience Builder Stopped', '⏹');
   });
 
   document.getElementById('resetAudienceQueueBtn')?.addEventListener('click', () => {
@@ -962,9 +973,11 @@ function initAgentListeners() {
   });
   document.getElementById('stopSorsaBoosterBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
-      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    });
+    if (sorsaWorkingTabId) {
+      chrome.tabs.sendMessage(sorsaWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      chrome.tabs.remove(sorsaWorkingTabId).catch(() => null);
+      sorsaWorkingTabId = null;
+    }
     updateAgentConsole('⏹️ Stopped', 'Sorsa Booster stopped by user.');
     const startBtn = document.getElementById('runSorsaBoosterBtn');
     const stopBtn = document.getElementById('stopSorsaBoosterBtn');
@@ -985,9 +998,11 @@ function initAgentListeners() {
   });
   document.getElementById('stopFollowerIncreaseBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
-      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    });
+    if (followerWorkingTabId) {
+      chrome.tabs.sendMessage(followerWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      chrome.tabs.remove(followerWorkingTabId).catch(() => null);
+      followerWorkingTabId = null;
+    }
     updateAgentConsole('⏹️ Stopped', 'Follower Growth stopped by user.');
     const startBtn = document.getElementById('runFollowerIncreaseBtn');
     const stopBtn = document.getElementById('stopFollowerIncreaseBtn');
@@ -1072,9 +1087,11 @@ function initAgentListeners() {
 
   document.getElementById('stopReplyBackBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
-      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    });
+    if (replyBackWorkingTabId) {
+      chrome.tabs.sendMessage(replyBackWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      chrome.tabs.remove(replyBackWorkingTabId).catch(() => null);
+      replyBackWorkingTabId = null;
+    }
     updateAgentConsole('⏹️ Stopped', 'Reply Back loop stopped by user.');
     const startBtn = document.getElementById('runReplyBackBtn');
     const stopBtn = document.getElementById('stopReplyBackBtn');
@@ -1086,6 +1103,7 @@ function initAgentListeners() {
     if (badge) badge.textContent = 'STOPPED';
     const countdown = document.getElementById('replyBackCountdownText');
     if (countdown) countdown.style.display = 'none';
+    showExtToast('Reply Back Stopped', '⏹');
   });
 
   // Agent 7: Auto Unfollow (A7, Standalone Safety Optimizer)
@@ -1095,9 +1113,11 @@ function initAgentListeners() {
 
   document.getElementById('stopAutoUnfollowBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
-      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    });
+    if (autoUnfollowWorkingTabId) {
+      chrome.tabs.sendMessage(autoUnfollowWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      chrome.tabs.remove(autoUnfollowWorkingTabId).catch(() => null);
+      autoUnfollowWorkingTabId = null;
+    }
     updateAgentConsole('⏹️ Stopped', 'Auto Unfollow stopped by user.');
     const startBtn = document.getElementById('runAutoUnfollowBtn');
     const stopBtn = document.getElementById('stopAutoUnfollowBtn');
@@ -1109,6 +1129,7 @@ function initAgentListeners() {
     if (badge) badge.textContent = 'STOPPED';
     const countdown = document.getElementById('unfollowCountdownText');
     if (countdown) countdown.style.display = 'none';
+    showExtToast('Auto Unfollow Stopped', '⏹');
   });
 
   // Agent 8: Picture & Voice Match
@@ -1206,9 +1227,11 @@ function initAgentListeners() {
   document.getElementById('runReciprocatorBtn')?.addEventListener('click', startCommenterReciprocatorWorkflow);
   document.getElementById('stopReciprocatorBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
-      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    });
+    if (reciprocatorWorkingTabId) {
+      chrome.tabs.sendMessage(reciprocatorWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      chrome.tabs.remove(reciprocatorWorkingTabId).catch(() => null);
+      reciprocatorWorkingTabId = null;
+    }
     updateAgentConsole('⏹️ Stopped', 'Commenter Reciprocator stopped by user.');
     const startBtn = document.getElementById('runReciprocatorBtn');
     const stopBtn = document.getElementById('stopReciprocatorBtn');
@@ -1220,6 +1243,7 @@ function initAgentListeners() {
     if (badge) badge.textContent = 'STOPPED';
     const countdown = document.getElementById('reciprocatorCountdownText');
     if (countdown) countdown.style.display = 'none';
+    showExtToast('Commenter Reciprocator Stopped', '⏹');
   });
 }
 
@@ -1604,7 +1628,6 @@ async function startCommenterReciprocatorWorkflow() {
 
   let doneCount = 0;
   let skippedCount = 0;
-  let workingTabId = null;
   let shouldCloseWorkingTab = false;
 
   // Load persisted reciprocated accounts to avoid duplicate runs
@@ -1621,16 +1644,16 @@ async function startCommenterReciprocatorWorkflow() {
     updateAgentConsole('Scanning Commenters', `Accessing post: ${postUrl}`);
 
     const tab = await chrome.tabs.create({ url: postUrl, active: false });
-    workingTabId = tab.id;
+    reciprocatorWorkingTabId = tab.id;
     shouldCloseWorkingTab = true;
-    await waitForTabComplete(workingTabId);
+    await waitForTabComplete(reciprocatorWorkingTabId);
     await sleep(3000);
 
     if (state.isAborted) return;
 
     if (statusText) statusText.textContent = `Scanning all comments on your post to build queue...`;
     const scanResult = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(workingTabId, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, (res) => resolve(res || { success: false, commenters: [] }));
+      chrome.tabs.sendMessage(reciprocatorWorkingTabId, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, (res) => resolve(res || { success: false, commenters: [] }));
     });
 
     if (state.isAborted) return;
@@ -1679,8 +1702,8 @@ async function startCommenterReciprocatorWorkflow() {
       if (statusText) statusText.textContent = `[${i + 1}/${totalInQueue}] Visiting @${commenterHandle}'s profile...`;
 
       try {
-        await chrome.tabs.update(workingTabId, { url: `https://x.com/${commenterHandle}` });
-        await waitForTabComplete(workingTabId);
+        await chrome.tabs.update(reciprocatorWorkingTabId, { url: `https://x.com/${commenterHandle}` });
+        await waitForTabComplete(reciprocatorWorkingTabId);
         await sleep(2200);
 
         if (state.isAborted) break;
@@ -1689,7 +1712,7 @@ async function startCommenterReciprocatorWorkflow() {
         if (statusText) statusText.textContent = `Scanning recent post & generating contextual AI reply for @${commenterHandle}...`;
 
         const engageRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(workingTabId, {
+          chrome.tabs.sendMessage(reciprocatorWorkingTabId, {
             type: 'RECIPROCAL_PROFILE_ENGAGEMENT',
             handle: commenterHandle,
             likePost: optLike,
@@ -1757,9 +1780,10 @@ async function startCommenterReciprocatorWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && workingTabId) {
-      chrome.tabs?.remove(workingTabId).catch(() => null);
+    if (shouldCloseWorkingTab && reciprocatorWorkingTabId) {
+      chrome.tabs?.remove(reciprocatorWorkingTabId).catch(() => null);
     }
+    reciprocatorWorkingTabId = null;
   }
 }
 
@@ -2036,8 +2060,6 @@ async function startAudienceBuilderWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
 
   const listSelect = document.getElementById('audienceListSelect')?.value || 'audienceList1';
-  let targetUrl = '';
-
   const dateRange = document.getElementById('audienceDateRangeSelect')?.value || '24h';
   const sortBy = document.getElementById('audienceSortBySelect')?.value || 'replies';
   const targetCount = Number(document.getElementById('audienceTargetCountSelect')?.value || 10);
@@ -2053,66 +2075,13 @@ async function startAudienceBuilderWorkflow() {
     });
   }
 
-  // Check Paid plan access
+  // Check Paid plan access BEFORE toggling UI
   if (listSelect !== 'custom') {
     const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect];
     if (curated?.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
       alert(`🔒 Pro Plan Required!\n\n"${curated.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
       switchExtTab('credits');
       return;
-    }
-  }
-
-  // Phase A: Resolve Target Feed URL
-  if (listSelect === 'custom') {
-    const rawCustomUrl = document.getElementById('customListUrlInput')?.value.trim() || '';
-    if (!rawCustomUrl) {
-      alert('⚠️ Please enter a Twitter List URL or handles (e.g. @vitalikbuterin, @cz_binance).');
-      return;
-    }
-    const listIdMatch = rawCustomUrl.match(/\/lists\/(\d+)/) || rawCustomUrl.match(/^(\d{15,25})$/);
-    if (listIdMatch) {
-      // 100% Reliable, Clean Filtered Live Search: No retweets, no replies, English only!
-      const listId = listIdMatch[1];
-      targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies`)}&f=live`;
-    } else if (rawCustomUrl.includes('x.com') || rawCustomUrl.includes('twitter.com')) {
-      targetUrl = rawCustomUrl;
-    } else {
-      // Direct handles pasted (e.g. "@vitalikbuterin, @cz_binance" or "sama, elonmusk")
-      const extractedHandles = rawCustomUrl
-        .split(/[\s,]+/)
-        .map(h => h.replace(/^@/, '').trim())
-        .filter(h => h && /^[A-Za-z0-9_]{1,25}$/.test(h));
-
-      if (extractedHandles.length > 0) {
-        const query = extractedHandles.slice(0, 15).map(h => 'from:' + h).join(' OR ');
-        targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
-      } else {
-        alert('⚠️ Please enter a valid Twitter List URL or handle(s) (e.g. https://x.com/i/lists/... or @vitalikbuterin, @cz_binance).');
-        return;
-      }
-    }
-  } else {
-    const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect] || FALLBACK_CURATED_LISTS.audienceList1;
-    const rawListUrl = (curated.listUrl || '').trim();
-    const listIdMatch = rawListUrl.match(/\/lists\/(\d+)/);
-
-    // If valid Twitter List URL is given and has a list ID, use the ultra-clean filtered live search!
-    if (listIdMatch && !rawListUrl.includes('1498675129654161413')) {
-      const listId = listIdMatch[1];
-      targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies`)}&f=live`;
-    } else {
-      // 100% Reliable Live Search Feed with targets:
-      const rawTargets = curated.targets || [];
-      const cleanHandles = rawTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
-      if (cleanHandles.length > 0) {
-        // Pick random batch of 12 handles for variety across multiple runs
-        const selected = cleanHandles.length > 12 ? [...cleanHandles].sort(() => 0.5 - Math.random()).slice(0, 12) : cleanHandles;
-        const query = selected.map(h => 'from:' + h).join(' OR ');
-        targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
-      } else {
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) lang:en -filter:retweets -filter:replies') + '&f=live';
-      }
     }
   }
 
@@ -2150,7 +2119,6 @@ async function startAudienceBuilderWorkflow() {
   });
 
   const followedSet = new Set((storageData.atomx_audience_followed_ids || []).map(h => h.toLowerCase()));
-  // Reset session counters for fresh Audience Builder session
   let doneCount = 0;
   let skippedCount = 0;
   let collectedCount = 0;
@@ -2161,73 +2129,129 @@ async function startAudienceBuilderWorkflow() {
   if (barEl) barEl.style.width = '0%';
   if (countdownEl) countdownEl.style.display = 'none';
 
-  // STATE: LIST_SELECTED
   if (stateBadge) stateBadge.textContent = 'LIST_SELECTED';
   if (titleEl) titleEl.textContent = 'Audience Builder';
-  if (statusText) statusText.textContent = `List selected. Navigating to timeline...`;
+  if (statusText) statusText.textContent = `Resolving target accounts for audience collection...`;
   if (barEl) barEl.style.width = '10%';
 
-  let workingTabId = null;
   let shouldCloseWorkingTab = false;
 
   try {
-    // STATE: FINDING_TWEETS (Phase B)
-    if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
-    if (statusText) statusText.textContent = `Opening target feed: ${targetUrl}...`;
-
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
-    workingTabId = listTab.id;
-    shouldCloseWorkingTab = true;
-    await waitForTabComplete(workingTabId);
-    await sleep(2500);
-
-    if (state.isAborted) return;
-
-    // STATE: COLLECTING_IDS (Phase B & C)
-    if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
-    if (statusText) statusText.textContent = `Deep scanning timeline feed across multiple scrolls (Target: ${targetCount} profiles)...`;
-    if (barEl) barEl.style.width = '20%';
-
-    const scanResult = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(workingTabId, {
-        type: 'AUDIENCE_BUILDER_HUNT_USERS',
-        dateRange,
-        sortBy,
-        targetCount,
-        verifiedXHandle: state.verifiedXHandle
-      }, (res) => resolve(res || { success: false, profiles: [], topTweets: [] }));
-    });
-
-    if (state.isAborted) return;
-
-    // RULE: Post-Authors Only (Directly target the creators who published the posts, no comments/repliers)
     let collectedProfiles = [];
     const collectedHandles = new Set();
+    const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
 
-    if (scanResult?.profiles && scanResult.profiles.length > 0) {
-      for (const p of scanResult.profiles) {
+    // 1. Immediately extract high-value targets from curated list or direct handles
+    if (listSelect !== 'custom') {
+      const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect] || FALLBACK_CURATED_LISTS.audienceList1;
+      const rawTargets = curated?.targets || [];
+      const cleanTargets = rawTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
+      for (const h of cleanTargets) {
         if (collectedProfiles.length >= targetCount) break;
-        const handleKey = (p.cleanHandle || '').toLowerCase();
-        if (handleKey && !collectedHandles.has(handleKey)) {
-          collectedHandles.add(handleKey);
-          collectedProfiles.push(p);
-          if (colEl) colEl.textContent = collectedProfiles.length;
+        const lower = h.toLowerCase();
+        if (lower !== loggedInHandle && !collectedHandles.has(lower) && !followedSet.has(lower)) {
+          collectedHandles.add(lower);
+          collectedProfiles.push({
+            cleanHandle: h,
+            handle: `@${h}`,
+            name: h
+          });
+        }
+      }
+    } else {
+      const rawCustomUrl = document.getElementById('customListUrlInput')?.value.trim() || '';
+      if (rawCustomUrl && !rawCustomUrl.includes('x.com') && !rawCustomUrl.includes('twitter.com') && !rawCustomUrl.includes('/')) {
+        const extractedHandles = rawCustomUrl
+          .split(/[\s,]+/)
+          .map(h => h.replace(/^@/, '').trim())
+          .filter(h => h && /^[A-Za-z0-9_]{1,25}$/.test(h));
+        for (const h of extractedHandles) {
+          if (collectedProfiles.length >= targetCount) break;
+          const lower = h.toLowerCase();
+          if (lower !== loggedInHandle && !collectedHandles.has(lower) && !followedSet.has(lower)) {
+            collectedHandles.add(lower);
+            collectedProfiles.push({
+              cleanHandle: h,
+              handle: `@${h}`,
+              name: h
+            });
+          }
         }
       }
     }
+
+    if (colEl) colEl.textContent = collectedProfiles.length;
+
+    // 2. If more targets needed to satisfy targetCount, hunt dynamically from active niche live feed
+    if (collectedProfiles.length < targetCount && !state.isAborted) {
+      let targetUrl = '';
+      if (listSelect === 'custom') {
+        const rawCustomUrl = document.getElementById('customListUrlInput')?.value.trim() || '';
+        const listIdMatch = rawCustomUrl.match(/\/lists\/(\d+)/) || rawCustomUrl.match(/^(\d{15,25})$/);
+        if (listIdMatch) {
+          const listId = listIdMatch[1];
+          targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets`)}&f=live`;
+        } else if (rawCustomUrl.includes('x.com') || rawCustomUrl.includes('twitter.com')) {
+          targetUrl = rawCustomUrl;
+        } else {
+          targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR tech) -filter:retweets') + '&f=live';
+        }
+      } else if (listSelect === 'audienceList2') {
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public" OR #buildinpublic) -filter:retweets') + '&f=live';
+      } else {
+        // Default: Web3 & Crypto active creators
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR #crypto OR #web3) -filter:retweets') + '&f=live';
+      }
+
+      if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
+      if (statusText) statusText.textContent = `Scanning live timeline feed for ${targetCount - collectedProfiles.length} active creator profiles...`;
+      if (barEl) barEl.style.width = '20%';
+
+      const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+      audienceWorkingTabId = listTab.id;
+      shouldCloseWorkingTab = true;
+      await waitForTabComplete(audienceWorkingTabId);
+      await sleep(2500);
+
+      if (!state.isAborted) {
+        const scanResult = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(audienceWorkingTabId, {
+            type: 'AUDIENCE_BUILDER_HUNT_USERS',
+            dateRange: 'all', // Dynamic scan ensures we never starve on strict time windows
+            sortBy,
+            targetCount: targetCount - collectedProfiles.length,
+            verifiedXHandle: state.verifiedXHandle
+          }, (res) => resolve(res || { success: false, profiles: [] }));
+        });
+
+        if (scanResult?.profiles && scanResult.profiles.length > 0) {
+          for (const p of scanResult.profiles) {
+            if (collectedProfiles.length >= targetCount) break;
+            const handleKey = (p.cleanHandle || '').toLowerCase();
+            if (handleKey && handleKey !== loggedInHandle && !collectedHandles.has(handleKey) && !followedSet.has(handleKey)) {
+              collectedHandles.add(handleKey);
+              collectedProfiles.push(p);
+              if (colEl) colEl.textContent = collectedProfiles.length;
+            }
+          }
+        }
+      }
+    }
+
+    if (state.isAborted) return;
 
     collectedCount = collectedProfiles.length;
     if (colEl) colEl.textContent = collectedCount;
 
     if (collectedCount === 0) {
-      alert('⚠️ No active author profiles could be extracted from this feed. Please verify the URL or try another list.');
+      alert('⚠️ Could not find active creator profiles for Audience Builder. Please try another list or verify your search URL.');
       return;
     }
 
     // STATE: QUEUE_READY
     if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
     if (barEl) barEl.style.width = '40%';
-    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount} active accounts. Beginning profile engagement loop...`;
+    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount}/${targetCount} active accounts. Beginning profile engagement loop...`;
     if (queueIndicator) queueIndicator.textContent = `Profile 1/${collectedCount}`;
 
     // Persist queue
@@ -2272,8 +2296,14 @@ async function startAudienceBuilderWorkflow() {
       if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
 
       try {
-        await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}` });
-        await waitForTabComplete(workingTabId);
+        if (!audienceWorkingTabId) {
+          const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
+          audienceWorkingTabId = newTab.id;
+          shouldCloseWorkingTab = true;
+        } else {
+          await chrome.tabs.update(audienceWorkingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
+        }
+        await waitForTabComplete(audienceWorkingTabId);
         await sleep(2000);
 
         if (state.isAborted) break;
@@ -2286,7 +2316,7 @@ async function startAudienceBuilderWorkflow() {
 
         const backendUrl = await getBackendUrl();
         const actionRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(workingTabId, {
+          chrome.tabs.sendMessage(audienceWorkingTabId, {
             type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
             handle: profile.cleanHandle,
             likePosts,
@@ -2358,9 +2388,10 @@ async function startAudienceBuilderWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && workingTabId) {
-      chrome.tabs?.remove(workingTabId).catch(() => null);
+    if (shouldCloseWorkingTab && audienceWorkingTabId) {
+      chrome.tabs?.remove(audienceWorkingTabId).catch(() => null);
     }
+    audienceWorkingTabId = null;
   }
 }
 
@@ -2474,14 +2505,14 @@ async function startSorsaScoreBoosterWorkflow() {
       if (barEl) barEl.style.width = '15%';
 
       const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
-      workingTabId = listTab.id;
+      sorsaWorkingTabId = listTab.id;
       shouldCloseWorkingTab = true;
-      await waitForTabComplete(workingTabId);
+      await waitForTabComplete(sorsaWorkingTabId);
       await sleep(2500);
 
       if (!state.isAborted) {
         const scanResult = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(workingTabId, {
+          chrome.tabs.sendMessage(sorsaWorkingTabId, {
             type: 'AUDIENCE_BUILDER_HUNT_USERS',
             dateRange: 'all',
             sortBy: 'replies',
@@ -2542,21 +2573,21 @@ async function startSorsaScoreBoosterWorkflow() {
       if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
 
       try {
-        if (!workingTabId) {
+        if (!sorsaWorkingTabId) {
           const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
-          workingTabId = newTab.id;
+          sorsaWorkingTabId = newTab.id;
           shouldCloseWorkingTab = true;
         } else {
-          await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
+          await chrome.tabs.update(sorsaWorkingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
         }
-        await waitForTabComplete(workingTabId);
+        await waitForTabComplete(sorsaWorkingTabId);
         await sleep(2000);
 
         if (state.isAborted) break;
 
         const backendUrl = await getBackendUrl();
         const actionRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(workingTabId, {
+          chrome.tabs.sendMessage(sorsaWorkingTabId, {
             type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
             handle: profile.cleanHandle,
             likePosts,
@@ -2608,9 +2639,10 @@ async function startSorsaScoreBoosterWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && workingTabId) {
-      chrome.tabs?.remove(workingTabId).catch(() => null);
+    if (shouldCloseWorkingTab && sorsaWorkingTabId) {
+      chrome.tabs?.remove(sorsaWorkingTabId).catch(() => null);
     }
+    sorsaWorkingTabId = null;
   }
 }
 
@@ -2670,28 +2702,21 @@ async function startFollowersIncreaseWorkflow() {
 
   let targetUrl = '';
   if (curatedFollower) {
-    const customTargets = (curatedFollower.targets && curatedFollower.targets.length > 0) ? curatedFollower.targets : [];
-    if (customTargets.length > 0) {
-      const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
-      const selected = clean.length > 12 ? [...clean].sort(() => 0.5 - Math.random()).slice(0, 12) : clean;
-      const query = selected.map(h => 'from:' + h).join(' OR ');
-      targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
-    } else if (curatedFollower.listUrl) {
+    if (curatedFollower.listUrl) {
       targetUrl = curatedFollower.listUrl;
     } else {
-      targetUrl = 'https://x.com/search?q=(crypto%20OR%20web3)&f=live';
+      targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR solana) -filter:retweets') + '&f=live';
     }
   } else if (niche === 'ai') {
-    targetUrl = 'https://x.com/search?q=(ai%20agents%20OR%20autonomous%20agents)&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(ai agents OR autonomous agents) -filter:retweets') + '&f=live';
   } else if (niche === 'founders') {
-    targetUrl = 'https://x.com/search?q=(startups%20OR%20founders%20OR%20building%20in%20public)&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public") -filter:retweets') + '&f=live';
   } else if (niche === 'solana') {
-    targetUrl = 'https://x.com/search?q=(solana%20OR%20sol)&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(solana OR sol) -filter:retweets') + '&f=live';
   } else {
-    targetUrl = 'https://x.com/search?q=(crypto%20OR%20web3)&f=live';
+    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) -filter:retweets') + '&f=live';
   }
 
-  let workingTabId = null;
   let shouldCloseWorkingTab = false;
 
   try {
@@ -2700,9 +2725,9 @@ async function startFollowersIncreaseWorkflow() {
     if (barEl) barEl.style.width = '15%';
 
     const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
-    workingTabId = listTab.id;
+    followerWorkingTabId = listTab.id;
     shouldCloseWorkingTab = true;
-    await waitForTabComplete(workingTabId);
+    await waitForTabComplete(followerWorkingTabId);
     await sleep(2500);
 
     if (state.isAborted) return;
@@ -2712,7 +2737,7 @@ async function startFollowersIncreaseWorkflow() {
     if (barEl) barEl.style.width = '20%';
 
     const scanResult = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(workingTabId, {
+      chrome.tabs.sendMessage(followerWorkingTabId, {
         type: 'AUDIENCE_BUILDER_HUNT_USERS',
         dateRange: 'all',
         sortBy: 'replies',
@@ -2740,13 +2765,13 @@ async function startFollowersIncreaseWorkflow() {
         if (barEl) barEl.style.width = `${Math.min(38, 20 + Math.round((collectedProfiles.length / targetCount) * 18))}%`;
 
         try {
-          await chrome.tabs.update(workingTabId, { url: busyTweet.tweetUrl });
-          await waitForTabComplete(workingTabId);
+          await chrome.tabs.update(followerWorkingTabId, { url: busyTweet.tweetUrl });
+          await waitForTabComplete(followerWorkingTabId);
           await sleep(2200);
 
           if (!state.isAborted) {
             const repliersRes = await new Promise((resolve) => {
-              chrome.tabs.sendMessage(workingTabId, {
+              chrome.tabs.sendMessage(followerWorkingTabId, {
                 type: 'COLLECT_REPLIERS_FROM_TWEET_THREAD',
                 targetCount: remainingToCollect
               }, (res) => resolve(res || { success: false, profiles: [] }));
@@ -2815,15 +2840,21 @@ async function startFollowersIncreaseWorkflow() {
       if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
 
       try {
-        await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}` });
-        await waitForTabComplete(workingTabId);
+        if (!followerWorkingTabId) {
+          const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
+          followerWorkingTabId = newTab.id;
+          shouldCloseWorkingTab = true;
+        } else {
+          await chrome.tabs.update(followerWorkingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
+        }
+        await waitForTabComplete(followerWorkingTabId);
         await sleep(2000);
 
         if (state.isAborted) break;
 
         const backendUrl = await getBackendUrl();
         const actionRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(workingTabId, {
+          chrome.tabs.sendMessage(followerWorkingTabId, {
             type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
             handle: profile.cleanHandle,
             likePosts: true,
@@ -2875,9 +2906,10 @@ async function startFollowersIncreaseWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && workingTabId) {
-      chrome.tabs?.remove(workingTabId).catch(() => null);
+    if (shouldCloseWorkingTab && followerWorkingTabId) {
+      chrome.tabs?.remove(followerWorkingTabId).catch(() => null);
     }
+    followerWorkingTabId = null;
   }
 }
 
@@ -2943,7 +2975,6 @@ async function startReplyBackLoopWorkflow() {
 
   let totalReplied = 0;
   let totalSkipped = 0;
-  let workingTabId = null;
   let shouldCloseWorkingTab = false;
 
   try {
@@ -2957,15 +2988,15 @@ async function startReplyBackLoopWorkflow() {
       if (statusText) statusText.textContent = `[${postNumberStr}] Opening your post: ${currentPostUrl}...`;
       updateAgentConsole('Reply Loop Running', `Accessing ${postNumberStr}: ${currentPostUrl}`);
 
-      if (!workingTabId) {
+      if (!replyBackWorkingTabId) {
         const tab = await chrome.tabs.create({ url: currentPostUrl, active: false });
-        workingTabId = tab.id;
+        replyBackWorkingTabId = tab.id;
         shouldCloseWorkingTab = true;
       } else {
-        await chrome.tabs.update(workingTabId, { url: currentPostUrl });
+        await chrome.tabs.update(replyBackWorkingTabId, { url: currentPostUrl });
       }
 
-      await waitForTabComplete(workingTabId);
+      await waitForTabComplete(replyBackWorkingTabId);
       await sleep(3000);
 
       if (state.isAborted) break;
@@ -2974,7 +3005,7 @@ async function startReplyBackLoopWorkflow() {
       if (statusText) statusText.textContent = `Scanning & hydrating comments snapshot (ignoring newly arriving comments)...`;
 
       const cycleResult = await new Promise((resolve) => {
-        chrome.tabs.sendMessage(workingTabId, {
+        chrome.tabs.sendMessage(replyBackWorkingTabId, {
           type: 'EXECUTE_REPLY_BACK_CYCLE',
           postUrl: currentPostUrl,
           style: tone,
@@ -3049,9 +3080,10 @@ async function startReplyBackLoopWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && workingTabId) {
-      chrome.tabs?.remove(workingTabId).catch(() => null);
+    if (shouldCloseWorkingTab && replyBackWorkingTabId) {
+      chrome.tabs?.remove(replyBackWorkingTabId).catch(() => null);
     }
+    replyBackWorkingTabId = null;
   }
 }
 
@@ -3118,7 +3150,6 @@ async function startAutoUnfollowWorkflow() {
   const verifiedHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').trim();
   const followingUrl = verifiedHandle ? `https://x.com/${verifiedHandle}/following` : 'https://x.com/following';
 
-  let workingTabId = null;
   let shouldCloseWorkingTab = false;
   let unfollowedCount = 0;
   let skippedCount = 0;
@@ -3128,9 +3159,9 @@ async function startAutoUnfollowWorkflow() {
   try {
     if (statusText) statusText.textContent = `Opening following list: ${followingUrl}...`;
     const tab = await chrome.tabs.create({ url: followingUrl, active: false });
-    workingTabId = tab.id;
+    autoUnfollowWorkingTabId = tab.id;
     shouldCloseWorkingTab = true;
-    await waitForTabComplete(workingTabId);
+    await waitForTabComplete(autoUnfollowWorkingTabId);
     await sleep(3000);
 
     if (state.isAborted) return;
@@ -3143,7 +3174,7 @@ async function startAutoUnfollowWorkflow() {
       if (stateBadge) stateBadge.textContent = 'UNFOLLOWING';
 
       const stepRes = await new Promise((resolve) => {
-        chrome.tabs.sendMessage(workingTabId, {
+        chrome.tabs.sendMessage(autoUnfollowWorkingTabId, {
           type: 'EXECUTE_AUTO_UNFOLLOW_STEP',
           criteria: { notFollowing, lowScore },
           scoreThreshold,
@@ -3254,9 +3285,10 @@ async function startAutoUnfollowWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && workingTabId) {
-      chrome.tabs?.remove(workingTabId).catch(() => null);
+    if (shouldCloseWorkingTab && autoUnfollowWorkingTabId) {
+      chrome.tabs?.remove(autoUnfollowWorkingTabId).catch(() => null);
     }
+    autoUnfollowWorkingTabId = null;
   }
 }
 
