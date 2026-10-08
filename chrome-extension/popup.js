@@ -924,6 +924,32 @@ function initAgentListeners() {
   });
 
   // Agent 6: Reply Back (A6, Posts, Fully Auto)
+  document.getElementById('replyBackUseCurrentTabBtn')?.addEventListener('click', async () => {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com')) && tabs[0].url.includes('/status/')) {
+        const cleanUrl = tabs[0].url.split('?')[0];
+        const in1 = document.getElementById('myTweetUrlInput1');
+        const in2 = document.getElementById('myTweetUrlInput2');
+        const in3 = document.getElementById('myTweetUrlInput3');
+        if (in1 && !in1.value.trim()) {
+          in1.value = cleanUrl;
+        } else if (in2 && !in2.value.trim()) {
+          in2.value = cleanUrl;
+        } else if (in3 && !in3.value.trim()) {
+          in3.value = cleanUrl;
+        } else if (in1) {
+          in1.value = cleanUrl;
+        }
+        showExtToast('Current Post Linked to Reply Back', '⚡');
+      } else {
+        alert('Please open your tweet/post on Twitter / X in your active browser tab first.');
+      }
+    } catch (e) {
+      console.warn('Could not query current tab:', e);
+    }
+  });
+
   document.getElementById('runReplyBackBtn')?.addEventListener('click', () => {
     startReplyBackLoopWorkflow();
   });
@@ -940,12 +966,33 @@ function initAgentListeners() {
     if (stopBtn) stopBtn.style.display = 'none';
     const statusText = document.getElementById('replyBackLiveStatusText');
     if (statusText) statusText.textContent = 'Workflow stopped by user.';
+    const badge = document.getElementById('replyBackStateBadge');
+    if (badge) badge.textContent = 'STOPPED';
+    const countdown = document.getElementById('replyBackCountdownText');
+    if (countdown) countdown.style.display = 'none';
   });
 
-  // Agent 7: Auto Unfollow
+  // Agent 7: Auto Unfollow (A7, Standalone Safety Optimizer)
   document.getElementById('runAutoUnfollowBtn')?.addEventListener('click', () => {
-    updateAgentConsole('Unfollow Scan Running', `Scanning followers with safe pacing delay (${state.delaySeconds}s).`);
-    alert(`🧹 Auto Unfollow Scanner Activated!\nScanning non-followers and accounts with low Walchain scores.\nExecuting safe unfollows with randomized ${state.delaySeconds}s delay.`);
+    startAutoUnfollowWorkflow();
+  });
+
+  document.getElementById('stopAutoUnfollowBtn')?.addEventListener('click', () => {
+    state.isAborted = true;
+    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
+      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+    });
+    updateAgentConsole('⏹️ Stopped', 'Auto Unfollow stopped by user.');
+    const startBtn = document.getElementById('runAutoUnfollowBtn');
+    const stopBtn = document.getElementById('stopAutoUnfollowBtn');
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    const statusText = document.getElementById('unfollowLiveStatusText');
+    if (statusText) statusText.textContent = 'Workflow stopped by user.';
+    const badge = document.getElementById('unfollowStateBadge');
+    if (badge) badge.textContent = 'STOPPED';
+    const countdown = document.getElementById('unfollowCountdownText');
+    if (countdown) countdown.style.display = 'none';
   });
 
   // Agent 8: Picture & Voice Match
@@ -2430,7 +2477,7 @@ async function startFollowersIncreaseWorkflow() {
 }
 
 // =========================================================================
-// AGENT 2: REPLY BACK WORKFLOW ENGINE (A6, POSTS, FULLY AUTO)
+// AGENT 6: REPLY BACK WORKFLOW ENGINE (A6, POSTS, FULLY AUTO)
 // =========================================================================
 async function startReplyBackLoopWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
@@ -2446,24 +2493,51 @@ async function startReplyBackLoopWorkflow() {
     return;
   }
 
+  if (state.credits < 1) {
+    alert('⚠️ Insufficient credits!\nYou need at least 1 credit to reply to comments.\nPlease top up in the Credits tab.');
+    switchExtTab('credits');
+    return;
+  }
+
+  const maxComments = Number(document.getElementById('replyBackMaxCountSelect')?.value || 999);
   const tone = document.getElementById('replyBackToneSelect')?.value || 'Natural & Concise';
   const delaySec = Number(document.getElementById('replyBackDelaySelect')?.value || 12);
+  const autoLike = document.getElementById('replyBackAutoLikeCheck')?.checked ?? true;
 
   const startBtn = document.getElementById('runReplyBackBtn');
   const stopBtn = document.getElementById('stopReplyBackBtn');
   const progressCard = document.getElementById('replyBackProgressCard');
   const postInd = document.getElementById('replyBackPostIndicator');
-  const badgeEl = document.getElementById('replyBackProgressBadge');
+  const stateBadge = document.getElementById('replyBackStateBadge');
   const barEl = document.getElementById('replyBackProgressBar');
   const doneEl = document.getElementById('replyBackDoneCount');
+  const queueEl = document.getElementById('replyBackQueueCount');
+  const skipEl = document.getElementById('replyBackSkippedCount');
   const statusText = document.getElementById('replyBackLiveStatusText');
+  const countdownEl = document.getElementById('replyBackCountdownText');
 
   state.isAborted = false;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
 
+  if (stateBadge) stateBadge.textContent = 'POSTS_ADDED';
+  if (doneEl) doneEl.textContent = '0';
+  if (queueEl) queueEl.textContent = '0';
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (countdownEl) countdownEl.style.display = 'none';
+
+  // Load persisted replied comments set (rerun protection)
+  let persistedReplied = [];
+  try {
+    const stored = await chrome.storage.local.get(['atomx_replied_comments']).catch(() => ({}));
+    if (Array.isArray(stored?.atomx_replied_comments)) persistedReplied = stored.atomx_replied_comments;
+  } catch (e) {}
+  const repliedCommentIds = new Set(persistedReplied);
+
   let totalReplied = 0;
+  let totalSkipped = 0;
   let workingTabId = null;
   let shouldCloseWorkingTab = false;
 
@@ -2474,7 +2548,8 @@ async function startReplyBackLoopWorkflow() {
       const currentPostUrl = postUrls[pIdx];
       const postNumberStr = `Post ${pIdx + 1} of ${postUrls.length}`;
       if (postInd) postInd.textContent = `${postNumberStr} (Active)`;
-      if (statusText) statusText.textContent = `Navigating to your post: ${currentPostUrl}...`;
+      if (stateBadge) stateBadge.textContent = 'LOADING_COMMENTS';
+      if (statusText) statusText.textContent = `[${postNumberStr}] Opening your post: ${currentPostUrl}...`;
       updateAgentConsole('Reply Loop Running', `Accessing ${postNumberStr}: ${currentPostUrl}`);
 
       if (!workingTabId) {
@@ -2490,7 +2565,8 @@ async function startReplyBackLoopWorkflow() {
 
       if (state.isAborted) break;
 
-      if (statusText) statusText.textContent = `Scanning all incoming comments under post...`;
+      if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
+      if (statusText) statusText.textContent = `Scanning & hydrating comments snapshot (ignoring newly arriving comments)...`;
 
       const cycleResult = await new Promise((resolve) => {
         chrome.tabs.sendMessage(workingTabId, {
@@ -2498,38 +2574,281 @@ async function startReplyBackLoopWorkflow() {
           postUrl: currentPostUrl,
           style: tone,
           delaySec,
+          maxComments,
+          autoLike,
+          alreadyRepliedIds: Array.from(repliedCommentIds),
           verifiedXHandle: state.verifiedXHandle
         }, (res) => resolve(res || { success: false, repliedCount: 0 }));
       });
 
       if (state.isAborted) break;
 
+      if (cycleResult.unauthorizedAccount) {
+        alert(cycleResult.error || 'Account lock mismatch detected.');
+        return;
+      }
+
       const repliedInThisPost = cycleResult?.repliedCount || 0;
       totalReplied += repliedInThisPost;
+      totalSkipped += (cycleResult?.skippedSelf || 0);
+
+      // Persist newly replied comments
+      if (Array.isArray(cycleResult?.results)) {
+        cycleResult.results.forEach(r => {
+          if (r.commentKey) repliedCommentIds.add(r.commentKey);
+        });
+        await chrome.storage.local.set({ atomx_replied_comments: Array.from(repliedCommentIds) }).catch(() => null);
+      }
+
+      // Deduct 1 credit per reply posted
+      if (repliedInThisPost > 0) {
+        deductCredits(repliedInThisPost);
+      }
 
       if (doneEl) doneEl.textContent = totalReplied;
-      if (badgeEl) badgeEl.textContent = `${totalReplied} REPLIED`;
+      if (queueEl) queueEl.textContent = cycleResult?.queuedCount || 0;
+      if (skipEl) skipEl.textContent = totalSkipped;
+
       const postProg = Math.round(((pIdx + 1) / postUrls.length) * 100);
       if (barEl) barEl.style.width = `${postProg}%`;
 
       if (pIdx < postUrls.length - 1 && !state.isAborted) {
-        if (statusText) statusText.textContent = `Completed post ${pIdx + 1}. Taking a 6s human break before post ${pIdx + 2}...`;
-        await sleep(6000);
+        if (stateBadge) stateBadge.textContent = 'BREAK';
+        if (countdownEl) countdownEl.style.display = 'block';
+        for (let s = 6; s > 0; s--) {
+          if (state.isAborted) break;
+          if (statusText) statusText.textContent = `Completed ${postNumberStr}. Taking break before post ${pIdx + 2}...`;
+          if (countdownEl) countdownEl.textContent = `⏱️ Next post in ${s}s...`;
+          await sleep(1000);
+        }
+        if (countdownEl) countdownEl.style.display = 'none';
       }
     }
 
     if (!state.isAborted) {
+      if (stateBadge) stateBadge.textContent = 'DONE';
       if (barEl) barEl.style.width = '100%';
-      if (statusText) statusText.textContent = `✓ Done! Auto-replied to all comments across ${postUrls.length} post(s).`;
-      updateAgentConsole('Reply Loop Complete', `Finished replying to all community comments with human typing.`);
-      alert(`🔄 Reply Back Cycle Finished!\n\n• Posts Processed: ${postUrls.length}\n• Total Comments Replied: ${totalReplied}\n• Action: Liked (❤️) + Contextual Human Letter-by-Letter Typing.`);
+      if (countdownEl) countdownEl.style.display = 'none';
+      if (statusText) statusText.textContent = `✓ Done! Replied to ${totalReplied} comment(s) across ${postUrls.length} post(s).`;
+      updateAgentConsole('Reply Loop Complete', `Finished replying to community comments with human typing.`);
+      alert(`🔄 Reply Back Cycle Finished!\n\n• Posts Processed: ${postUrls.length}\n• Total Comments Replied: ${totalReplied}\n• Self & Duplicate Comments Skipped: ${totalSkipped}\n• Cost Deducted: ${totalReplied} Credit(s)\n• Action: Liked (❤️) + Contextual Human Letter-by-Letter Typing.`);
+    } else {
+      if (stateBadge) stateBadge.textContent = 'STOPPED';
+      if (statusText) statusText.textContent = 'Reply loop stopped by user.';
     }
   } catch (err) {
     console.error('Reply Back Loop error:', err);
+    if (stateBadge) stateBadge.textContent = 'FAILED';
     alert('Reply Back error: ' + err.message);
   } finally {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
+    if (countdownEl) countdownEl.style.display = 'none';
+    if (shouldCloseWorkingTab && workingTabId) {
+      chrome.tabs?.remove(workingTabId).catch(() => null);
+    }
+  }
+}
+
+// =========================================================================
+// AGENT 7: AUTO UNFOLLOW STANDALONE WORKFLOW ENGINE (A7, SAFETY)
+// =========================================================================
+async function startAutoUnfollowWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
+  const notFollowing = document.getElementById('unfollowCriteriaNotFollowing')?.checked ?? true;
+  const lowScore = document.getElementById('unfollowCriteriaLowScore')?.checked ?? false;
+
+  if (!notFollowing && !lowScore) {
+    alert('⚠️ Please select at least one criteria:\n• Does Not Follow Back\n• Low Wallchain / Influence Score');
+    return;
+  }
+
+  if (state.credits < 1) {
+    alert('⚠️ Insufficient credits!\nYou need at least 1 credit for unfollow operations (1 credit per 10 unfollows).\nPlease top up in the Credits tab.');
+    switchExtTab('credits');
+    return;
+  }
+
+  const targetLimit = Number(document.getElementById('unfollowMaxCount')?.value || 25);
+  const delaySec = Number(document.getElementById('unfollowDelaySelect')?.value || 18);
+  const scoreThreshold = Number(document.getElementById('unfollowScoreThresholdInput')?.value || 30);
+  const rawWhitelist = document.getElementById('unfollowWhitelistInput')?.value || '';
+  const whitelistList = rawWhitelist.split(/[,\n]/).map(w => w.trim()).filter(Boolean);
+
+  const startBtn = document.getElementById('runAutoUnfollowBtn');
+  const stopBtn = document.getElementById('stopAutoUnfollowBtn');
+  const progressCard = document.getElementById('unfollowProgressCard');
+  const stateBadge = document.getElementById('unfollowStateBadge');
+  const barEl = document.getElementById('unfollowProgressBar');
+  const progressText = document.getElementById('unfollowProgressText');
+  const doneEl = document.getElementById('unfollowCountDone');
+  const skipEl = document.getElementById('unfollowCountSkipped');
+  const failEl = document.getElementById('unfollowCountFailed');
+  const statusText = document.getElementById('unfollowLiveStatusText');
+  const countdownEl = document.getElementById('unfollowCountdownText');
+
+  state.isAborted = false;
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (progressCard) progressCard.style.display = 'block';
+
+  if (stateBadge) stateBadge.textContent = 'FILTER_SELECTED';
+  if (doneEl) doneEl.textContent = '0';
+  if (skipEl) skipEl.textContent = '0';
+  if (failEl) failEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (progressText) progressText.textContent = `0 / ${targetLimit}`;
+  if (countdownEl) countdownEl.style.display = 'none';
+
+  // Load persisted processed accounts to prevent re-processing
+  let persistedUnfollowed = [];
+  try {
+    const stored = await chrome.storage.local.get(['atomx_unfollowed_accounts']).catch(() => ({}));
+    if (Array.isArray(stored?.atomx_unfollowed_accounts)) persistedUnfollowed = stored.atomx_unfollowed_accounts;
+  } catch (e) {}
+  const processedHandlesSet = new Set(persistedUnfollowed.map(h => h.toLowerCase()));
+
+  // Determine user handle for Following URL
+  const verifiedHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').trim();
+  const followingUrl = verifiedHandle ? `https://x.com/${verifiedHandle}/following` : 'https://x.com/following';
+
+  let workingTabId = null;
+  let shouldCloseWorkingTab = false;
+  let unfollowedCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+  let consecutiveScrolls = 0;
+
+  try {
+    if (statusText) statusText.textContent = `Opening following list: ${followingUrl}...`;
+    const tab = await chrome.tabs.create({ url: followingUrl, active: false });
+    workingTabId = tab.id;
+    shouldCloseWorkingTab = true;
+    await waitForTabComplete(workingTabId);
+    await sleep(3000);
+
+    if (state.isAborted) return;
+
+    if (stateBadge) stateBadge.textContent = 'FOLLOWING_LOADED';
+    if (statusText) statusText.textContent = `Following list loaded! Starting smart filtering loop...`;
+    await sleep(1200);
+
+    while (!state.isAborted && unfollowedCount < targetLimit) {
+      if (stateBadge) stateBadge.textContent = 'UNFOLLOWING';
+
+      const stepRes = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(workingTabId, {
+          type: 'EXECUTE_AUTO_UNFOLLOW_STEP',
+          criteria: { notFollowing, lowScore },
+          scoreThreshold,
+          whitelist: whitelistList,
+          processedHandles: Array.from(processedHandlesSet)
+        }, (res) => resolve(res || { success: false, error: 'No response from tab' }));
+      });
+
+      if (state.isAborted) break;
+
+      if (stepRes.action === 'UNFOLLOWED') {
+        consecutiveScrolls = 0;
+        unfollowedCount++;
+        if (stepRes.handle) {
+          processedHandlesSet.add(stepRes.handle.toLowerCase());
+          persistedUnfollowed.push(stepRes.handle);
+        }
+
+        if (doneEl) doneEl.textContent = unfollowedCount;
+        const pct = Math.min(100, Math.round((unfollowedCount / targetLimit) * 100));
+        if (barEl) barEl.style.width = `${pct}%`;
+        if (progressText) progressText.textContent = `${unfollowedCount} / ${targetLimit}`;
+        if (statusText) statusText.textContent = `✓ Unfollowed @${stepRes.handle} (Non-follower / Filter match).`;
+
+        // Credit cost: 1 credit per 10 unfollows (deducted in batches of 10)
+        if (unfollowedCount % 10 === 0) {
+          deductCredits(1);
+          if (statusText) statusText.textContent += ` [1 Credit deducted for 10 unfollows]`;
+        }
+
+        // Persist progress
+        await chrome.storage.local.set({ atomx_unfollowed_accounts: persistedUnfollowed }).catch(() => null);
+
+        // Check if target limit reached
+        if (unfollowedCount >= targetLimit) {
+          break;
+        }
+
+        // RULE: Long Break vs Normal Pacing Break
+        // Every 16 unfollows -> 2 minute long break (120 seconds)
+        if (unfollowedCount % 16 === 0) {
+          if (stateBadge) stateBadge.textContent = 'LONG_BREAK';
+          if (countdownEl) countdownEl.style.display = 'block';
+          for (let s = 120; s > 0; s--) {
+            if (state.isAborted) break;
+            const min = Math.floor(s / 60);
+            const sec = s % 60;
+            const secStr = sec < 10 ? '0' + sec : sec;
+            if (statusText) statusText.textContent = `☕ Safety Long Break: Pausing 2 min after ${unfollowedCount} unfollows...`;
+            if (countdownEl) countdownEl.textContent = `☕ Long break: ${min}m ${secStr}s remaining...`;
+            await sleep(1000);
+          }
+          if (countdownEl) countdownEl.style.display = 'none';
+        } else {
+          // Normal pacing delay (e.g. 15-20s)
+          if (stateBadge) stateBadge.textContent = 'WAITING';
+          if (countdownEl) countdownEl.style.display = 'block';
+          for (let s = delaySec; s > 0; s--) {
+            if (state.isAborted) break;
+            if (statusText) statusText.textContent = `Pacing safety delay before next account...`;
+            if (countdownEl) countdownEl.textContent = `⏱️ Next in ${s}s...`;
+            await sleep(1000);
+          }
+          if (countdownEl) countdownEl.style.display = 'none';
+        }
+      } else if (stepRes.action === 'SKIPPED') {
+        consecutiveScrolls = 0;
+        skippedCount++;
+        if (stepRes.handle) processedHandlesSet.add(stepRes.handle.toLowerCase());
+        if (skipEl) skipEl.textContent = skippedCount;
+        if (statusText) statusText.textContent = `Skipped @${stepRes.handle || 'account'} (${stepRes.reason || 'Protected'}).`;
+        await sleep(800);
+      } else if (stepRes.action === 'SCROLLED') {
+        consecutiveScrolls++;
+        if (statusText) statusText.textContent = `Auto-scrolling following list (${consecutiveScrolls})...`;
+        await sleep(1600);
+        if (consecutiveScrolls >= 5) {
+          // List ended (no more accounts found after 5 consecutive scrolls)
+          if (statusText) statusText.textContent = `End of following list reached!`;
+          break;
+        }
+      } else if (stepRes.action === 'FAILED') {
+        failedCount++;
+        if (stepRes.handle) processedHandlesSet.add(stepRes.handle.toLowerCase());
+        if (failEl) failEl.textContent = failedCount;
+        if (statusText) statusText.textContent = `Failed on @${stepRes.handle || 'account'}: ${stepRes.error || 'Unknown error'}.`;
+        await sleep(1200);
+      } else {
+        await sleep(2000);
+      }
+    }
+
+    if (!state.isAborted) {
+      if (stateBadge) stateBadge.textContent = 'DONE';
+      if (barEl) barEl.style.width = '100%';
+      if (countdownEl) countdownEl.style.display = 'none';
+      if (statusText) statusText.textContent = `✓ Auto Unfollow finished! Unfollowed: ${unfollowedCount}, Skipped: ${skippedCount}, Failed: ${failedCount}.`;
+      alert(`🧹 Auto Unfollow Cycle Finished!\n\n• Target: ${targetLimit}\n• Successfully Unfollowed: ${unfollowedCount}\n• Skipped (Follows back / Whitelisted): ${skippedCount}\n• Failed: ${failedCount}\n• Total Credits Deducted: ${Math.floor(unfollowedCount / 10)} Credit(s)\n\nDesigned within safety limits with pacing delays and long breaks.`);
+    } else {
+      if (stateBadge) stateBadge.textContent = 'STOPPED';
+      if (statusText) statusText.textContent = 'Auto Unfollow stopped by user.';
+    }
+  } catch (err) {
+    console.error('Auto Unfollow error:', err);
+    if (stateBadge) stateBadge.textContent = 'FAILED';
+    alert('Auto Unfollow error: ' + err.message);
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (countdownEl) countdownEl.style.display = 'none';
     if (shouldCloseWorkingTab && workingTabId) {
       chrome.tabs?.remove(workingTabId).catch(() => null);
     }

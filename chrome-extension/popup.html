@@ -680,107 +680,216 @@
             <!-- Workspace 6: Reply Back (A6, Posts, Fully Auto) -->
             <div class="agent-panel-content" id="panel-agent-replyback" style="display:none; flex-direction:column; gap:10px;">
               <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-                <strong>Auto-Reply To All Comments:</strong> Paste up to 3 links of your own posts. Bot visits each post, likes incoming comments (❤️), and generates authentic human replies with letter-by-letter typing and intentional typo correction.
+                <strong>Auto-Reply To Your Own Posts:</strong> Target comments exclusively on your own posts. Scans replies, auto-likes (❤️), generates authentic AI replies with letter-by-letter human typing, and handles nested/self-comment filtering.
               </div>
 
-              <!-- Your Posts Input (Max 3 Posts) -->
+              <!-- Phase A: Add Your Post Links (Max 3 Posts) -->
               <div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <label class="opt-label" style="margin-bottom:0;">Add Your Post Links (Max 3 Posts)</label>
-                  <span id="replyBackPostCountBadge" style="font-size:10px; font-weight:700; color:var(--blue-primary);">1 / 3 Posts</span>
+                  <label class="opt-label" style="margin-bottom:0;">Your Post Links (Max 3 Posts)</label>
+                  <button type="button" class="badge-mini" id="replyBackUseCurrentTabBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">⚡ Current Tab</button>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:6px;">
-                  <input type="text" id="myTweetUrlInput1" class="ext-input" placeholder="Post 1 URL: https://x.com/yourhandle/status/1842...">
-                  <input type="text" id="myTweetUrlInput2" class="ext-input" placeholder="Post 2 URL (Optional): https://x.com/yourhandle/status/...">
-                  <input type="text" id="myTweetUrlInput3" class="ext-input" placeholder="Post 3 URL (Optional): https://x.com/yourhandle/status/...">
+                  <input type="text" id="myTweetUrlInput1" class="ext-input" placeholder="Post 1: https://x.com/yourhandle/status/18420958...">
+                  <input type="text" id="myTweetUrlInput2" class="ext-input" placeholder="Post 2 (Optional): https://x.com/yourhandle/status/...">
+                  <input type="text" id="myTweetUrlInput3" class="ext-input" placeholder="Post 3 (Optional): https://x.com/yourhandle/status/...">
                 </div>
               </div>
 
-              <!-- Tone & Strategy Selection -->
+              <!-- Reply Limits & Like Control -->
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
-                  <label class="opt-label">Reply Tone / Persona</label>
+                  <label class="opt-label">Max Replies Per Post</label>
+                  <select id="replyBackMaxCountSelect" class="ext-select">
+                    <option value="999" selected>All Comments Found</option>
+                    <option value="5">Up to 5 Comments</option>
+                    <option value="10">Up to 10 Comments</option>
+                    <option value="20">Up to 20 Comments</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Pacing Delay / Break</label>
+                  <select id="replyBackDelaySelect" class="ext-select">
+                    <option value="12" selected>10 - 15s (Human Pacing)</option>
+                    <option value="18">15 - 20s (Recommended)</option>
+                    <option value="25">20 - 30s (Ultra Safe)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Reply Tone / Style</label>
                   <select id="replyBackToneSelect" class="ext-select">
                     <option value="Natural & Concise" selected>Natural & Concise</option>
                     <option value="Bullish">Bullish & Supportive</option>
                     <option value="Founder Alpha">Founder / Operator Alpha</option>
                     <option value="Friendly">Warm & Grateful</option>
-                    <option value="Engaging Question">Insightful Follow-up Question</option>
+                    <option value="Engaging Question">Insightful Follow-up</option>
                   </select>
                 </div>
-                <div>
-                  <label class="opt-label">Pacing Delay Between Replies</label>
-                  <select id="replyBackDelaySelect" class="ext-select">
-                    <option value="12" selected>10 - 15s (Human Pacing)</option>
-                    <option value="6">5 - 8s (Fast)</option>
-                    <option value="20">18 - 25s (Conservative)</option>
-                  </select>
+                <div style="display:flex; align-items:center; margin-top:16px;">
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                    <input type="checkbox" id="replyBackAutoLikeCheck" checked>
+                    <span>❤️ Auto-Like comment</span>
+                  </label>
                 </div>
               </div>
 
-              <!-- Live Progress & Queue Feedback Card -->
-              <div id="replyBackProgressCard" style="display:none; padding:10px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <span style="font-weight:700; color:var(--text-primary);" id="replyBackPostIndicator">Post 1 of 1</span>
-                  <span id="replyBackProgressBadge" style="font-weight:800; color:var(--status-success); font-family:monospace;">0 / 0 REPLIED</span>
+              <!-- Cost & Snapshot Notice -->
+              <div style="font-size:10.5px; color:var(--text-muted); background:var(--bg-canvas); padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle);">
+                💳 <strong>Cost:</strong> 1 credit per reply posted. Snapshot queue prevents infinite loops on newly arriving comments.
+              </div>
+
+              <!-- Risk Note -->
+              <div style="font-size:10.5px; color:#F59E0B; background:rgba(245, 158, 11, 0.1); padding:6px 10px; border-radius:6px; border:1px solid rgba(245, 158, 11, 0.25); line-height:1.35;">
+                ⚠️ <strong>Risk reduction note:</strong> Rapid successive replies can trigger X burst activity limits. Configurable pacing delay and human typing reduce risk but do not eliminate it.
+              </div>
+
+              <!-- State Machine & Progress Card -->
+              <div id="replyBackProgressCard" style="display:none; padding:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="live-dot" id="replyBackLiveDot"></span>
+                    <span id="replyBackStateBadge" class="badge-mini auto" style="font-family:monospace;">IDLE</span>
+                  </div>
+                  <span id="replyBackPostIndicator" style="font-weight:700; color:var(--text-primary);">Post 1 of 1</span>
                 </div>
-                <div style="width:100%; height:6px; background:var(--border-subtle); border-radius:3px; overflow:hidden; margin-bottom:6px;">
+                <div style="width:100%; height:6px; background:var(--bg-canvas); border-radius:3px; overflow:hidden; margin-bottom:8px;">
                   <div id="replyBackProgressBar" style="width:0%; height:100%; background:var(--status-success); transition:width 0.3s ease;"></div>
                 </div>
-                <div style="display:flex; justify-content:space-between; color:var(--text-secondary); font-size:10px; margin-bottom:4px;">
-                  <span>Done: <strong id="replyBackDoneCount" style="color:var(--status-success);">0</strong></span>
-                  <span>Queue: <strong id="replyBackQueueCount" style="color:var(--blue-primary);">0</strong></span>
-                  <span>Current: <strong id="replyBackCurrentUser" style="color:var(--text-primary);">—</strong></span>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; text-align:center; margin-bottom:8px;">
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--text-muted);">Replied</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--status-success);" id="replyBackDoneCount">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--text-muted);">Queue</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--blue-primary);" id="replyBackQueueCount">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--text-muted);">Skipped (Self)</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--text-muted);" id="replyBackSkippedCount">0</div>
+                  </div>
                 </div>
-                <div id="replyBackLiveStatusText" style="color:var(--text-secondary); font-size:10.5px; line-height:1.3;">Scanning post for incoming community comments...</div>
+                <div id="replyBackLiveStatusText" style="color:var(--text-secondary); font-size:11px; line-height:1.3;">Ready to scan comments...</div>
+                <div id="replyBackCountdownText" style="display:none; color:var(--blue-primary); font-weight:700; font-size:10.5px; margin-top:4px;">⏱️ Next reply in 12s...</div>
               </div>
 
               <!-- Action Buttons -->
-              <div style="display:flex; gap:6px; margin-top:4px;">
+              <div style="display:flex; gap:6px; margin-top:2px;">
                 <button class="primary-btn mini-btn" id="runReplyBackBtn" style="flex:2; margin-top:0;">▶ START AUTO REPLY BACK</button>
                 <button class="secondary-btn mini-btn" id="stopReplyBackBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
               </div>
             </div>
 
-            <!-- Workspace 7: Auto Unfollow (A7, Safety) -->
+            <!-- Workspace 7: Auto Unfollow (A7, Standalone Safety Optimizer) -->
             <div class="agent-panel-content" id="panel-agent-unfollow" style="display:none; flex-direction:column; gap:10px;">
               <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-                <strong>Ratio Optimizer & Safety Scanner:</strong> Clean up inactive accounts and non-followers while protecting your VIP contacts and friends with randomized safety pacing.
+                <strong>Following Cleaner:</strong> Opens your Following list and unfollows one account at a time. Filters accounts that do not follow you back or have low scores, using smart auto-scroll, safe pacing, and automatic long breaks.
               </div>
 
+              <!-- Phase A: Filter Selection (Can select either or both) -->
               <div>
-                <label class="opt-label">Unfollow Filtering Rule</label>
-                <select id="unfollowCriteria" class="ext-select">
-                  <option value="nonfollowers" selected>Accounts Not Following You Back</option>
-                  <option value="walchain">Accounts with Low Walchain Score (&lt;30)</option>
-                  <option value="inactive">Inactive for &gt; 30 Days (No Posts)</option>
-                </select>
+                <label class="opt-label">Unfollow Filtering Criteria (Select one or both)</label>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <label style="display:flex; align-items:center; gap:8px; font-size:11.5px; background:var(--bg-card); padding:8px 10px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="unfollowCriteriaNotFollowing" checked>
+                    <span><strong>Does Not Follow Back</strong> (Missing "Follows you" badge)</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:8px; font-size:11.5px; background:var(--bg-card); padding:8px 10px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="unfollowCriteriaLowScore">
+                    <span><strong>Low Wallchain / Influence Score</strong> (Below threshold)</span>
+                  </label>
+                </div>
               </div>
 
+              <!-- Score Threshold & Target Limit -->
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
-                  <label class="opt-label">Max Unfollows Per Batch</label>
-                  <select id="unfollowMaxCount" class="ext-select">
-                    <option value="15" selected>15 Accounts (Safe Daily)</option>
-                    <option value="25">25 Accounts</option>
-                    <option value="50">50 Accounts (Max Safe)</option>
-                  </select>
+                  <label class="opt-label">Score Threshold</label>
+                  <input type="number" id="unfollowScoreThresholdInput" class="ext-input" value="30" min="5" max="100" placeholder="e.g. 30">
                 </div>
                 <div>
-                  <label class="opt-label">Safety Delay</label>
-                  <select id="unfollowDelaySelect" class="ext-select">
-                    <option value="8" selected>8 - 14s (Randomized)</option>
-                    <option value="15">15 - 25s (Ultra Safe)</option>
+                  <label class="opt-label">Target Limit (Max 2000)</label>
+                  <select id="unfollowMaxCount" class="ext-select">
+                    <option value="25" selected>25 Accounts</option>
+                    <option value="50">50 Accounts</option>
+                    <option value="100">100 Accounts</option>
+                    <option value="250">250 Accounts</option>
+                    <option value="500">500 Accounts</option>
+                    <option value="1000">1000 Accounts</option>
+                    <option value="2000">2000 Accounts (Max)</option>
                   </select>
                 </div>
               </div>
 
+              <!-- Pacing & Delays -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Delay Per Unfollow</label>
+                  <select id="unfollowDelaySelect" class="ext-select">
+                    <option value="18" selected>15 - 20s (Default Safe)</option>
+                    <option value="14">12 - 15s (Faster)</option>
+                    <option value="25">20 - 25s (Ultra Conservative)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Long Break Rule</label>
+                  <div style="font-size:10.5px; color:var(--text-muted); padding:8px; background:var(--bg-canvas); border-radius:6px; border:1px solid var(--border-subtle); line-height:1.3;">
+                    ☕ 2 min break every 16 unfollows
+                  </div>
+                </div>
+              </div>
+
+              <!-- Whitelist -->
               <div>
                 <label class="opt-label">Whitelist Protected Accounts (Never Unfollow)</label>
                 <input type="text" id="unfollowWhitelistInput" class="ext-input" placeholder="@friend1, @partner2, @vitalikbuterin" style="font-size:11px;">
               </div>
 
-              <div style="display:flex; gap:6px; margin-top:4px;">
+              <!-- Cost Notice -->
+              <div style="font-size:10.5px; color:var(--text-muted); background:var(--bg-canvas); padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle);">
+                💳 <strong>Cost:</strong> 1 credit per 10 unfollows (deducted in batches of 10). Auto-scrolls timeline automatically.
+              </div>
+
+              <!-- Risk Note -->
+              <div style="font-size:10.5px; color:#F59E0B; background:rgba(245, 158, 11, 0.1); padding:6px 10px; border-radius:6px; border:1px solid rgba(245, 158, 11, 0.25); line-height:1.35;">
+                ⚠️ <strong>Safety Notice:</strong> Designed to operate within standard safety thresholds. Bulk unfollowing carries platform rate limit risks; pacing and long breaks reduce automation detection.
+              </div>
+
+              <!-- State Machine & Progress Card -->
+              <div id="unfollowProgressCard" style="display:none; padding:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="live-dot" id="unfollowLiveDot"></span>
+                    <span id="unfollowStateBadge" class="badge-mini safety" style="font-family:monospace;">IDLE</span>
+                  </div>
+                  <span id="unfollowProgressText" style="font-weight:700; color:var(--text-primary);">0 / 25</span>
+                </div>
+                <div style="width:100%; height:6px; background:var(--bg-canvas); border-radius:3px; overflow:hidden; margin-bottom:8px;">
+                  <div id="unfollowProgressBar" style="width:0%; height:100%; background:var(--blue-primary); transition:width 0.3s ease;"></div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; text-align:center; margin-bottom:8px;">
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:#EF4444;">Unfollowed</div>
+                    <div style="font-weight:800; font-size:13px; color:#EF4444;" id="unfollowCountDone">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--text-muted);">Skipped</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--text-primary);" id="unfollowCountSkipped">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--text-muted);">Failed</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--text-muted);" id="unfollowCountFailed">0</div>
+                  </div>
+                </div>
+                <div id="unfollowLiveStatusText" style="color:var(--text-secondary); font-size:11px; line-height:1.3;">Ready to scan following list...</div>
+                <div id="unfollowCountdownText" style="display:none; color:var(--blue-primary); font-weight:700; font-size:10.5px; margin-top:4px;">⏱️ Next in 18s...</div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div style="display:flex; gap:6px; margin-top:2px;">
                 <button class="secondary-btn mini-btn" id="runAutoUnfollowBtn" style="flex:2; margin-top:0; background:rgba(239,68,68,0.08); color:#DC2626; border-color:rgba(239,68,68,0.3);">🧹 SCAN & SAFE UNFOLLOW</button>
                 <button class="secondary-btn mini-btn" id="stopAutoUnfollowBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
               </div>

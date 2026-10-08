@@ -483,6 +483,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  // Agent 7: Auto Unfollow — Scan following page and unfollow matching accounts
+  if (message.type === 'EXECUTE_AUTO_UNFOLLOW_STEP') {
+    executeAutoUnfollowStep(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 // Wait for element helper with timeout
@@ -1318,41 +1326,86 @@ async function executeReplyBackCycle(params = {}) {
   }
 
   const mainArticle = getMainPostArticle();
-  const loggedInHandle = getLoggedInUserHandle();
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
   const style = params.style || 'Natural & Concise';
   const delaySec = Number(params.delaySec || 12);
+  const maxComments = Number(params.maxComments || 999);
+  const autoLike = params.autoLike !== false;
+  const alreadyReplied = new Set(Array.isArray(params.alreadyRepliedIds) ? params.alreadyRepliedIds : []);
 
-  // Collect all comments below the main post
+  // 1. Initial scrolling & handle "Load more replies" to hydrate existing comments
+  for (let s = 0; s < 3; s++) {
+    window.scrollBy({ top: 600, behavior: 'smooth' });
+    await sleep(800);
+    // Click any "Show more replies" buttons if present
+    const loadMoreButtons = Array.from(document.querySelectorAll('button[role="button"]')).filter(b => {
+      const txt = (b.innerText || '').toLowerCase();
+      return txt.includes('show replies') || txt.includes('show more replies') || txt.includes('show probability');
+    });
+    if (loadMoreButtons.length > 0) {
+      loadMoreButtons[0].click();
+      await sleep(1000);
+    }
+  }
+
+  // Scroll back to top of comments
+  if (mainArticle) {
+    mainArticle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    await sleep(800);
+  }
+
+  // 2. Take a strict SNAPSHOT of comments at this moment (never re-queries mid-run)
   const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
-  const commentArticles = allArticles.filter(a => a !== mainArticle);
+  const rawComments = allArticles.filter(a => a !== mainArticle);
+
+  // Filter out self-comments and already replied comments
+  const snapshotQueue = [];
+  let skippedSelf = 0;
+
+  for (const art of rawComments) {
+    const data = extractTweetData(art);
+    const authorHandle = (data.authorHandle || '').toLowerCase().replace(/^@/, '').trim();
+
+    // Skip your own comments & nested self replies
+    if (authorHandle && loggedInHandle && authorHandle === loggedInHandle) {
+      skippedSelf++;
+      continue;
+    }
+
+    // Skip if already replied in previous runs
+    const commentKey = `${authorHandle}_${(data.text || '').slice(0, 30)}`;
+    if (alreadyReplied.has(commentKey)) {
+      skippedSelf++;
+      continue;
+    }
+
+    snapshotQueue.push({ article: art, data, commentKey, authorHandle });
+    if (snapshotQueue.length >= maxComments) break;
+  }
 
   const results = [];
   let doneCount = 0;
 
-  for (let i = 0; i < commentArticles.length; i++) {
+  for (let i = 0; i < snapshotQueue.length; i++) {
     if (isWorkflowAborted) break;
 
-    const commentArt = commentArticles[i];
-    const commentData = extractTweetData(commentArt);
-    const commenterHandle = (commentData.authorHandle || '').toLowerCase().replace('@', '');
-
-    // Skip your own comments
-    if (commenterHandle && loggedInHandle && commenterHandle === loggedInHandle.toLowerCase()) {
-      continue;
-    }
+    const item = snapshotQueue[i];
+    const { article: commentArt, data: commentData, commentKey } = item;
 
     // Scroll comment into view
     commentArt.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await sleep(600);
 
     // 1. Auto-Like the comment (❤️)
-    try {
-      const likeBtn = commentArt.querySelector('button[data-testid="like"]');
-      if (likeBtn) {
-        likeBtn.click();
-        await sleep(400);
-      }
-    } catch (e) {}
+    if (autoLike) {
+      try {
+        const likeBtn = commentArt.querySelector('button[data-testid="like"]');
+        if (likeBtn) {
+          likeBtn.click();
+          await sleep(400);
+        }
+      } catch (e) {}
+    }
 
     // 2. Generate Contextual AI reply for this comment via background worker
     let replyText = '';
@@ -1396,24 +1449,130 @@ async function executeReplyBackCycle(params = {}) {
         submitBtn.removeAttribute('disabled');
         submitBtn.click();
         doneCount++;
-        results.push({ commenter: commentData.authorHandle, reply: replyText });
+        results.push({ commenter: commentData.authorHandle, reply: replyText, commentKey });
         await sleep(800);
       }
     }
 
     // 6. Safe delay before next comment
-    if (i < commentArticles.length - 1 && !isWorkflowAborted) {
+    if (i < snapshotQueue.length - 1 && !isWorkflowAborted) {
       await sleep(delaySec * 1000);
     }
   }
 
   return {
     success: true,
-    totalComments: commentArticles.length,
+    totalFound: rawComments.length,
+    queuedCount: snapshotQueue.length,
     repliedCount: doneCount,
+    skippedSelf,
     results,
     aborted: isWorkflowAborted
   };
+}
+
+// =========================================================================
+// AGENT 7: AUTO UNFOLLOW STANDALONE ENGINE
+// =========================================================================
+async function executeAutoUnfollowStep(params = {}) {
+  isWorkflowAborted = false;
+  const { criteria = { notFollowing: true, lowScore: false }, scoreThreshold = 30, whitelist = [], processedHandles = [] } = params;
+  const cleanWhitelist = new Set((whitelist || []).map(w => w.replace(/^@/, '').toLowerCase().trim()));
+  const alreadyProcessed = new Set((processedHandles || []).map(h => h.toLowerCase().trim()));
+
+  // Ensure on following page or scroll to load more
+  let userCells = Array.from(document.querySelectorAll('div[data-testid="UserCell"]'));
+  if (userCells.length === 0) {
+    window.scrollBy({ top: 600, behavior: 'smooth' });
+    await sleep(1500);
+    userCells = Array.from(document.querySelectorAll('div[data-testid="UserCell"]'));
+  }
+
+  if (userCells.length === 0) {
+    return { success: false, error: 'No user cells found on following page' };
+  }
+
+  for (const cell of userCells) {
+    if (isWorkflowAborted) break;
+
+    // Extract handle
+    const link = cell.querySelector('a[href^="/"]');
+    const href = link ? (link.getAttribute('href') || '').replace(/^\//, '').split('/')[0].split('?')[0].toLowerCase().trim() : '';
+    if (!href || ['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(href)) continue;
+
+    // 1. Whitelist Check
+    if (cleanWhitelist.has(href)) {
+      alreadyProcessed.add(href);
+      continue; // Skip whitelisted VIP
+    }
+
+    // 2. Check if already processed in this session
+    if (alreadyProcessed.has(href)) {
+      continue;
+    }
+
+    // Mark as visited in session
+    alreadyProcessed.add(href);
+
+    // 3. Check "Follows you" badge
+    // Twitter/X renders a span with text "Follows you" inside [data-testid="userFollowIndicator"]
+    const followIndicator = cell.querySelector('[data-testid="userFollowIndicator"]');
+    const cellText = (cell.innerText || '');
+    const followsYou = cellText.includes('Follows you') || (followIndicator && followIndicator.innerText.includes('Follows you'));
+
+    // Check criteria match
+    let shouldUnfollow = false;
+    if (criteria.notFollowing && !followsYou) {
+      shouldUnfollow = true;
+    }
+    if (criteria.lowScore && !shouldUnfollow) {
+      // User specified low score rule
+      shouldUnfollow = true;
+    }
+
+    if (!shouldUnfollow) {
+      return { success: true, action: 'SKIPPED', handle: href, reason: 'Follows you back' };
+    }
+
+    // 4. Find Following button to click
+    const followBtn = cell.querySelector('button[data-testid$="-unfollow"]') ||
+                      Array.from(cell.querySelectorAll('button')).find(b => (b.innerText || '').trim().toLowerCase() === 'following');
+
+    if (!followBtn) {
+      return { success: true, action: 'SKIPPED', handle: href, reason: 'Already not following' };
+    }
+
+    // Scroll into view
+    cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await sleep(500);
+
+    // Click Unfollow button
+    followBtn.click();
+    await sleep(600);
+
+    // Confirm dialog: click "Unfollow" in confirmation modal
+    const confirmBtn = await waitForElement('button[data-testid="confirmationSheetConfirm"]', 2500);
+    if (confirmBtn) {
+      confirmBtn.click();
+      await sleep(700);
+      return { success: true, action: 'UNFOLLOWED', handle: href };
+    } else {
+      // Try fallback modal confirmation
+      const modalBtn = Array.from(document.querySelectorAll('div[role="dialog"] button')).find(b => (b.innerText || '').trim().toLowerCase() === 'unfollow');
+      if (modalBtn) {
+        modalBtn.click();
+        await sleep(700);
+        return { success: true, action: 'UNFOLLOWED', handle: href };
+      }
+    }
+
+    return { success: false, action: 'FAILED', handle: href, error: 'Confirmation button not found' };
+  }
+
+  // If reached end of visible cells, scroll down to load more
+  window.scrollBy({ top: 800, behavior: 'smooth' });
+  await sleep(1500);
+  return { success: true, action: 'SCROLLED' };
 }
 
 // =========================================================================
