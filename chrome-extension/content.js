@@ -265,15 +265,81 @@ const QWERTY_NEIGHBORS = {
 };
 
 /**
+ * Gentle scroll into view that never causes violent jumps or jarring snaps.
+ * If element is already visible within comfortable viewport bounds, does not move the screen at all!
+ */
+function gentleScrollIntoView(element) {
+  if (!element) return;
+  try {
+    const rect = element.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    // Already nicely visible on screen
+    if (rect.top >= 60 && rect.bottom <= vh - 40) {
+      return;
+    }
+    element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    // Graceful fallback
+  }
+}
+
+/**
+ * Natural human-like reading scroll for tweet status pages.
+ * Smoothly scrolls down through the tweet text to bring the action toolbar
+ * (like/repost) and reply/comment composer comfortably into the lower-middle viewport.
+ */
+async function smoothScrollPostForReading(mainArticle) {
+  if (!mainArticle) {
+    window.scrollBy({ top: 380, behavior: 'smooth' });
+    await sleep(800);
+    return;
+  }
+
+  try {
+    // Find action toolbar (Like, Repost, Reply bar) or inline reply box
+    const actionBar = mainArticle.querySelector('div[role="group"]');
+    const replyTarget = document.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]') ||
+                        mainArticle.querySelector('button[data-testid="reply"]') ||
+                        actionBar;
+
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+
+    if (replyTarget) {
+      const rect = replyTarget.getBoundingClientRect();
+      // If reply area is already comfortably in the lower half of screen, just slight pause
+      if (rect.top >= 150 && rect.bottom <= vh - 50) {
+        await sleep(600);
+        return;
+      }
+
+      // Calculate smooth target scroll position so action bar & reply box sit at ~60-70% down viewport
+      const targetY = window.scrollY + rect.top - (vh * 0.65);
+      if (targetY > window.scrollY + 30) {
+        window.scrollTo({ top: Math.max(0, Math.round(targetY)), behavior: 'smooth' });
+        await sleep(900); // Natural human reading pause
+        return;
+      }
+    }
+
+    // Fallback: smooth human scroll down to reveal reply area
+    window.scrollBy({ top: 420, behavior: 'smooth' });
+    await sleep(800);
+  } catch (e) {
+    window.scrollBy({ top: 350, behavior: 'smooth' });
+    await sleep(800);
+  }
+}
+
+/**
  * Human-like letter-by-letter typing with intentional typos & backspace corrections.
  * Fully compatible with modern X (Twitter) DraftJS & Lexical rich-text editors.
  */
 async function typeTextHumanLike(editor, text) {
   if (!editor || !text) return false;
 
-  // 1. Focus editor and place blinking cursor in comment box
-  editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  await sleep(200);
+  // 1. Focus editor and place blinking cursor in comment box gently without jumping
+  gentleScrollIntoView(editor);
+  await sleep(150);
 
   editor.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
   editor.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
@@ -420,8 +486,8 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   let textarea = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
 
   if (!textarea && replyBtn) {
-    replyBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await sleep(300);
+    gentleScrollIntoView(replyBtn);
+    await sleep(200);
     replyBtn.click();
     await sleep(800);
   }
@@ -504,8 +570,8 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   await sleep(150);
 
   // 5. Click Submit EXACTLY ONCE (No duplicate click dispatch, no retry clicks!)
-  submitBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  await sleep(200);
+  gentleScrollIntoView(submitBtn);
+  await sleep(150);
 
   submitBtn.focus();
   submitBtn.click();
@@ -763,11 +829,62 @@ async function executeAutonomousTweetWorkflow(params) {
     };
   }
 
-  // 3. Smooth Scroll down to mimic human reader
+  // 3. Auto-Follow Creator FIRST (Naturally executed at top of post while avatar & header are in full view)
+  if (actions.follow && !isWorkflowAborted) {
+    try {
+      // 1. Look inside mainArticle author header
+      let followBtn = Array.from(mainArticle.querySelectorAll('button, div[role="button"]')).find(b => {
+        const txt = (b.innerText || '').trim();
+        const testId = b.getAttribute('data-testid') || '';
+        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
+      });
+
+      // 2. Look across whole page if not directly inside mainArticle header
+      if (!followBtn) {
+        followBtn = Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => {
+          const txt = (b.innerText || '').trim();
+          const testId = b.getAttribute('data-testid') || '';
+          return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
+        });
+      }
+
+      // 3. Hover over author avatar/name to trigger Twitter HoverCard if not visible directly
+      if (!followBtn) {
+        const authorLink = mainArticle.querySelector('div[data-testid="User-Name"] a, a[role="link"][href*="/"]');
+        if (authorLink) {
+          authorLink.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+          await sleep(650);
+          const hoverCard = document.querySelector('div[data-testid="HoverCard"], div[role="dialog"]');
+          if (hoverCard) {
+            followBtn = Array.from(hoverCard.querySelectorAll('button')).find(b => {
+              const txt = (b.innerText || '').trim();
+              return txt === 'Follow' && !txt.includes('Following');
+            });
+          }
+        }
+      }
+
+      if (followBtn) {
+        followBtn.click();
+        performed.push('Followed Creator ➕');
+        await sleep(600);
+      } else {
+        const isFollowing = Array.from(document.querySelectorAll('button')).some(b => (b.innerText || '').trim() === 'Following');
+        if (isFollowing) {
+          performed.push('Already Following');
+        }
+      }
+    } catch (e) {
+      console.warn('Follow action error:', e);
+    }
+  }
+
+  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+
+  // 4. Natural Reading Scroll: Smoothly scroll down through post to bring action bar & comment box into view together
   if (actions.scroll !== false && !isWorkflowAborted) {
-    window.scrollBy({ top: 320, behavior: 'smooth' });
+    await smoothScrollPostForReading(mainArticle);
     performed.push('Scrolled & hydrated');
-    await sleep(800);
   }
 
   if (isWorkflowAborted) return { success: false, aborted: true, performed };
@@ -801,7 +918,7 @@ function sanitizeClientComment(text, maxWords = 10) {
   return clean;
 }
 
-  // 4. Auto-Like Action (MAIN POST ONLY) with Natural Human Variance (Skip ~1 in 7-8 posts randomly)
+  // 5. Auto-Like Action (MAIN POST ONLY) with Natural Human Variance (Skip ~1 in 7-8 posts randomly)
   let shouldExecuteLike = shouldLike;
   if (shouldLike && actions.comment) {
     const skipLikeRandomly = Math.random() < 0.13; // ~12.5% chance to skip like naturally
@@ -818,7 +935,7 @@ function sanitizeClientComment(text, maxWords = 10) {
       if (likeBtn) {
         likeBtn.click();
         performed.push('Liked Main Post ❤️');
-        await sleep(600);
+        await sleep(500);
       }
     } catch (e) {
       console.warn('Like action error:', e);
@@ -827,7 +944,7 @@ function sanitizeClientComment(text, maxWords = 10) {
 
   if (isWorkflowAborted) return { success: false, aborted: true, performed };
 
-  // 5. Auto-Repost Action (MAIN POST ONLY)
+  // 6. Auto-Repost Action (MAIN POST ONLY)
   if (actions.repost && !isWorkflowAborted) {
     try {
       const isAlreadyReposted = !!mainArticle.querySelector('button[data-testid="unretweet"], div[data-testid="unretweet"]');
@@ -837,7 +954,7 @@ function sanitizeClientComment(text, maxWords = 10) {
         const rtBtn = mainArticle.querySelector('button[data-testid="retweet"], div[data-testid="retweet"], button[aria-label*="Repost" i], button[aria-label*="Retweet" i]');
         if (rtBtn) {
           rtBtn.click();
-          await sleep(600);
+          await sleep(500);
           // Twitter confirms with either data-testid="retweetConfirm" or menuitem containing text Repost
           let confirmBtn = document.querySelector('div[data-testid="retweetConfirm"], button[data-testid="retweetConfirm"]');
           if (!confirmBtn) {
@@ -850,64 +967,12 @@ function sanitizeClientComment(text, maxWords = 10) {
           if (confirmBtn) {
             confirmBtn.click();
             performed.push('Reposted 🔁');
-            await sleep(600);
+            await sleep(500);
           }
         }
       }
     } catch (e) {
       console.warn('Repost action error:', e);
-    }
-  }
-
-  if (isWorkflowAborted) return { success: false, aborted: true, performed };
-
-  // 6. Auto-Follow Creator Action
-  if (actions.follow && !isWorkflowAborted) {
-    try {
-      // 1. Look inside mainArticle
-      let followBtn = Array.from(mainArticle.querySelectorAll('button, div[role="button"]')).find(b => {
-        const txt = (b.innerText || '').trim();
-        const testId = b.getAttribute('data-testid') || '';
-        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
-      });
-
-      // 2. Look across whole page for creator's follow button
-      if (!followBtn) {
-        followBtn = Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => {
-          const txt = (b.innerText || '').trim();
-          const testId = b.getAttribute('data-testid') || '';
-          return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
-        });
-      }
-
-      // 3. Hover over author avatar/name to trigger Twitter HoverCard if not visible
-      if (!followBtn) {
-        const authorLink = mainArticle.querySelector('div[data-testid="User-Name"] a, a[role="link"][href*="/"]');
-        if (authorLink) {
-          authorLink.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-          await sleep(650);
-          const hoverCard = document.querySelector('div[data-testid="HoverCard"], div[role="dialog"]');
-          if (hoverCard) {
-            followBtn = Array.from(hoverCard.querySelectorAll('button')).find(b => {
-              const txt = (b.innerText || '').trim();
-              return txt === 'Follow' && !txt.includes('Following');
-            });
-          }
-        }
-      }
-
-      if (followBtn) {
-        followBtn.click();
-        performed.push('Followed Creator ➕');
-        await sleep(600);
-      } else {
-        const isFollowing = Array.from(document.querySelectorAll('button')).some(b => (b.innerText || '').trim() === 'Following');
-        if (isFollowing) {
-          performed.push('Already Following');
-        }
-      }
-    } catch (e) {
-      console.warn('Follow action error:', e);
     }
   }
 
@@ -1307,7 +1372,7 @@ async function engageAndFollowProfile(options = {}) {
   let replyDone = 0;
 
   try {
-    // Step 1: Check if already followed on page
+    // Step 1: Follow Check & Action right at the top of the profile where avatar and Follow button are visible
     const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
     const alreadyBtn = buttons.find(b => {
       const txt = (b.innerText || '').trim();
@@ -1315,16 +1380,30 @@ async function engageAndFollowProfile(options = {}) {
       return txt === 'Following' || testId.includes('unfollow') || txt.includes('Following');
     });
 
-    // If already followed and neither like nor reply is requested, exit early
-    if (alreadyBtn && !likePosts && !replyPosts) {
-      return { success: true, alreadyFollowing: true, handle: targetHandle, message: 'Already Following' };
+    let followed = false;
+    if (!alreadyBtn) {
+      const followBtn = buttons.find(b => {
+        const txt = (b.innerText || '').trim();
+        const testId = b.getAttribute('data-testid') || '';
+        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
+      });
+      if (followBtn) {
+        followBtn.click();
+        followed = true;
+        await sleep(650);
+      }
     }
 
-    // Step 2: DEEP SCROLL past profile header banner, avatar, bio & tabs to load recent posts
-    window.scrollBy({ top: 700, behavior: 'smooth' });
-    await sleep(1100);
-    window.scrollBy({ top: 500, behavior: 'smooth' });
-    await sleep(1000);
+    // If already followed (or just followed) and neither like nor reply is requested, exit early
+    if ((alreadyBtn || followed) && !likePosts && !replyPosts) {
+      return { success: true, alreadyFollowing: !!alreadyBtn, followed, handle: targetHandle, message: alreadyBtn ? 'Already Following' : 'Followed' };
+    }
+
+    // Step 2: Smooth scroll down past profile header/bio to reveal recent posts
+    window.scrollBy({ top: 550, behavior: 'smooth' });
+    await sleep(900);
+    window.scrollBy({ top: 400, behavior: 'smooth' });
+    await sleep(800);
 
     // Step 3: Find Recent Posts and SKIP Pinned Tweets & Reposts
     const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
@@ -1336,10 +1415,10 @@ async function engageAndFollowProfile(options = {}) {
     // The topmost non-pinned post is the creator's recent post
     const targetRecentPost = validRecentArticles[0] || allArticles[0];
 
-    // Scroll that target post directly into center of screen so user sees the bot working on it!
+    // Gently scroll that target post into view
     if (targetRecentPost) {
-      targetRecentPost.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(900);
+      gentleScrollIntoView(targetRecentPost);
+      await sleep(600);
     }
 
     // Step 4: Like recent posts on user's profile timeline (randomly 1 or 2 posts)
@@ -1436,41 +1515,10 @@ async function engageAndFollowProfile(options = {}) {
       return { success: false, aborted: true };
     }
 
-    // If already following, we are done with actions
-    if (alreadyBtn) {
-      return {
-        success: true,
-        alreadyFollowing: true,
-        followed: false,
-        handle: targetHandle,
-        likesDone,
-        replyDone
-      };
-    }
-
-    // Step 6: Click Follow button
-    const refreshedButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-    const followBtn = refreshedButtons.find(b => {
-      const txt = (b.innerText || '').trim();
-      const testId = b.getAttribute('data-testid') || '';
-      return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
-    });
-
-    if (!followBtn) {
-      const nowFollowing = refreshedButtons.some(b => (b.innerText || '').trim() === 'Following');
-      if (nowFollowing) {
-        return { success: true, alreadyFollowing: true, handle: targetHandle, likesDone, replyDone };
-      }
-      return { success: false, error: 'Follow button not found', likesDone, replyDone };
-    }
-
-    followBtn.click();
-    await sleep(750);
-
     return {
       success: true,
-      alreadyFollowing: false,
-      followed: true,
+      alreadyFollowing: !!alreadyBtn,
+      followed,
       handle: targetHandle,
       likesDone,
       replyDone
@@ -1821,9 +1869,9 @@ async function executeLiveRaidEngagement(params = {}) {
     return { success: false, error: 'No tweet found on active tab' };
   }
 
-  // Smooth scroll into center view so screen recorder captures the target
-  tweetArticle.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  await sleep(700);
+  // Smooth scroll into view so screen recorder captures the target
+  gentleScrollIntoView(tweetArticle);
+  await sleep(600);
 
   // Visual Recording Glow
   if (actions.glow) {
@@ -1958,15 +2006,30 @@ async function executeReciprocalProfileEngagement(params = {}) {
   let tweetUrl = '';
 
   try {
-    // 1. Scroll past profile header/bio to reveal recent posts
-    window.scrollBy({ top: 600, behavior: 'smooth' });
-    await sleep(1200);
+    // 1. Optional Follow user right at top of their profile while header & avatar are in full view
+    if (followUser) {
+      const followButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+      const followBtn = followButtons.find(b => {
+        const txt = (b.innerText || '').trim();
+        const testId = b.getAttribute('data-testid') || '';
+        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
+      });
+      if (followBtn) {
+        followBtn.click();
+        followDone = true;
+        await sleep(650);
+      }
+    }
 
-    // 2. Find recent tweets, skip pinned tweets
+    // 2. Smoothly scroll past profile header/bio to reveal recent posts
+    window.scrollBy({ top: 550, behavior: 'smooth' });
+    await sleep(900);
+
+    // 3. Find recent tweets, skip pinned tweets
     let allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     if (allArticles.length === 0) {
-      window.scrollBy({ top: 500, behavior: 'smooth' });
-      await sleep(1400);
+      window.scrollBy({ top: 450, behavior: 'smooth' });
+      await sleep(1000);
       allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     }
 
@@ -1984,9 +2047,9 @@ async function executeReciprocalProfileEngagement(params = {}) {
       return { success: false, reason: 'NO_TARGET_POST', error: 'Could not select target post' };
     }
 
-    // Scroll target post into center view
-    targetArticle.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await sleep(800);
+    // Gently scroll target post into view without jerking
+    gentleScrollIntoView(targetArticle);
+    await sleep(600);
 
     if (isWorkflowAborted) return { success: false, aborted: true };
 
@@ -1994,19 +2057,19 @@ async function executeReciprocalProfileEngagement(params = {}) {
     const tweetText = tweetData.text || '';
     tweetUrl = tweetData.tweetUrl || '';
 
-    // 3. Like the target post
+    // 4. Like the target post
     if (likePost) {
       const likeBtn = targetArticle.querySelector('button[data-testid="like"]');
       if (likeBtn) {
         likeBtn.click();
         likeDone = true;
-        await sleep(650);
+        await sleep(500);
       }
     }
 
     if (isWorkflowAborted) return { success: false, aborted: true, likeDone };
 
-    // 4. Generate contextual AI reply for this commenter's post
+    // 5. Generate contextual AI reply for this commenter's post
     try {
       const aiRes = await chrome.runtime.sendMessage({
         type: 'GENERATE_AI_REPLY',
@@ -2043,29 +2106,14 @@ async function executeReciprocalProfileEngagement(params = {}) {
     // Sanitize comment (5-10 words, crisp, authentic)
     replyText = sanitizeClientComment(replyText, 12);
 
-    // 5. Post AI reply on target post using universal robust posting engine
+    // 6. Post AI reply on target post using universal robust posting engine
     const commentRes = await postCommentOnTargetArticle(targetArticle, replyText);
     if (commentRes && commentRes.success) {
       replyDone = true;
       console.log(`[ATOMX RECIPROCAL] Successfully posted reply on @${targetHandle}: "${replyText}"`);
-      await sleep(1000);
+      await sleep(800);
     } else {
       console.warn('[ATOMX RECIPROCAL] Could not post reply:', commentRes?.error);
-    }
-
-    // 8. Optional Follow user
-    if (followUser) {
-      const followButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-      const followBtn = followButtons.find(b => {
-        const txt = (b.innerText || '').trim();
-        const testId = b.getAttribute('data-testid') || '';
-        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following');
-      });
-      if (followBtn) {
-        followBtn.click();
-        followDone = true;
-        await sleep(600);
-      }
     }
 
     return {
