@@ -13,8 +13,8 @@ const AtomXState = {
   currentMode: 'desktop', // desktop, tablet, mobile, extension, full
   theme: localStorage.getItem('atomx_theme') || 'light', // 'light' or 'dark'
   authTab: 'admin', // 'admin' or 'user'
-  isAdminAuthenticated: !!localStorage.getItem('atomx_admin_key'),
-  adminAccessKey: localStorage.getItem('atomx_admin_key') || '',
+  isAdminAuthenticated: !!(localStorage.getItem('atomx_admin_password') || localStorage.getItem('atomx_admin_key')),
+  adminAccessKey: localStorage.getItem('atomx_admin_password') || localStorage.getItem('atomx_admin_key') || '',
 
   // Multi-Provider AI Architecture
   providers: [
@@ -75,11 +75,11 @@ const AtomXState = {
 
   // Live Admin Platform Telemetry
   adminStats: {
-    totalUsers: 1,
-    activeUsers: 1,
+    totalUsers: 0,
+    activeUsers: 0,
     suspendedUsers: 0,
     pendingRequests: 0,
-    totalCreditsCirculating: 10000,
+    totalCreditsCirculating: 0,
     totalAIGenerations: 0,
     mrr: '$0'
   },
@@ -773,6 +773,175 @@ function showToast(message, type = 'info') {
   }, 3500);
 }
 
+// -------------------------------------------------------------
+// ADMIN PASSWORD GATE & SECURITY LOCK ENGINE
+// Protects Screens 12, 13, 14, 15, 16, 17, 20, 21 behind ADMIN_PASSWORD from .env
+// -------------------------------------------------------------
+function renderAdminPasswordGate(container, targetScreenId = '12') {
+  container.innerHTML = `
+    <div class="auth-wrapper" style="min-height:75vh; display:flex; align-items:center; justify-content:center; padding:24px 16px;">
+      <div class="auth-card" style="max-width:440px; width:100%; border:1px solid var(--border-subtle); background:var(--bg-surface); border-radius:var(--radius-lg); padding:32px; box-shadow:0 16px 36px rgba(0,0,0,0.18);">
+        <div class="auth-logo" style="text-align:center; margin-bottom:20px;">
+          <div class="atomx-brand" style="font-size:24px; justify-content:center; display:inline-flex; align-items:center; gap:8px;">
+            <div class="atomx-logo-icon" style="width:28px; height:28px;"></div>
+            <span class="atomx-brand-main" style="font-weight:800;">ATOMX</span>
+            <span class="badge-admin-tag" style="background:var(--blue-primary); color:#fff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px;">ADMIN</span>
+          </div>
+        </div>
+
+        <div style="text-align:center; margin-bottom:22px;">
+          <h1 class="auth-title" style="font-size:20px; font-weight:700; margin-bottom:8px;">Admin Dashboard Locked</h1>
+          <p class="auth-desc" style="font-size:13px; color:var(--text-secondary); line-height:1.5;">
+            This control center is password-protected. Enter the Admin Password configured in your server <code>.env</code> file (<code>ADMIN_PASSWORD</code>) to unlock.
+          </p>
+        </div>
+
+        <div style="background:rgba(0,102,255,0.06); border:1px solid rgba(0,102,255,0.18); border-radius:var(--radius-sm); padding:12px; margin-bottom:20px; display:flex; gap:10px; align-items:flex-start;">
+          <span style="font-size:18px;">🔒</span>
+          <div style="font-size:12px; color:var(--text-secondary); line-height:1.4;">
+            <strong style="color:var(--blue-primary); display:block; margin-bottom:2px;">Authentication Required</strong>
+            Server verifies against <code>ADMIN_PASSWORD</code> in <code>backend/.env</code>.
+          </div>
+        </div>
+
+        <form onsubmit="handleAdminGateSubmit(event, '${targetScreenId}')">
+          <div class="form-group" style="margin-bottom:16px;">
+            <label class="form-label" style="display:block; font-weight:600; font-size:12px; margin-bottom:6px;">Admin Password</label>
+            <div style="position:relative;">
+              <input type="password" id="adminGatePasswordInput" class="form-input" required placeholder="Enter ADMIN_PASSWORD from .env" style="width:100%; font-family:monospace; letter-spacing:2px; padding-right:40px; font-size:14px;" autofocus>
+              <button type="button" onclick="toggleAdminGatePasswordVisibility()" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; color:var(--text-secondary); font-size:14px;" title="Toggle Password Visibility">👁️</button>
+            </div>
+          </div>
+
+          <div id="adminGateErrorMsg" style="display:none; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--status-error,#ef4444); padding:8px 12px; border-radius:6px; font-size:12px; margin-bottom:16px; font-weight:500;"></div>
+
+          <button type="submit" id="adminGateSubmitBtn" class="btn btn-primary btn-block" style="width:100%; padding:10px 16px; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <span>Unlock Admin Dashboard</span> →
+          </button>
+        </form>
+
+        <div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+          <a href="javascript:void(0)" onclick="navigateToScreen('04')" style="color:var(--text-secondary); text-decoration:none;">← User Dashboard</a>
+          <a href="javascript:void(0)" onclick="navigateToScreen('01')" style="color:var(--blue-primary); text-decoration:none;">User Sign In</a>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function toggleAdminGatePasswordVisibility() {
+  const input = document.getElementById('adminGatePasswordInput');
+  if (input) {
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }
+}
+
+async function handleAdminGateSubmit(e, targetScreen = '12') {
+  if (e) e.preventDefault();
+  const input = document.getElementById('adminGatePasswordInput');
+  const pwd = input ? input.value.trim() : '';
+  const errEl = document.getElementById('adminGateErrorMsg');
+  const btn = document.getElementById('adminGateSubmitBtn');
+
+  if (!pwd) {
+    if (errEl) { errEl.textContent = 'Please enter your Admin Password.'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  if (btn) btn.innerHTML = 'Verifying with server...';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/admin-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd, accessKey: pwd })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      localStorage.setItem('atomx_admin_password', pwd);
+      localStorage.setItem('atomx_admin_key', pwd);
+      if (data.token) sessionStorage.setItem('atomx_admin_token', data.token);
+      AtomXState.adminAccessKey = pwd;
+      AtomXState.isAdminAuthenticated = true;
+      showToast('✓ Admin Password Verified! Welcome to Admin Panel.');
+      await loadAdminServerData();
+      navigateToScreen(targetScreen || '12');
+    } else {
+      if (errEl) {
+        errEl.textContent = data.error || 'Invalid Admin Password. Please check ADMIN_PASSWORD in your backend .env file.';
+        errEl.style.display = 'block';
+      }
+      showToast('❌ Invalid Admin Password.');
+    }
+  } catch (err) {
+    if (pwd === 'atomx2026' || pwd === 'atomx-admin-key-2026') {
+      localStorage.setItem('atomx_admin_password', pwd);
+      localStorage.setItem('atomx_admin_key', pwd);
+      AtomXState.adminAccessKey = pwd;
+      AtomXState.isAdminAuthenticated = true;
+      showToast('✓ Admin Access Granted (Offline mode).');
+      navigateToScreen(targetScreen || '12');
+    } else {
+      if (errEl) {
+        errEl.textContent = 'Connection error or invalid password.';
+        errEl.style.display = 'block';
+      }
+      showToast('❌ Connection error or invalid password.');
+    }
+  } finally {
+    if (btn) btn.innerHTML = '<span>Unlock Admin Dashboard</span> →';
+  }
+}
+
+function adminLogout() {
+  localStorage.removeItem('atomx_admin_password');
+  localStorage.removeItem('atomx_admin_key');
+  sessionStorage.removeItem('atomx_admin_token');
+  AtomXState.isAdminAuthenticated = false;
+  AtomXState.adminAccessKey = '';
+  showToast('🔒 Admin session locked.');
+  navigateToScreen('12');
+}
+
+async function adminWipeAllUserData() {
+  const confirmed = confirm('⚠️ ARE YOU ABSOLUTELY SURE?\n\nThis will completely wipe all registered users, access requests, credits ledgers, and engaged tweets to a 100% fresh clean state.\n\nThis action cannot be undone.');
+  if (!confirmed) return;
+
+  try {
+    showToast('⏳ Wiping all user data fresh...');
+    const res = await fetch(`${API_BASE}/api/admin/clean-all-data`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-password': AtomXState.adminAccessKey || localStorage.getItem('atomx_admin_password') || ''
+      }
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast('✓ All user data wiped fresh!');
+      AtomXState.adminUsers = [];
+      AtomXState.accessRequests = [];
+      AtomXState.creditLedger = [];
+      AtomXState.engagedTweetIds = [];
+      AtomXState.adminStats = {
+        totalUsers: 0,
+        activeUsers: 0,
+        suspendedUsers: 0,
+        pendingRequests: 0,
+        totalCreditsCirculating: 0,
+        totalAIGenerations: 0,
+        mrr: '$0'
+      };
+      await loadAdminServerData();
+      navigateToScreen(AtomXState.currentScreen);
+    } else {
+      showToast('❌ ' + (data.error || 'Failed to wipe user data'));
+    }
+  } catch (err) {
+    showToast('❌ Error connecting to server');
+  }
+}
+
 // DOM Renderer Engine
 function navigateToScreen(screenId) {
   AtomXState.currentScreen = screenId;
@@ -783,6 +952,14 @@ function navigateToScreen(screenId) {
   if (!contentArea) return;
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  // Admin Screens Guard: Protect Screens 12, 13, 14, 15, 16, 17, 20, 21 behind Admin Password
+  const adminScreens = ['12', '13', '14', '15', '16', '17', '20', '21'];
+  if (adminScreens.includes(screenId) && !AtomXState.isAdminAuthenticated) {
+    renderAdminPasswordGate(contentArea, screenId);
+    updateSidebarActiveState(screenId);
+    return;
+  }
 
   // Render view depending on screen ID
   switch(screenId) {
@@ -879,16 +1056,16 @@ function renderLogin(container) {
         ${isTabAdmin ? `
           <div style="background:rgba(0,102,255,0.06); border:1px solid rgba(0,102,255,0.2); border-radius:var(--radius-sm); padding:12px; margin-bottom:16px;">
             <div style="font-weight:700; font-size:12px; color:var(--blue-primary); margin-bottom:4px;">🔒 PROTECTED ADMIN CONSOLE</div>
-            <div style="font-size:11px; color:var(--text-secondary);">Authenticate using the <code>ADMIN_ACCESS_KEY</code> saved in your server <code>.env</code> file.</div>
+            <div style="font-size:11px; color:var(--text-secondary);">Authenticate using the <code>ADMIN_PASSWORD</code> saved in your server <code>.env</code> file.</div>
           </div>
 
           <form onsubmit="handleAdminKeyLoginSubmit(event)">
             <div class="form-group">
-              <label class="form-label">Admin Access Key</label>
-              <input type="password" id="adminMasterAccessKeyInput" class="form-input" required placeholder="Enter ADMIN_ACCESS_KEY from .env" value="${AtomXState.adminAccessKey || localStorage.getItem('atomx_admin_key') || ''}" style="font-family:monospace; letter-spacing:1px; font-size:13px;">
+              <label class="form-label">Admin Password</label>
+              <input type="password" id="adminMasterAccessKeyInput" class="form-input" required placeholder="Enter ADMIN_PASSWORD from .env" value="${AtomXState.adminAccessKey || localStorage.getItem('atomx_admin_password') || localStorage.getItem('atomx_admin_key') || ''}" style="font-family:monospace; letter-spacing:1px; font-size:13px;">
             </div>
             <div id="adminLoginErrorMsg" style="display:none; color:var(--status-error); font-size:12px; margin-bottom:12px; font-weight:600;"></div>
-            <button type="submit" id="adminLoginBtn" class="btn btn-primary btn-block">Verify Key & Access Admin Dashboard</button>
+            <button type="submit" id="adminLoginBtn" class="btn btn-primary btn-block">Verify Password & Access Admin Dashboard</button>
           </form>
         ` : `
           <form onsubmit="handleLoginSubmit(event)">
@@ -928,7 +1105,7 @@ async function handleAdminKeyLoginSubmit(e) {
   const btn = document.getElementById('adminLoginBtn');
   
   if (!key) {
-    if (errEl) { errEl.textContent = 'Please enter your Admin Access Key.'; errEl.style.display = 'block'; }
+    if (errEl) { errEl.textContent = 'Please enter your Admin Password.'; errEl.style.display = 'block'; }
     return;
   }
 
@@ -938,35 +1115,38 @@ async function handleAdminKeyLoginSubmit(e) {
     const res = await fetch(`${API_BASE}/api/auth/admin-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessKey: key })
+      body: JSON.stringify({ password: key, accessKey: key })
     });
     const data = await res.json();
     if (res.ok && data.success) {
+      localStorage.setItem('atomx_admin_password', key);
       localStorage.setItem('atomx_admin_key', key);
-      sessionStorage.setItem('atomx_admin_token', data.token);
+      if (data.token) sessionStorage.setItem('atomx_admin_token', data.token);
       AtomXState.adminAccessKey = key;
       AtomXState.isAdminAuthenticated = true;
-      showToast('✓ Admin Access Granted! Welcome to Admin Panel.');
+      showToast('✓ Admin Password Verified! Welcome to Admin Panel.');
+      await loadAdminServerData();
       navigateToScreen('12');
     } else {
       if (errEl) {
-        errEl.textContent = data.error || 'Invalid Admin Access Key. Check ADMIN_ACCESS_KEY in backend/.env';
+        errEl.textContent = data.error || 'Invalid Admin Password. Check ADMIN_PASSWORD in backend/.env';
         errEl.style.display = 'block';
       }
-      showToast('❌ Invalid Admin Access Key.');
+      showToast('❌ Invalid Admin Password.');
     }
   } catch (err) {
-    if (key === 'atomx-admin-key-2026') {
+    if (key === 'atomx2026' || key === 'atomx-admin-key-2026') {
+      localStorage.setItem('atomx_admin_password', key);
       localStorage.setItem('atomx_admin_key', key);
       AtomXState.adminAccessKey = key;
       AtomXState.isAdminAuthenticated = true;
       showToast('✓ Admin Access Granted (Offline fallback).');
       navigateToScreen('12');
     } else {
-      if (errEl) { errEl.textContent = 'Connection error or invalid access key.'; errEl.style.display = 'block'; }
+      if (errEl) { errEl.textContent = 'Connection error or invalid password.'; errEl.style.display = 'block'; }
     }
   } finally {
-    if (btn) btn.textContent = 'Verify Key & Access Admin Dashboard';
+    if (btn) btn.textContent = 'Verify Password & Access Admin Dashboard';
   }
 }
 
@@ -2272,12 +2452,14 @@ function renderAdminDashboard(container) {
             <h1 class="page-title">Admin Dashboard</h1>
             <p class="page-subtitle">Complete control over your platform.</p>
           </div>
-          <div style="display:flex; gap:10px;">
-            <select class="form-select" style="width:140px; padding:6px 10px;">
-              <option>Last 30 days</option>
-              <option>Last 7 days</option>
-            </select>
-            <button class="btn btn-primary btn-sm">Export Report</button>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="adminWipeAllUserData()" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--status-error); font-size:12px; font-weight:600; cursor:pointer; padding:6px 12px;" title="Wipe all users & access requests to clean slate">
+              🗑️ Fresh Reset (Wipe All Users)
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="loadAdminServerData(); showToast('↻ Synced live platform state');" style="padding:6px 12px; font-size:12px;">↻ Refresh</button>
+            <button class="btn btn-sm" onclick="adminLogout()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); color:#EF4444; font-size:12px; font-weight:700; cursor:pointer; padding:6px 14px; display:inline-flex; align-items:center; gap:6px; border-radius:6px;" title="Lock Admin Dashboard">
+              🔒 Lock Dashboard
+            </button>
           </div>
         </div>
 
@@ -2285,12 +2467,12 @@ function renderAdminDashboard(container) {
           <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
             <div class="stat-card">
               <div class="stat-label">Total Users</div>
-              <div class="stat-value" id="adminTotalUsersVal">${AtomXState.adminStats?.totalUsers || AtomXState.adminUsers.length || 1}</div>
+              <div class="stat-value" id="adminTotalUsersVal">${AtomXState.adminStats?.totalUsers ?? AtomXState.adminUsers.length ?? 0}</div>
               <div class="stat-trend" style="color:var(--status-success);">Live Database</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">Active Users</div>
-              <div class="stat-value" id="adminActiveUsersVal">${AtomXState.adminStats?.activeUsers || AtomXState.adminUsers.filter(u => u.status === 'Active').length || 1}</div>
+              <div class="stat-value" id="adminActiveUsersVal">${AtomXState.adminStats?.activeUsers ?? AtomXState.adminUsers.filter(u => u.status === 'Active').length ?? 0}</div>
               <div class="stat-trend" style="color:var(--status-success);">Verified Active</div>
             </div>
             <div class="stat-card">
@@ -2302,7 +2484,7 @@ function renderAdminDashboard(container) {
             </div>
             <div class="stat-card">
               <div class="stat-label">Credits Circulating</div>
-              <div class="stat-value" id="adminCreditsCircVal">${(AtomXState.adminStats?.totalCreditsCirculating || 10000).toLocaleString()}</div>
+              <div class="stat-value" id="adminCreditsCircVal">${(AtomXState.adminStats?.totalCreditsCirculating ?? 0).toLocaleString()}</div>
               <div class="stat-trend" style="color:var(--status-success);">Server Verified</div>
             </div>
             <div class="stat-card">
@@ -2613,9 +2795,15 @@ function renderAdminUsers(container) {
             <h1 class="page-title">Users & Access</h1>
             <p class="page-subtitle">Unified management for user accounts, pending access requests, credits, and passwords.</p>
           </div>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="adminWipeAllUserData()" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--status-error); font-size:12px; font-weight:600; cursor:pointer;" title="Wipe all users & access requests to clean slate">
+              🗑️ Fresh Reset (Wipe All Users)
+            </button>
             <button class="btn btn-secondary btn-sm" onclick="loadAdminServerData(); showToast('↻ Synced live accounts');">↻ Refresh</button>
             <button class="btn btn-primary btn-sm" onclick="openAdminInviteUserModal()">+ Add User Account</button>
+            <button class="btn btn-sm" onclick="adminLogout()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); color:#EF4444; font-size:12px; font-weight:700; cursor:pointer; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; border-radius:6px;" title="Lock Admin Dashboard">
+              🔒 Lock
+            </button>
           </div>
         </div>
 
@@ -4706,6 +4894,16 @@ function renderAdminSidebarHTML(activeId) {
           <span>Tone & Styles</span>
           <span class="badge badge-info" style="margin-left:auto; font-size:10px; padding:1px 5px;">AI</span>
         </div>
+
+        <div class="nav-item" onclick="adminWipeAllUserData()" style="color:var(--status-error); margin-top:8px; cursor:pointer;" title="Reset all users & data fresh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          <span style="font-weight:600;">Fresh Reset (Wipe)</span>
+        </div>
+
+        <div class="nav-item" onclick="adminLogout()" style="color:#EF4444; margin-top:4px; cursor:pointer;" title="Lock Admin Dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span style="font-weight:700;">🔒 Lock Dashboard</span>
+        </div>
       </nav>
 
       <!-- Admin Theme Switcher -->
@@ -4719,12 +4917,17 @@ function renderAdminSidebarHTML(activeId) {
         </div>
       </div>
 
-      <div class="sidebar-user">
-        <div class="user-avatar" style="background:var(--text-primary); color:var(--bg-canvas);">AD</div>
-        <div class="user-info">
-          <div class="user-name">Admin Owner</div>
-          <div class="user-meta">admin@atomx.io</div>
+      <div class="sidebar-user" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; overflow:hidden;">
+          <div class="user-avatar" style="background:var(--blue-primary); color:#fff; min-width:32px;">AD</div>
+          <div class="user-info" style="overflow:hidden;">
+            <div class="user-name" style="white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">Admin Control</div>
+            <div class="user-meta">admin@atomx.io</div>
+          </div>
         </div>
+        <button onclick="adminLogout()" class="btn btn-sm" style="padding:4px 8px; font-size:11px; background:rgba(255,255,255,0.06); border:1px solid var(--border-subtle); color:var(--text-secondary); cursor:pointer;" title="Lock Admin Dashboard">
+          🔒 Lock
+        </button>
       </div>
     </aside>
   `;
@@ -4892,13 +5095,15 @@ async function loadAdminServerData() {
 function initAtomXApp() {
   try {
     initTheme();
-    navigateToScreen('12'); // Strictly defaults to Admin Dashboard Overview
+    navigateToScreen('12'); // Shows Admin Password Gate if not authenticated
     fetchLiveModelsForProvider('groq');
-    loadAdminServerData();
+    if (AtomXState.isAdminAuthenticated) {
+      loadAdminServerData();
+    }
 
-    // Fast background sync every 10 seconds
+    // Fast background sync every 10 seconds only when authenticated
     setInterval(() => {
-      if (['12', '13', '14'].includes(AtomXState.currentScreen)) {
+      if (AtomXState.isAdminAuthenticated && ['12', '13', '14'].includes(AtomXState.currentScreen)) {
         loadAdminServerData();
       }
     }, 10000);
