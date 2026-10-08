@@ -95,4 +95,19 @@ router.post('/admin/tone-styles', adminController.saveToneStyles);
 router.get('/admin/api-logs', adminController.getApiLogs);
 router.get('/admin/test-keys', adminController.testProviderKeys);
 
+// Referral Management & User Referral Stats
+router.get('/referrals/stats', (req, res) => {
+  const referralService = require('../services/referralService');
+  const stats = referralService.getUserReferralStats(req.query.handle || req.query.user);
+  res.json(stats);
+});
+router.get('/admin/referrals', adminController.getReferrals);
+
+// Promotional Special Offers (FOUNDING 100)
+router.get('/offers/current', adminController.getOffer);
+router.post('/admin/offers', adminController.saveOffer);
+
+// Universal Version & Update Engine
+router.get('/system/version', adminController.getSystemVersion);
+
 module.exports = router;

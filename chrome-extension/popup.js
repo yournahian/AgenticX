@@ -291,7 +291,88 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Non-blocking background operations
   initAudienceBuilderSystem().catch(console.warn);
   autoDetectTweet().catch(console.warn);
+  checkExtensionVersion().catch(console.warn);
+  startExtOfferCountdown();
+  setupExtReferralFeatures();
 });
+
+// Universal Extension Version Check
+async function checkExtensionVersion() {
+  const CURRENT_EXT_VERSION = '1.0.0';
+  try {
+    const backendUrl = await getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/system/version`).catch(() => null);
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data.currentVersion && data.currentVersion !== CURRENT_EXT_VERSION) {
+        const banner = document.getElementById('extUpdateBanner');
+        const verText = document.getElementById('extUpdateVersionText');
+        const dlBtn = document.getElementById('extUpdateDownloadBtn');
+        if (banner) {
+          banner.style.display = 'flex';
+          if (verText) verText.textContent = `UPDATE AVAILABLE: v${data.currentVersion}`;
+          if (dlBtn && data.downloadUrl) dlBtn.href = data.downloadUrl;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Version check error:', e);
+  }
+}
+
+// Live Countdown for Founding 100 Launch Offer
+function startExtOfferCountdown() {
+  if (window._extOfferCountdownInterval) clearInterval(window._extOfferCountdownInterval);
+
+  function tick() {
+    const el = document.getElementById('extFoundingCountdownTimer');
+    const box = document.getElementById('extFoundingCountdownBox');
+    if (!el) return;
+
+    const target = window._extOfferTargetTime || (window._extOfferTargetTime = Date.now() + (2 * 86400000) + (14 * 3600000) + (37 * 60000) + 52000);
+    const diff = target - Date.now();
+
+    if (diff <= 0) {
+      el.innerHTML = '<span style="color:#EF4444; font-weight:800;">OFFER EXPIRED</span>';
+      if (box) box.style.borderColor = '#EF4444';
+      return;
+    }
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    const pad = (n) => String(n).padStart(2, '0');
+    el.innerText = `${pad(days)}d : ${pad(hours)}h : ${pad(minutes)}m : ${pad(seconds)}s`;
+  }
+
+  tick();
+  window._extOfferCountdownInterval = setInterval(tick, 1000);
+}
+
+// Extension Referral Features & Link Copying
+function setupExtReferralFeatures() {
+  const copyBtn = document.getElementById('extCopyInviteLinkBtn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const input = document.getElementById('extInviteLinkInput');
+      const url = input ? input.value : 'https://atomxengage.com';
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => alert('✓ Referral link copied to clipboard!'));
+      } else {
+        prompt('Copy your referral link:', url);
+      }
+    });
+  }
+
+  // Update personal handle link if logged in
+  if (state.user && state.user.handle) {
+    const clean = state.user.handle.replace(/^@/, '');
+    const linkInput = document.getElementById('extInviteLinkInput');
+    if (linkInput) linkInput.value = `https://atomxengage.com/ref/${clean}`;
+  }
+}
 
 // Tab switching
 function initTabs() {
@@ -3580,12 +3661,14 @@ async function handleExtSubmitRequest() {
   const emailInput = document.getElementById('extReqEmailInput');
   const telegramInput = document.getElementById('extReqTelegramInput');
   const handleInput = document.getElementById('extReqHandleInput');
+  const refInput = document.getElementById('extReqReferredByInput');
   const btn = document.getElementById('extSubmitRequestBtn');
 
   const fullName = nameInput?.value.trim();
   const email = emailInput?.value.trim();
   let telegram = telegramInput?.value.trim() || '';
   let handle = handleInput?.value.trim();
+  let referredBy = refInput?.value.trim() || '';
 
   if (!fullName) {
     alert('Please enter your full name.');
@@ -3602,6 +3685,7 @@ async function handleExtSubmitRequest() {
 
   if (!handle.startsWith('@')) handle = '@' + handle;
   if (telegram && !telegram.startsWith('@')) telegram = '@' + telegram;
+  if (referredBy && !referredBy.startsWith('@')) referredBy = '@' + referredBy;
 
   if (btn) {
     btn.disabled = true;
@@ -3613,7 +3697,15 @@ async function handleExtSubmitRequest() {
     const res = await fetch(`${backendUrl}/api/auth/request-access`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fullName, email, telegram, handle, xHandle: handle, useCase: 'Chrome Extension Access Request' })
+      body: JSON.stringify({ 
+        fullName, 
+        email, 
+        telegram, 
+        handle, 
+        xHandle: handle, 
+        referredBy, 
+        useCase: `Chrome Extension Access Request${referredBy ? ` | REF:${referredBy}` : ''}` 
+      })
     });
 
     const data = await res.json();
@@ -3626,6 +3718,7 @@ async function handleExtSubmitRequest() {
       email,
       telegram,
       handle,
+      referredBy,
       status: 'PENDING',
       requestedAt: Date.now()
     };

@@ -952,8 +952,8 @@ function navigateToScreen(screenId) {
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
 
-  // Admin Screens Guard: Protect Screens 12, 13, 14, 15, 16, 17, 20, 21 behind Admin Password
-  const adminScreens = ['12', '13', '14', '15', '16', '17', '20', '21'];
+  // Admin Screens Guard: Protect Screens 12, 13, 14, 15, 16, 17, 20, 21, 22 behind Admin Password
+  const adminScreens = ['12', '13', '14', '15', '16', '17', '20', '21', '22'];
   if (adminScreens.includes(screenId) && !AtomXState.isAdminAuthenticated) {
     renderAdminPasswordGate(contentArea, screenId);
     updateSidebarActiveState(screenId);
@@ -985,6 +985,7 @@ function navigateToScreen(screenId) {
     case '17': renderAdminTransactions(contentArea); break;
     case '20': renderAdminCuratedLists(contentArea); break;
     case '21': renderAdminToneStyles(contentArea); break;
+    case '22': renderAdminReferrals(contentArea); break;
     case '18': renderSuspended(contentArea); break;
     case '19': renderSystemStates(contentArea); break;
     case 'arch': renderSystemArchitecture(contentArea); break;
@@ -2008,8 +2009,41 @@ function renderCreditsPlans(container) {
             <button class="btn btn-primary" onclick="alert('Checkout initiated! (Growth Plan 10,000 Credits)')">Buy Credits</button>
           </div>
 
-          <!-- Pricing Grid -->
+          <!-- Pricing Grid with FOUNDING 100 Launch Offer -->
           <div class="pricing-grid">
+            <!-- FOUNDING 100 Promotional Launch Offer -->
+            <div class="pricing-card" style="border:2px solid #FF6B00; background:linear-gradient(180deg, rgba(255,107,0,0.06), rgba(0,0,0,0.2)); position:relative; box-shadow:0 0 25px rgba(255,107,0,0.15);">
+              <div class="pricing-card-badge" style="background:linear-gradient(135deg, #FF6B00, #E60000); color:#FFF; font-weight:800; font-size:11px; padding:4px 10px; border-radius:20px; text-transform:uppercase; letter-spacing:0.5px;">
+                🔥 FIRST LAUNCH OFFER
+              </div>
+              <div style="font-size:14px; font-weight:800; color:#FF6B00; text-transform:uppercase; margin-top:8px;">FOUNDING 100</div>
+              <div class="plan-price" style="margin:8px 0 4px 0;">
+                <span style="text-decoration:line-through; color:var(--text-muted); font-size:16px; margin-right:8px;">$5/month</span>
+                <span style="color:#FF6B00; font-size:32px; font-weight:800;">$2</span><span style="font-size:14px; color:var(--text-muted); font-weight:500;">/ month</span>
+              </div>
+              <div style="font-size:15px; font-weight:800; color:var(--blue-primary); margin-bottom:12px;">
+                ⚡ 5,000 Credits
+              </div>
+              <ul class="plan-feature-list" style="margin-bottom:14px;">
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 5,000 AI replies</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> All automation agents</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Human-like pacing</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Priority processing</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Early feature access</li>
+                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Dedicated support</li>
+              </ul>
+
+              <!-- Live Real-Time Countdown Timer -->
+              <div id="foundingCountdownBox" style="background:rgba(255,107,0,0.12); border:1px solid rgba(255,107,0,0.3); border-radius:8px; padding:8px 10px; text-align:center; margin-bottom:12px;">
+                <div style="font-size:10px; font-weight:700; color:#FF6B00; text-transform:uppercase; letter-spacing:0.5px;">⏳ Offer Ends In</div>
+                <div id="foundingCountdownTimer" style="font-family:monospace; font-size:13px; font-weight:800; color:var(--text-primary); margin-top:2px;">
+                  02d : 14h : 37m : 52s
+                </div>
+              </div>
+
+              <button class="btn btn-primary btn-block" style="background:linear-gradient(135deg, #FF6B00, #E60000); border:none; font-weight:700;" onclick="alert('Claiming Founding 100 Offer ($2 / 5,000 Credits)!'); AtomXState.currentUser.credits += 5000; renderCreditsPlans(document.getElementById('mainContentArea'));">Claim Offer ($2)</button>
+            </div>
+
             <!-- Free Plan -->
             <div class="pricing-card">
               <div style="font-size:13px; font-weight:700; color:var(--text-secondary);">FREE</div>
@@ -2056,18 +2090,110 @@ function renderCreditsPlans(container) {
             </div>
           </div>
 
-          <!-- Referral / Invite & Earn Card -->
-          <div class="atomx-card" style="margin-top:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; background:linear-gradient(135deg, rgba(49,87,230,0.06), rgba(34,160,107,0.06)); border:1px solid var(--border-subtle);">
-            <div>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:20px;">🎁</span>
-                <h3 style="font-size:15px; font-weight:700;">Invite and Earn Credits</h3>
+          <!-- USER REFERRAL PROGRAM DASHBOARD (LEVEL 1 DIRECT ONLY) -->
+          <div class="atomx-card" style="margin-top:24px; padding:20px; background:linear-gradient(135deg, rgba(49,87,230,0.05), rgba(34,160,107,0.05)); border:1px solid var(--border-subtle);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+              <div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:22px;">🎁</span>
+                  <h3 style="font-size:16px; font-weight:800; color:var(--text-primary);">Referral Program</h3>
+                  <span class="badge badge-success" style="font-size:10px; font-weight:700;">150 + 150 CR</span>
+                </div>
+                <p style="font-size:12px; color:var(--text-secondary); margin-top:4px;">
+                  Invite friends & earn Credits. When their account is approved, both of you receive <strong>150 Credits</strong>! Plus 10% on their first purchase.
+                </p>
               </div>
-              <p style="font-size:13px; color:var(--text-secondary); margin-top:4px;">Share your personal invite code. When a friend joins with your code, both of you receive bonus credits!</p>
+              <div style="display:flex; gap:12px; text-align:right;">
+                <div>
+                  <div style="font-size:11px; color:var(--text-muted); font-weight:600;">TOTAL REFERRALS</div>
+                  <div style="font-size:20px; font-weight:800; color:var(--text-primary);">12</div>
+                </div>
+                <div>
+                  <div style="font-size:11px; color:var(--status-success); font-weight:600;">APPROVED</div>
+                  <div style="font-size:20px; font-weight:800; color:var(--status-success);">8</div>
+                </div>
+                <div>
+                  <div style="font-size:11px; color:var(--status-warning); font-weight:600;">PENDING</div>
+                  <div style="font-size:20px; font-weight:800; color:var(--status-warning);">4</div>
+                </div>
+                <div>
+                  <div style="font-size:11px; color:var(--blue-primary); font-weight:600;">EARNED</div>
+                  <div style="font-size:20px; font-weight:800; color:var(--blue-primary);">650 Cr</div>
+                </div>
+              </div>
             </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <input type="text" readonly value="EVAN-X924" class="form-input" style="width:130px; font-weight:700; text-align:center; background:var(--bg-card); cursor:text;">
-              <button class="btn btn-primary btn-sm" onclick="navigator.clipboard?.writeText('EVAN-X924'); alert('Invite code EVAN-X924 copied to clipboard! Share it with friends to earn bonus credits.');">Copy Invite Code</button>
+
+            <!-- Referral Link Box -->
+            <div style="background:var(--bg-canvas); padding:14px; border-radius:8px; border:1px solid var(--border-subtle); margin-bottom:16px;">
+              <div style="font-size:11px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin-bottom:6px;">Your Referral Link</div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <input type="text" readonly id="userRefLinkInput" value="https://atomxengage.com/ref/${(AtomXState.currentUser.handle || 'user').replace('@','')}" class="form-input" style="flex:1; min-width:240px; font-family:monospace; font-weight:700; background:var(--bg-card); cursor:text;">
+                <button class="btn btn-primary" onclick="copyUserRefLink()">📋 Copy Link</button>
+              </div>
+
+              <!-- Social Share Shortcuts -->
+              <div style="display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; color:var(--text-muted);">
+                <span>Share:</span>
+                <button class="btn btn-secondary btn-sm" onclick="shareRefLink('x')" style="padding:3px 8px; font-size:11px;">𝕏 Post</button>
+                <button class="btn btn-secondary btn-sm" onclick="shareRefLink('tg')" style="padding:3px 8px; font-size:11px;">✈️ Telegram</button>
+                <button class="btn btn-secondary btn-sm" onclick="shareRefLink('wa')" style="padding:3px 8px; font-size:11px;">💬 WhatsApp</button>
+                <button class="btn btn-secondary btn-sm" onclick="shareRefLink('fb')" style="padding:3px 8px; font-size:11px;">🌐 Facebook</button>
+              </div>
+            </div>
+
+            <!-- Program Rules / Level 1 Note -->
+            <div style="font-size:11px; color:var(--text-secondary); padding:8px 12px; background:rgba(59,130,246,0.06); border-radius:6px; border-left:3px solid var(--blue-primary); margin-bottom:16px; line-height:1.5;">
+              <strong>ℹ️ Strict Rules:</strong> Direct Level-1 referrals only (no MLM / Level 2/3). Rewards are issued <strong>after admin account approval</strong>. Multiple accounts under the same X ID are strictly forbidden. All rewards are in Credits, not cash.
+            </div>
+
+            <!-- User Referrals Table -->
+            <div style="border-top:1px solid var(--border-subtle); padding-top:12px;">
+              <div style="font-weight:700; font-size:13px; color:var(--text-primary); margin-bottom:8px;">Recent Referrals & Status</div>
+              <div class="table-wrapper" style="overflow-x:auto;">
+                <table class="atomx-table" style="font-size:12px;">
+                  <thead>
+                    <tr>
+                      <th>Referred User</th>
+                      <th>Status</th>
+                      <th>Account Approval</th>
+                      <th>First Purchase</th>
+                      <th>Your Reward</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <strong>Nahian</strong>
+                        <div style="font-size:11px; color:var(--text-muted); font-family:monospace;">@yournahian</div>
+                      </td>
+                      <td><span class="badge badge-success">Approved</span></td>
+                      <td><span style="color:var(--status-success); font-weight:700;">✓ Approved</span></td>
+                      <td>$10 Plan</td>
+                      <td style="color:var(--blue-primary); font-weight:700;">150 + 1 Cr</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <strong>Saim</strong>
+                        <div style="font-size:11px; color:var(--text-muted); font-family:monospace;">@KhanWg60464</div>
+                      </td>
+                      <td><span class="badge badge-warning">Pending</span></td>
+                      <td><span style="color:var(--text-muted);">Awaiting Review</span></td>
+                      <td>—</td>
+                      <td style="color:var(--text-muted);">Pending</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <strong>Alex</strong>
+                        <div style="font-size:11px; color:var(--text-muted); font-family:monospace;">@alex_growth</div>
+                      </td>
+                      <td><span class="badge badge-success">Approved</span></td>
+                      <td><span style="color:var(--status-success); font-weight:700;">✓ Approved</span></td>
+                      <td>$29 Plan</td>
+                      <td style="color:var(--blue-primary); font-weight:700;">150 + 2.9 Cr</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -2128,6 +2254,71 @@ function renderCreditsPlans(container) {
       </div>
     </div>
   `;
+
+  startLiveOfferCountdown();
+}
+
+function startLiveOfferCountdown(expiresAt) {
+  if (window._offerCountdownInterval) clearInterval(window._offerCountdownInterval);
+
+  function tick() {
+    const el = document.getElementById('foundingCountdownTimer');
+    const box = document.getElementById('foundingCountdownBox');
+    if (!el) return;
+
+    const target = expiresAt ? new Date(expiresAt).getTime() : (window._offerTargetTime || (window._offerTargetTime = Date.now() + (2 * 86400000) + (14 * 3600000) + (37 * 60000) + 52000));
+    const now = Date.now();
+    const diff = target - now;
+
+    if (diff <= 0) {
+      el.innerHTML = '<span style="color:var(--status-error); font-weight:800;">OFFER EXPIRED</span>';
+      if (box) box.style.borderColor = 'var(--status-error)';
+      return;
+    }
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    const pad = (n) => String(n).padStart(2, '0');
+    el.innerText = `${pad(days)}d : ${pad(hours)}h : ${pad(minutes)}m : ${pad(seconds)}s`;
+  }
+
+  tick();
+  window._offerCountdownInterval = setInterval(tick, 1000);
+}
+
+function copyUserRefLink() {
+  const input = document.getElementById('userRefLinkInput');
+  const url = input ? input.value : `https://atomxengage.com/ref/${(AtomXState.currentUser.handle || 'user').replace('@','')}`;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('✓ Referral link copied to clipboard!');
+    }).catch(() => {
+      prompt('Copy your referral link:', url);
+    });
+  } else {
+    prompt('Copy your referral link:', url);
+  }
+}
+
+function shareRefLink(platform) {
+  const handle = (AtomXState.currentUser.handle || 'user').replace('@','');
+  const refUrl = `https://atomxengage.com/ref/${handle}`;
+  const text = `Join ATOMX ENGAGE for autonomous AI Twitter growth! Use my referral link to get 150 bonus credits: ${refUrl}`;
+  
+  let url = '';
+  if (platform === 'x') {
+    url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+  } else if (platform === 'tg') {
+    url = `https://t.me/share/url?url=${encodeURIComponent(refUrl)}&text=${encodeURIComponent('Join ATOMX ENGAGE & get 150 bonus credits!')}`;
+  } else if (platform === 'wa') {
+    url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  } else if (platform === 'fb') {
+    url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(refUrl)}`;
+  }
+  if (url) window.open(url, '_blank');
 }
 
 function confirmCryptoTxHash() {
@@ -2723,18 +2914,20 @@ function renderAdminUsers(container) {
               <thead>
                 <tr>
                   <th>User</th>
-                  <th>Verified X ID</th>
+                  <th>Username</th>
                   <th>Email</th>
-                  <th>Plan & Credits</th>
+                  <th>Plan</th>
+                  <th>Credits</th>
                   <th>Status</th>
-                  <th>Activity / Date</th>
+                  <th>Referred By</th>
+                  <th>Date</th>
                   <th style="text-align:right;">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 ${displayed.length === 0 ? `
                   <tr>
-                    <td colspan="7" style="text-align:center; padding:36px; color:var(--text-muted);">
+                    <td colspan="9" style="text-align:center; padding:36px; color:var(--text-muted);">
                       <div style="font-size:24px; margin-bottom:6px;">👥</div>
                       <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:2px;">No Accounts in "${activeFilter}"</div>
                       <div style="font-size:12px;">Try switching filter tabs or clear your search query.</div>
@@ -2766,17 +2959,20 @@ function renderAdminUsers(container) {
                       ${u.telegram ? `<div style="font-size:11px; color:#229ED9; font-weight:600; margin-top:2px;">✈️ ${u.telegram}</div>` : ''}
                     </td>
                     <td>
-                      ${isPending ? `<span style="color:var(--text-muted); font-size:12px;">--</span>` : `
-                        <div>
-                          <span class="badge badge-neutral" style="font-size:10px;">${u.plan || 'Free'}</span>
-                          <span style="font-weight:600; margin-left:4px; font-size:12px;">${(u.credits || 0).toLocaleString()} cr</span>
-                        </div>
-                      `}
+                      <span class="badge badge-neutral" style="font-size:11px;">${u.plan || 'Free'}</span>
+                    </td>
+                    <td style="font-weight:700; color:var(--text-primary); font-size:12px;">
+                      ${(u.credits || 0).toLocaleString()}
                     </td>
                     <td>
                       <span class="badge ${isPending ? 'badge-warning' : isSuspended ? 'badge-error' : isRejected ? 'badge-error' : 'badge-success'}">
                         ${s}
                       </span>
+                    </td>
+                    <td>
+                      ${u.referredBy && u.referredBy !== 'Direct / —' ? 
+                        `<span style="color:#229ED9; font-weight:700; font-family:monospace; font-size:12px;">${u.referredBy}</span>` : 
+                        `<span style="color:var(--text-muted); font-size:12px;">Direct / —</span>`}
                     </td>
                     <td style="color:var(--text-muted); font-size:11px;">${u.dateDisplay}</td>
                     <td style="text-align:right;">
@@ -3354,6 +3550,45 @@ function renderAdminPlanManagement(container) {
         </div>
 
         <div class="workspace-body">
+          <!-- Special Launch Promotional Offer Controller Card -->
+          <div class="atomx-card" style="margin-bottom:24px; padding:18px 20px; border:2px solid #FF6B00; background:linear-gradient(135deg, rgba(255,107,0,0.06), rgba(0,0,0,0.1));">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span class="badge" style="background:#FF6B00; color:#FFF; font-weight:800; font-size:11px;">FIRST LAUNCH OFFER</span>
+                <h3 style="font-size:16px; font-weight:800; color:var(--text-primary); margin:0;">FOUNDING 100 Promotional Campaign</h3>
+              </div>
+              <span class="badge badge-success" style="font-weight:700;">ACTIVE NOW</span>
+            </div>
+            
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:14px;">
+              <div style="background:var(--bg-canvas); padding:10px 12px; border-radius:6px; border:1px solid var(--border-subtle);">
+                <div style="font-size:11px; color:var(--text-muted); font-weight:600;">PRICING DISCOUNT</div>
+                <div style="font-size:16px; font-weight:800; color:#FF6B00; margin-top:2px;">
+                  <span style="text-decoration:line-through; font-size:13px; color:var(--text-muted);">$5/mo</span> → $2/mo
+                </div>
+              </div>
+              <div style="background:var(--bg-canvas); padding:10px 12px; border-radius:6px; border:1px solid var(--border-subtle);">
+                <div style="font-size:11px; color:var(--text-muted); font-weight:600;">CREDITS ALLOCATION</div>
+                <div style="font-size:16px; font-weight:800; color:var(--blue-primary); margin-top:2px;">5,000 Credits</div>
+              </div>
+              <div style="background:var(--bg-canvas); padding:10px 12px; border-radius:6px; border:1px solid var(--border-subtle);">
+                <div style="font-size:11px; color:var(--text-muted); font-weight:600;">CLAIM LIMIT</div>
+                <div style="font-size:16px; font-weight:800; color:var(--text-primary); margin-top:2px;">First 100 Users (14 Claimed)</div>
+              </div>
+              <div style="background:var(--bg-canvas); padding:10px 12px; border-radius:6px; border:1px solid var(--border-subtle);">
+                <div style="font-size:11px; color:var(--text-muted); font-weight:600;">REAL-TIME COUNTDOWN</div>
+                <div style="font-size:13px; font-weight:800; font-family:monospace; color:#FF6B00; margin-top:4px;">02d : 14h : 37m : 52s</div>
+              </div>
+            </div>
+
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <button class="btn btn-secondary btn-sm" onclick="showToast('✓ Extended offer by 24 Hours!');">⏳ +24h Extension</button>
+              <button class="btn btn-secondary btn-sm" onclick="showToast('✓ Extended offer by 48 Hours!');">⏳ +48h Extension</button>
+              <button class="btn btn-secondary btn-sm" onclick="showToast('✓ Extended offer by 7 Days!');">⏳ +7 Days Extension</button>
+              <button class="btn btn-primary btn-sm" onclick="promptEditFoundingOffer()">✏️ Edit Price, Credits & Expiry</button>
+            </div>
+          </div>
+
           <div class="pricing-grid">
             ${AtomXState.plans.map(p => `
               <div class="pricing-card ${p.popular ? 'featured' : ''}" style="position:relative;">
@@ -3432,6 +3667,18 @@ function openEditPlanModal(planId) {
     </div>
   `;
   document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function promptEditFoundingOffer() {
+  const price = prompt('Enter Launch Price ($ / month):', '2.00');
+  if (price === null) return;
+  const credits = prompt('Enter Credit Allocation:', '5000');
+  if (credits === null) return;
+  const expiryHours = prompt('Set Expiry from now (in hours):', '72');
+  if (expiryHours === null) return;
+
+  showToast(`✓ Founding 100 offer updated! Price: $${price}/mo, Credits: ${credits}, Expires in ${expiryHours} hours.`);
+  renderAdminPlanManagement(document.getElementById('mainContentArea'));
 }
 
 function openNewPlanModal() {
@@ -4537,6 +4784,170 @@ async function saveAdminToneStylesToServer() {
 }
 
 // -------------------------------------------------------------
+// SCREEN 22: ADMIN REFERRAL MANAGEMENT DASHBOARD
+// -------------------------------------------------------------
+async function renderAdminReferrals(container) {
+  let stats = {
+    totalReferrals: 0,
+    approvedReferrals: 0,
+    pendingReferrals: 0,
+    referralCredits: 0,
+    purchaseRewards: 0
+  };
+  let referrals = [];
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/referrals`);
+    if (res.ok) {
+      const data = await res.json();
+      stats = data.stats || stats;
+      referrals = data.referrals || [];
+    }
+  } catch (e) {
+    console.warn('Error fetching referrals:', e);
+  }
+
+  // Fallback demo items if database is freshly initialized
+  if (referrals.length === 0) {
+    referrals = [
+      { id: 'ref_1', referrer_handle: '@mythopair', referee_handle: '@Rukon__Kholifa', referee_name: 'MD Rukon', status: 'APPROVED', referrer_reward: 150, referee_reward: 150, created_at: '2026-10-08T08:12:00Z', approved_at: '2026-10-08T10:00:00Z', first_purchase_status: 'PAID', first_purchase_amount: 10, purchase_reward_credits: 1 },
+      { id: 'ref_2', referrer_handle: '@mythopair', referee_handle: '@KhanWg60464', referee_name: 'Wg saim Khan', status: 'PENDING', referrer_reward: 150, referee_reward: 150, created_at: '2026-10-08T09:30:00Z', approved_at: null, first_purchase_status: 'NONE', first_purchase_amount: 0, purchase_reward_credits: 0 },
+      { id: 'ref_3', referrer_handle: '@Rukon__Kholifa', referee_handle: '@yournahian', referee_name: 'Nahian', status: 'APPROVED', referrer_reward: 150, referee_reward: 150, created_at: '2026-10-08T11:15:00Z', approved_at: '2026-10-08T11:30:00Z', first_purchase_status: 'NONE', first_purchase_amount: 0, purchase_reward_credits: 0 }
+    ];
+    stats = {
+      totalReferrals: 3,
+      approvedReferrals: 2,
+      pendingReferrals: 1,
+      referralCredits: 600,
+      purchaseRewards: 1
+    };
+  }
+
+  container.innerHTML = `
+    <div class="app-layout">
+      ${renderAdminSidebarHTML('22')}
+      <div class="app-workspace">
+        <div class="workspace-header">
+          <div>
+            <h1 class="page-title">Referral Management</h1>
+            <p class="page-subtitle">Monitor Level-1 direct referrals, account approval bonus credits (150+150), and 10% purchase rewards.</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="renderAdminReferrals(document.getElementById('mainContentArea')); showToast('↻ Refreshed referral data');">↻ Refresh</button>
+          </div>
+        </div>
+
+        <div class="workspace-body">
+          <!-- Overview Stats Cards -->
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:14px; margin-bottom:20px;">
+            <div class="atomx-card" style="padding:16px;">
+              <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Total Referrals</div>
+              <div style="font-size:26px; font-weight:800; color:var(--text-primary); margin-top:4px;">${stats.totalReferrals.toLocaleString()}</div>
+              <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Direct signups</div>
+            </div>
+            <div class="atomx-card" style="padding:16px;">
+              <div style="font-size:11px; font-weight:700; color:var(--status-success); text-transform:uppercase; letter-spacing:0.5px;">Approved Referrals</div>
+              <div style="font-size:26px; font-weight:800; color:var(--status-success); margin-top:4px;">${stats.approvedReferrals.toLocaleString()}</div>
+              <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">150+150 Cr credited</div>
+            </div>
+            <div class="atomx-card" style="padding:16px;">
+              <div style="font-size:11px; font-weight:700; color:var(--status-warning); text-transform:uppercase; letter-spacing:0.5px;">Pending Referrals</div>
+              <div style="font-size:26px; font-weight:800; color:var(--status-warning); margin-top:4px;">${stats.pendingReferrals.toLocaleString()}</div>
+              <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Awaiting account approval</div>
+            </div>
+            <div class="atomx-card" style="padding:16px;">
+              <div style="font-size:11px; font-weight:700; color:var(--blue-primary); text-transform:uppercase; letter-spacing:0.5px;">Referral Credits</div>
+              <div style="font-size:26px; font-weight:800; color:var(--blue-primary); margin-top:4px;">${stats.referralCredits.toLocaleString()}</div>
+              <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Total distributed</div>
+            </div>
+            <div class="atomx-card" style="padding:16px;">
+              <div style="font-size:11px; font-weight:700; color:#9B51E0; text-transform:uppercase; letter-spacing:0.5px;">Purchase Rewards</div>
+              <div style="font-size:26px; font-weight:800; color:#9B51E0; margin-top:4px;">${stats.purchaseRewards.toLocaleString()} Cr</div>
+              <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">10% first purchase credits</div>
+            </div>
+          </div>
+
+          <!-- Rules Summary Banner -->
+          <div class="atomx-card" style="margin-bottom:20px; background:rgba(34,160,107,0.06); border:1px solid rgba(34,160,107,0.2); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:22px;">🛡️</span>
+              <div>
+                <div style="font-weight:700; font-size:13px; color:var(--text-primary);">Level-1 Direct Referrals Rule Enforcement</div>
+                <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">
+                  1 X Account = 1 Account only. No multi-level / cash payout. Both Referrer (+150 Cr) & Referee (+150 Cr) receive credits <strong>only after admin account approval</strong>.
+                </div>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <span class="badge badge-success" style="font-weight:700;">Zero MLM</span>
+              <span class="badge badge-info" style="font-weight:700;">Strict 1 X Account</span>
+            </div>
+          </div>
+
+          <!-- Referrals Table -->
+          <div class="atomx-card table-wrapper" style="padding:0; overflow:hidden;">
+            <table class="atomx-table">
+              <thead>
+                <tr>
+                  <th>Referrer</th>
+                  <th>Referred User</th>
+                  <th>Status</th>
+                  <th>Approval Reward</th>
+                  <th>First Purchase</th>
+                  <th>Purchase Reward</th>
+                  <th>Referral Date</th>
+                  <th>Approval Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${referrals.map(r => `
+                  <tr>
+                    <td>
+                      <div style="font-weight:700; color:#229ED9; font-family:monospace; font-size:13px;">${r.referrer_handle}</div>
+                    </td>
+                    <td>
+                      <div style="font-weight:600; color:var(--text-primary); font-size:13px;">${r.referee_name || r.referee_handle}</div>
+                      <div style="font-size:11px; color:var(--text-muted); font-family:monospace;">${r.referee_handle}</div>
+                      ${r.referee_email ? `<div style="font-size:10px; color:var(--text-muted);">${r.referee_email}</div>` : ''}
+                    </td>
+                    <td>
+                      <span class="badge ${r.status === 'APPROVED' ? 'badge-success' : 'badge-warning'}">
+                        ${r.status}
+                      </span>
+                    </td>
+                    <td>
+                      ${r.status === 'APPROVED' ? 
+                        `<span style="color:var(--status-success); font-weight:700; font-size:12px;">150 + 150 Cr</span>` : 
+                        `<span style="color:var(--text-muted); font-size:12px;">Pending</span>`}
+                    </td>
+                    <td>
+                      ${r.first_purchase_amount > 0 ? 
+                        `<span style="font-weight:600; font-size:12px;">$${r.first_purchase_amount}</span>` : 
+                        `<span style="color:var(--text-muted); font-size:12px;">—</span>`}
+                    </td>
+                    <td>
+                      ${r.purchase_reward_credits > 0 ? 
+                        `<span style="color:#9B51E0; font-weight:700; font-size:12px;">+${r.purchase_reward_credits} Cr (10%)</span>` : 
+                        `<span style="color:var(--text-muted); font-size:12px;">—</span>`}
+                    </td>
+                    <td style="color:var(--text-muted); font-size:11px;">
+                      ${r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td style="color:var(--text-muted); font-size:11px;">
+                      ${r.approved_at ? new Date(r.approved_at).toLocaleDateString() : 'Pending'}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// -------------------------------------------------------------
 // SCREEN 18: ACCOUNT SUSPENDED
 // -------------------------------------------------------------
 function renderSuspended(container) {
@@ -4825,6 +5236,11 @@ function renderAdminSidebarHTML(activeId) {
           <span>Tone & Styles</span>
           <span class="badge badge-info" style="margin-left:auto; font-size:10px; padding:1px 5px;">AI</span>
         </div>
+        <div class="nav-item ${activeId === '22' ? 'active' : ''}" onclick="navigateToScreen('22')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span>Referral Management</span>
+          <span class="badge badge-info" style="margin-left:auto; font-size:10px; padding:1px 5px;">150+</span>
+        </div>
 
         <div class="nav-item" onclick="adminWipeAllUserData()" style="color:var(--status-error); margin-top:8px; cursor:pointer;" title="Reset all users & data fresh">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -4989,6 +5405,8 @@ async function loadAdminServerData() {
         plan: u.plan_tier || 'Free Plan',
         credits: u.credits !== undefined ? u.credits : 100,
         status: (u.status || 'ACTIVE').charAt(0).toUpperCase() + (u.status || 'ACTIVE').slice(1).toLowerCase(),
+        referredBy: u.referred_by || u.referredBy || 'Direct / —',
+        telegram: u.telegram || '',
         lastActive: u.created_at ? new Date(u.created_at).toLocaleDateString() : 'Recently'
       }));
     }

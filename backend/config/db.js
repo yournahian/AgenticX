@@ -59,13 +59,35 @@ module.exports = {
     return data || null;
   },
 
+  async getUserByHandle(handle) {
+    if (!supabase || !handle) return null;
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    const { data } = await supabase.from('users').select('*').or(`handle.eq.@${clean},handle.eq.${clean}`).maybeSingle();
+    return data || null;
+  },
+
   async getAllUsers() {
     if (!supabase) return [];
     const { data, error } = await supabase
       .from('users')
       .select('id, full_name, email, handle, role, status, plan_tier, credits, avatar_initials, created_at')
       .order('created_at', { ascending: true });
-    return data || [];
+    
+    // Attach referredBy from referrals service
+    try {
+      const referralService = require('../services/referralService');
+      const allRefs = referralService.getAllReferrals();
+      return (data || []).map(u => {
+        const uHandle = (u.handle || '').toLowerCase();
+        const refMatch = allRefs.find(r => r.referee_handle.toLowerCase() === uHandle || (u.email && r.referee_email.toLowerCase() === u.email.toLowerCase()));
+        return {
+          ...u,
+          referredBy: refMatch ? refMatch.referrer_handle : 'Direct / —'
+        };
+      });
+    } catch (e) {
+      return data || [];
+    }
   },
 
   async updateUserStatus(userId, status) {
@@ -169,10 +191,12 @@ module.exports = {
     return (data || []).map(r => {
       const match = (r.use_case || '').match(/X_ID:(@?[\w_]+)/i);
       const tgMatch = (r.use_case || '').match(/TG:(@?[\w_]+)/i);
+      const refMatch = (r.use_case || '').match(/REF:(@?[\w_]+)/i);
       return {
         ...r,
         handle: match ? (match[1].startsWith('@') ? match[1] : '@' + match[1]) : '@' + r.email.split('@')[0],
-        telegram: tgMatch ? (tgMatch[1].startsWith('@') ? tgMatch[1] : '@' + tgMatch[1]) : (r.telegram || '')
+        telegram: tgMatch ? (tgMatch[1].startsWith('@') ? tgMatch[1] : '@' + tgMatch[1]) : (r.telegram || ''),
+        referredBy: refMatch ? (refMatch[1].startsWith('@') ? refMatch[1] : '@' + refMatch[1]) : 'Direct / —'
       };
     });
   },
@@ -260,6 +284,18 @@ module.exports = {
       status: 'APPROVED',
       reviewed_at: new Date().toISOString()
     }).eq('id', requestId);
+
+    // Process referral rewards if this user was referred (Referrer +150, User +150)
+    try {
+      const referralService = require('../services/referralService');
+      await referralService.processApprovalRewards({
+        refereeHandle: assignedHandle,
+        refereeEmail: req.email,
+        refereeUserId: userRecord.id
+      });
+    } catch (refErr) {
+      console.warn('[Referral Approval Notice]', refErr.message);
+    }
 
     return { userId: userRecord.id, credits: userRecord.credits, handle: assignedHandle, plan: userRecord.plan_tier };
   },

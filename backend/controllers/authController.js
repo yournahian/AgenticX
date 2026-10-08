@@ -57,8 +57,10 @@ exports.login = async (req, res) => {
   }
 };
 
+const referralService = require('../services/referralService');
+
 exports.requestAccess = async (req, res) => {
-  const { fullName, email, handle, xHandle, password, useCase, telegram } = req.body;
+  const { fullName, email, handle, xHandle, password, useCase, telegram, referredBy, ref } = req.body;
   if (!fullName || !email) {
     return res.status(400).json({ error: 'Full name and email are required' });
   }
@@ -72,20 +74,55 @@ exports.requestAccess = async (req, res) => {
   const rawTelegram = (telegram || '').trim();
   const formattedTelegram = rawTelegram ? (rawTelegram.startsWith('@') ? rawTelegram : '@' + rawTelegram) : '';
 
+  const rawReferrer = (referredBy || ref || '').trim().replace(/^@/, '');
+  const formattedReferrer = rawReferrer && rawReferrer.toLowerCase() !== rawHandle.toLowerCase() ? '@' + rawReferrer : '';
+
   try {
-    const existing = await db.getUserByEmail(email);
-    if (existing) {
+    // 1. Strict 1 account per email
+    const existingEmail = await db.getUserByEmail(email);
+    if (existingEmail) {
       return res.status(400).json({ error: 'An account with this email already exists' });
     }
 
-    const note = `X_ID:${formattedHandle}${formattedTelegram ? ` | TG:${formattedTelegram}` : ''} | Note: ${useCase || 'User access request'}`;
+    // 2. Strict 1 account per X ID (Enforce zero duplicate X accounts)
+    const existingHandleUser = await db.getUserByHandle(rawHandle);
+    if (existingHandleUser) {
+      return res.status(400).json({ 
+        error: `This Twitter / X handle (${formattedHandle}) is already registered to an account. Each X account can only be linked once.` 
+      });
+    }
+
+    // 3. Check for existing pending request with this X ID
+    const existingReqs = await db.getAccessRequests();
+    const duplicateReq = (existingReqs || []).find(r => {
+      const h = (r.handle || '').replace(/^@/, '').toLowerCase();
+      return h === rawHandle.toLowerCase() && (r.status === 'PENDING' || r.status === 'APPROVED');
+    });
+    if (duplicateReq) {
+      return res.status(400).json({ 
+        error: `An access request for ${formattedHandle} has already been submitted (${duplicateReq.status}). Multiple accounts with the same X ID are strictly prohibited.` 
+      });
+    }
+
+    const note = `X_ID:${formattedHandle}${formattedTelegram ? ` | TG:${formattedTelegram}` : ''}${formattedReferrer ? ` | REF:${formattedReferrer}` : ''} | Note: ${useCase || 'User access request'}`;
     await db.createAccessRequest(fullName, email, note, formattedHandle, password);
+
+    // 4. Record pending referral if referred
+    if (formattedReferrer) {
+      referralService.recordPendingReferral({
+        referrerHandle: formattedReferrer,
+        refereeHandle: formattedHandle,
+        refereeEmail: email,
+        refereeName: fullName
+      });
+    }
 
     res.status(201).json({
       message: `Access request submitted for ${formattedHandle}! Waiting for admin approval.`,
       status: 'PENDING',
       handle: formattedHandle,
-      telegram: formattedTelegram
+      telegram: formattedTelegram,
+      referredBy: formattedReferrer || null
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

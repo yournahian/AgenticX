@@ -39,6 +39,20 @@
       </div>
     </header>
 
+    <!-- Universal Update Available Notification Banner -->
+    <div id="extUpdateBanner" style="display:none; padding:7px 12px; background:linear-gradient(135deg, #1E3A8A, #2563EB); color:#FFFFFF; font-size:11px; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.2);">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span style="font-size:14px;">🔔</span>
+        <div>
+          <strong id="extUpdateVersionText">UPDATE AVAILABLE: v1.0.1</strong>
+          <div style="font-size:9.5px; opacity:0.85;">Security hardening & multi-agent upgrades</div>
+        </div>
+      </div>
+      <a href="https://github.com/yournahian/AgenticX/releases" target="_blank" id="extUpdateDownloadBtn" style="background:#FFFFFF; color:#1E3A8A; font-weight:800; font-size:10px; padding:3px 8px; border-radius:4px; text-decoration:none; white-space:nowrap; box-shadow:0 1px 3px rgba(0,0,0,0.2);">
+        UPDATE NOW
+      </a>
+    </div>
+
     <!-- 1-to-1 Verified Twitter / X Identity Lock Bar -->
     <div id="verifiedAccountBar" style="display:none; padding: 6px 14px; background: rgba(59,130,246,0.06); border-bottom: 1px solid var(--border-subtle); font-size: 11px; justify-content: space-between; align-items: center;">
       <div style="display:flex; align-items:center; gap:6px;">
@@ -1430,13 +1444,51 @@
           <div style="font-size:11px; color:var(--text-secondary);">1 Credit = 1 AI Reply or Action</div>
         </div>
 
-        <!-- Invite and Earn -->
+        <!-- FOUNDING 100 Promotional Launch Offer -->
+        <div class="card" style="padding:12px; background:linear-gradient(180deg, rgba(255,107,0,0.06), rgba(0,0,0,0.2)); border:1.5px solid #FF6B00; border-radius:var(--radius-md); margin-bottom:12px; position:relative;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span class="badge-mini popular" style="background:linear-gradient(135deg, #FF6B00, #E60000); color:#FFF; font-weight:800;">🔥 FIRST LAUNCH OFFER</span>
+            <span style="font-size:11px; font-weight:800; color:#FF6B00;">FOUNDING 100</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
+            <div>
+              <span style="text-decoration:line-through; font-size:12px; color:var(--text-muted);">$5/mo</span>
+              <span style="font-size:20px; font-weight:800; color:#FF6B00; margin-left:4px;">$2</span><span style="font-size:11px; color:var(--text-muted);">/mo</span>
+            </div>
+            <div style="font-size:12px; font-weight:800; color:var(--blue-primary);">5,000 Credits</div>
+          </div>
+          <div id="extFoundingCountdownBox" style="background:rgba(255,107,0,0.12); border:1px solid rgba(255,107,0,0.3); border-radius:6px; padding:6px; text-align:center; margin-bottom:8px;">
+            <div style="font-size:9.5px; font-weight:700; color:#FF6B00; text-transform:uppercase;">⏳ OFFER ENDS IN</div>
+            <div id="extFoundingCountdownTimer" style="font-family:monospace; font-size:12px; font-weight:800; color:var(--text-primary); margin-top:2px;">
+              02d : 14h : 37m : 52s
+            </div>
+          </div>
+          <a href="https://atomxengage.com" target="_blank" class="primary-btn mini-btn" style="width:100%; margin-top:0; text-align:center; background:linear-gradient(135deg, #FF6B00, #E60000); border:none; text-decoration:none; display:block;">
+            ⚡ Claim Founding 100 ($2)
+          </a>
+        </div>
+
+        <!-- Level-1 Referral Program Dashboard -->
         <div class="card" style="padding:12px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); margin-bottom:12px;">
-          <div style="font-weight:700; font-size:12px; margin-bottom:2px; color:var(--text-primary);">🎁 Invite & Earn Credits</div>
-          <div style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">Share your code; both you & your referral receive bonus credits.</div>
-          <div style="display:flex; gap:6px;">
-            <input type="text" readonly value="EVAN-X924" id="extInviteCodeInput" class="ext-input" style="font-weight:700; text-align:center; font-size:12px;">
-            <button class="primary-btn mini-btn" id="extCopyInviteBtn" style="margin-top:0;">Copy</button>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <div style="font-weight:700; font-size:12px; color:var(--text-primary);">🎁 Referral Program</div>
+            <span class="badge-mini growth" style="font-size:9px;">150 + 150 CR</span>
+          </div>
+          <p style="font-size:10.5px; color:var(--text-secondary); margin-bottom:8px; line-height:1.4;">
+            Invite friends. When their account is approved, both receive <strong>+150 Credits</strong>! Plus 10% on first purchase.
+          </p>
+
+          <div style="font-size:10px; color:var(--text-muted); margin-bottom:3px;">Your Personal Referral Link:</div>
+          <div style="display:flex; gap:6px; margin-bottom:8px;">
+            <input type="text" readonly value="https://atomxengage.com/ref/user" id="extInviteLinkInput" class="ext-input" style="font-weight:700; font-size:10.5px; font-family:monospace;">
+            <button class="primary-btn mini-btn" id="extCopyInviteLinkBtn" style="margin-top:0; padding:0 8px;">Copy</button>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; background:var(--bg-canvas); padding:6px 10px; border-radius:6px; font-size:10px; border:1px solid var(--border-subtle);">
+            <div>Total: <strong id="extRefTotalCount">0</strong></div>
+            <div style="color:var(--status-success);">Approved: <strong id="extRefApprovedCount">0</strong></div>
+            <div style="color:var(--status-warning);">Pending: <strong id="extRefPendingCount">0</strong></div>
+            <div style="color:var(--blue-primary);">Earned: <strong id="extRefEarnedCredits">0 Cr</strong></div>
           </div>
         </div>
 
@@ -1542,9 +1594,14 @@
             <input type="text" id="extReqTelegramInput" class="ext-input" placeholder="e.g. @evanjawad" value="">
           </div>
 
-          <div style="margin-bottom:12px;">
+          <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Your Real Twitter / X ID (Handle)</label>
             <input type="text" id="extReqHandleInput" class="ext-input" placeholder="e.g. @mythopair" value="">
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Referred By (Optional)</label>
+            <input type="text" id="extReqReferredByInput" class="ext-input" placeholder="e.g. @mythopair" value="">
           </div>
 
           <button type="button" class="primary-btn mini-btn" id="extSubmitRequestBtn" style="width:100%; margin-top:0;">

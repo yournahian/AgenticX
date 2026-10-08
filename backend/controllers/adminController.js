@@ -499,3 +499,74 @@ exports.wipeAllUsers = async (req, res) => {
     res.status(500).json({ error: 'Failed to wipe user data: ' + err.message });
   }
 };
+
+// Referral Management (Admin Dashboard)
+exports.getReferrals = async (req, res) => {
+  try {
+    const referralService = require('../services/referralService');
+    const referrals = referralService.getAllReferrals();
+
+    const totalReferrals = referrals.length;
+    const approvedReferrals = referrals.filter(r => r.status === 'APPROVED').length;
+    const pendingReferrals = referrals.filter(r => r.status === 'PENDING').length;
+    const referralCredits = approvedReferrals * 150 * 2; // 150 referrer + 150 referee
+    const purchaseRewards = referrals.reduce((sum, r) => sum + (r.purchase_reward_credits || 0), 0);
+
+    res.json({
+      success: true,
+      stats: {
+        totalReferrals,
+        approvedReferrals,
+        pendingReferrals,
+        referralCredits,
+        purchaseRewards
+      },
+      referrals
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch referrals: ' + err.message });
+  }
+};
+
+// Special Promotional Offers (FOUNDING 100 / FIRST LAUNCH)
+exports.getOffer = (req, res) => {
+  try {
+    const offerService = require('../services/offerService');
+    const offer = offerService.getCurrentOffer();
+    res.json(offer);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch promotional offer: ' + err.message });
+  }
+};
+
+exports.saveOffer = (req, res) => {
+  try {
+    const offerService = require('../services/offerService');
+    const updated = offerService.updateOffer(req.body);
+    res.json({
+      success: true,
+      message: '✓ Promotional offer updated successfully!',
+      offer: updated
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save promotional offer: ' + err.message });
+  }
+};
+
+// System Version & Universal Update API
+exports.getSystemVersion = (req, res) => {
+  res.json({
+    currentVersion: '1.0.1',
+    minSupportedVersion: '1.0.0',
+    releaseDate: '2026-10-08',
+    releaseNotes: 'Security hardening, Telegram ID integration, and Auto-calculate plan credits',
+    downloadUrl: 'https://github.com/yournahian/AgenticX/releases',
+    features: [
+      'Telegram ID capture & display',
+      'Auto-calculated plan credits with bonus',
+      'Promotional Founding 100 offer with live countdown',
+      'Direct Level-1 referral rewards (150 + 150 Cr)',
+      'Single X ID per account enforcement'
+    ]
+  });
+};
