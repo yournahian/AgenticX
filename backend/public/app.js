@@ -981,8 +981,13 @@ function renderRequestAccess(container) {
 
         <form onsubmit="handleRequestAccessSubmit(event)">
           <div class="form-group">
-            <label class="form-label">Name</label>
+            <label class="form-label">Full Name</label>
             <input type="text" id="reqName" class="form-input" required placeholder="Full name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Twitter / X Handle or ID</label>
+            <input type="text" id="reqHandle" class="form-input" required placeholder="@username or handle">
+            <div class="form-hint" style="color:var(--blue-primary); font-size:11px; margin-top:3px;">🔒 The extension will be strictly locked to this single X ID.</div>
           </div>
           <div class="form-group">
             <label class="form-label">Email</label>
@@ -990,14 +995,14 @@ function renderRequestAccess(container) {
           </div>
           <div class="form-group">
             <label class="form-label">Password</label>
-            <input type="password" id="reqPass" class="form-input" required placeholder="Create strong password">
+            <input type="password" id="reqPass" class="form-input" required placeholder="Create password">
           </div>
           <div class="form-group">
             <label class="form-label">Confirm Password</label>
             <input type="password" id="reqConfirm" class="form-input" required placeholder="Confirm password">
           </div>
-          <button type="submit" class="btn btn-primary btn-block">Request Access</button>
-          <p class="form-hint" style="text-align:center; margin-top:12px;">Your account will be reviewed before activation.</p>
+          <button type="submit" class="btn btn-primary btn-block">Request Access & Verify X ID</button>
+          <p class="form-hint" style="text-align:center; margin-top:12px;">Your X ID will be reviewed and approved by administrator before activation.</p>
         </form>
 
         <div class="auth-footer">
@@ -1008,8 +1013,34 @@ function renderRequestAccess(container) {
   `;
 }
 
-function handleRequestAccessSubmit(e) {
-  e.preventDefault();
+async function handleRequestAccessSubmit(e) {
+  if (e) e.preventDefault();
+  const name = document.getElementById('reqName')?.value.trim();
+  const handle = document.getElementById('reqHandle')?.value.trim();
+  const email = document.getElementById('reqEmail')?.value.trim();
+  const pass = document.getElementById('reqPass')?.value.trim();
+  const confirm = document.getElementById('reqConfirm')?.value.trim();
+
+  if (!handle) {
+    alert('Please enter your X (Twitter) handle or ID.');
+    return;
+  }
+  if (pass && confirm && pass !== confirm) {
+    alert('Passwords do not match. Please re-enter.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/access-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName: name, email, handle, password: pass })
+    });
+    if (res.ok) {
+      showToast(`✓ Request submitted for ${handle}! Waiting for admin approval.`);
+    }
+  } catch (err) {}
+
   navigateToScreen('03');
 }
 
@@ -2505,6 +2536,7 @@ function renderAdminAccessRequests(container) {
               <thead>
                 <tr>
                   <th>User</th>
+                  <th>Verified X ID</th>
                   <th>Email</th>
                   <th>Requested Date</th>
                   <th>Status</th>
@@ -2514,7 +2546,7 @@ function renderAdminAccessRequests(container) {
               <tbody>
                 ${AtomXState.accessRequests.length === 0 ? `
                   <tr>
-                    <td colspan="5" style="text-align:center; padding:36px; color:var(--text-muted);">
+                    <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
                       <div style="font-size:24px; margin-bottom:8px;">📭</div>
                       <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:4px;">No Pending Access Requests</div>
                       <div style="font-size:12px;">When new users request access through the registration portal, they will appear here.</div>
@@ -2523,11 +2555,12 @@ function renderAdminAccessRequests(container) {
                 ` : AtomXState.accessRequests.map(req => `
                   <tr>
                     <td style="font-weight:600;">${req.name}</td>
+                    <td style="font-weight:700; color:var(--blue-primary);">${req.handle || '@user'}</td>
                     <td>${req.email}</td>
                     <td style="color:var(--text-muted);">${req.requestedDate}</td>
                     <td><span class="badge badge-warning">${req.status || 'Pending'}</span></td>
                     <td style="text-align:right;">
-                      <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${req.name}', '${req.email}')">Approve</button>
+                      <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${req.name}', '${req.email}', '${req.handle || '@user'}', '${req.id}')">Approve</button>
                       <button class="btn btn-danger btn-sm" onclick="rejectUserRequest(${req.id})">Reject</button>
                     </td>
                   </tr>
@@ -2541,17 +2574,18 @@ function renderAdminAccessRequests(container) {
   `;
 }
 
-function openApprovalModal(name, email) {
+function openApprovalModal(name, email, handle = '@user', reqId = '') {
   const modalHTML = `
     <div class="modal-backdrop" id="approvalModal">
       <div class="modal-box">
         <div class="modal-header">
-          <h3 class="modal-title">Approve Account</h3>
+          <h3 class="modal-title">Approve Account & Authorize X ID</h3>
           <button class="modal-close-btn" onclick="closeModal()">×</button>
         </div>
-        <div style="margin-bottom:16px;">
-          <div style="font-weight:700; font-size:15px;">${name}</div>
-          <div style="font-size:13px; color:var(--text-secondary);">${email}</div>
+        <div style="margin-bottom:16px; background:var(--bg-canvas); padding:12px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
+          <div style="font-weight:700; font-size:15px; color:var(--text-primary);">${name}</div>
+          <div style="font-size:13px; font-weight:700; color:var(--blue-primary); margin-top:2px;">🔒 Locked to X ID: ${handle}</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">Email: ${email}</div>
         </div>
         <div class="form-group">
           <label class="form-label">Initial Credits</label>
@@ -2559,22 +2593,16 @@ function openApprovalModal(name, email) {
           <div class="form-hint">Server assigns 100 free credits upon onboarding.</div>
         </div>
         <div class="form-group">
-          <label class="form-label">Plan</label>
+          <label class="form-label">Plan Tier</label>
           <select class="form-select" id="approvalPlanSelect">
             <option selected value="Free">Free (100 Credits)</option>
             <option value="Growth">Growth (10,000 Credits)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Expiration</label>
-          <select class="form-select">
-            <option selected>No expiration</option>
-            <option>30 Days Trial</option>
+            <option value="Pro">Pro (25,000 Credits)</option>
           </select>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:24px;">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="confirmApproval('${name}', '${email}')">Approve Account</button>
+          <button class="btn btn-primary" onclick="confirmApproval('${name}', '${email}', '${handle}', '${reqId}')">Approve & Authorize ID</button>
         </div>
       </div>
     </div>
@@ -2587,7 +2615,7 @@ function closeModal() {
   if (modal) modal.remove();
 }
 
-async function confirmApproval(name, email) {
+async function confirmApproval(name, email, handle = '@user', reqId = '') {
   closeModal();
   const credits = Number(document.getElementById('initialCreditsInput')?.value) || 100;
   const plan = document.getElementById('approvalPlanSelect')?.value || 'Free';
@@ -2595,11 +2623,11 @@ async function confirmApproval(name, email) {
     const res = await fetch(`${API_BASE}/api/admin/approve-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, initialCredits: credits, planTier: plan })
+      body: JSON.stringify({ requestId: reqId, email, handle, initialCredits: credits, planTier: plan })
     });
     if (res.ok) {
       await loadAdminServerData();
-      alert(`User ${name} approved on server! Allocated ${credits} credits.`);
+      alert(`User ${name} (${handle}) approved on server! Allocated ${credits} credits.`);
       navigateToScreen('14');
       return;
     }
@@ -2739,13 +2767,18 @@ function renderAdminCreditManagement(container) {
               </div>
 
               <div class="form-group">
+                <label class="form-label">Credit Amount</label>
+                <input type="number" id="adminCreditInput" class="form-input" value="1000" min="1">
+              </div>
+
+              <div class="form-group">
                 <label class="form-label">Reason</label>
                 <input type="text" id="adminCreditReason" class="form-input" value="Promotional bonus">
               </div>
 
               <div style="display:flex; gap:10px;">
-                <button class="btn btn-primary" onclick="adminAdjustCredits(1000, 'Add')">+ Add Credits</button>
-                <button class="btn btn-secondary" onclick="adminAdjustCredits(1000, 'Remove')">- Remove Credits</button>
+                <button class="btn btn-primary" onclick="adminTriggerCreditAdjustment('Add')">+ Add Credits</button>
+                <button class="btn btn-secondary" onclick="adminTriggerCreditAdjustment('Remove')">- Remove Credits</button>
               </div>
             </div>
 
@@ -2805,6 +2838,16 @@ function renderAdminCreditManagement(container) {
   `;
 }
 
+function adminTriggerCreditAdjustment(type) {
+  const input = document.getElementById('adminCreditInput');
+  const amt = parseInt(input?.value, 10);
+  if (isNaN(amt) || amt <= 0) {
+    alert('Please enter a valid credit amount greater than 0.');
+    return;
+  }
+  adminAdjustCredits(amt, type);
+}
+
 async function adminAdjustCredits(amt, type) {
   const amount = type === 'Add' ? amt : -amt;
   const reason = document.getElementById('adminCreditReason')?.value || 'Admin Adjustment';
@@ -2836,7 +2879,7 @@ async function adminAdjustCredits(amt, type) {
 }
 
 // -------------------------------------------------------------
-// SCREEN 16: PLAN MANAGEMENT (ADMIN)
+// SCREEN 16: PLAN & OFFERS MANAGEMENT (ADMIN)
 // -------------------------------------------------------------
 function renderAdminPlanManagement(container) {
   container.innerHTML = `
@@ -2845,29 +2888,188 @@ function renderAdminPlanManagement(container) {
       <div class="app-workspace">
         <div class="workspace-header">
           <div>
-            <h1 class="page-title">Plans</h1>
-            <p class="page-subtitle">Configure pricing tiers, credit allocations, and features.</p>
+            <h1 class="page-title">Plans & Special Offers</h1>
+            <p class="page-subtitle">Configure pricing tiers, credit allocations, discounts, and custom promotional offers.</p>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="alert('New custom tier modal opened')">+ New Plan</button>
+          <button class="btn btn-primary btn-sm" onclick="openNewPlanModal()">+ Add New Plan / Offer</button>
         </div>
 
         <div class="workspace-body">
           <div class="pricing-grid">
             ${AtomXState.plans.map(p => `
-              <div class="pricing-card ${p.popular ? 'featured' : ''}">
-                ${p.popular ? `<div class="pricing-card-badge">POPULAR</div>` : ''}
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                  <h3 style="font-size:16px; font-weight:800;">${p.name}</h3>
-                  <span class="badge badge-success">Active</span>
+              <div class="pricing-card ${p.popular ? 'featured' : ''}" style="position:relative;">
+                ${p.offerBadge ? `
+                  <div class="pricing-card-badge" style="background:linear-gradient(135deg, #FF6B00, #E60000); color:#FFF; font-weight:800; font-size:11px; padding:4px 10px; border-radius:20px; text-transform:uppercase;">
+                    🔥 ${p.offerBadge}
+                  </div>
+                ` : (p.popular ? `<div class="pricing-card-badge">POPULAR</div>` : '')}
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:${p.offerBadge ? '10px' : '0'};">
+                  <h3 style="font-size:16px; font-weight:800; text-transform:uppercase;">${p.name}</h3>
+                  <span class="badge ${p.price > 0 ? 'badge-success' : 'badge-secondary'}">${p.price > 0 ? 'Active' : 'Free Tier'}</span>
                 </div>
-                <div class="plan-price">$${p.price} <span style="font-size:13px; color:var(--text-muted); font-weight:500;">/ month</span></div>
-                <div style="font-size:14px; font-weight:600; color:var(--text-primary); margin-bottom:12px;">${p.credits.toLocaleString()} Credits</div>
-                <ul class="plan-feature-list">
-                  ${p.features.map(f => `<li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ${f}</li>`).join('')}
+
+                <div class="plan-price" style="margin:12px 0 6px 0;">
+                  $${p.price} <span style="font-size:13px; color:var(--text-muted); font-weight:500;">/ month</span>
+                </div>
+
+                <div style="font-size:14px; font-weight:700; color:var(--blue-primary); margin-bottom:12px;">
+                  ⚡ ${(p.credits || 0).toLocaleString()} Credits
+                </div>
+
+                <ul class="plan-feature-list" style="margin-bottom:16px;">
+                  ${(p.features || []).map(f => `<li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ${f}</li>`).join('')}
                 </ul>
-                <button class="btn btn-secondary btn-block" onclick="alert('Editing ${p.name} plan configuration')">Edit Plan</button>
+
+                <button class="btn btn-secondary btn-block" onclick="openEditPlanModal('${p.id}')">✏️ Edit Price & Offers</button>
               </div>
             `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openEditPlanModal(planId) {
+  const plan = AtomXState.plans.find(p => p.id === planId);
+  if (!plan) return;
+
+  const modalHTML = `
+    <div class="modal-backdrop" id="planEditModal">
+      <div class="modal-box" style="max-width:480px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Edit Plan: ${plan.name}</h3>
+          <button class="modal-close-btn" onclick="closeModal()">×</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Plan Name</label>
+          <input type="text" class="form-input" id="editPlanName" value="${plan.name}">
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label class="form-label">Price ($ / month)</label>
+            <input type="number" class="form-input" id="editPlanPrice" value="${plan.price}" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Credits Allocated</label>
+            <input type="number" class="form-input" id="editPlanCredits" value="${plan.credits}" min="100">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Special Offer Badge (Optional)</label>
+          <input type="text" class="form-input" id="editPlanBadge" value="${plan.offerBadge || ''}" placeholder="e.g. 50% OFF, FLASH DEAL, BEST VALUE">
+          <div class="form-hint">Shown as an eye-catching promotional badge above the plan card.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Features (one per line)</label>
+          <textarea class="form-input" id="editPlanFeatures" rows="4">${(plan.features || []).join('\n')}</textarea>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="savePlanChanges('${plan.id}')">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function openNewPlanModal() {
+  const modalHTML = `
+    <div class="modal-backdrop" id="planNewModal">
+      <div class="modal-box" style="max-width:480px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Create New Plan / Promotional Offer</h3>
+          <button class="modal-close-btn" onclick="closeModal()">×</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Plan Name</label>
+          <input type="text" class="form-input" id="newPlanName" placeholder="e.g. SUMMER SPECIAL or ENTERPRISE">
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group">
+            <label class="form-label">Price ($ / month)</label>
+            <input type="number" class="form-input" id="newPlanPrice" value="19" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Credits Allocated</label>
+            <input type="number" class="form-input" id="newPlanCredits" value="20000" min="100">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Promotional Offer Badge</label>
+          <input type="text" class="form-input" id="newPlanBadge" value="SPECIAL OFFER" placeholder="e.g. 50% OFF, LIMITED DEAL">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Features (one per line)</label>
+          <textarea class="form-input" id="newPlanFeatures" rows="3">20,000 AI replies\nAll autonomous agents\nPriority server queue\nDedicated support</textarea>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewPlan()">Create Offer Plan</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+async function savePlanChanges(planId) {
+  const plan = AtomXState.plans.find(p => p.id === planId);
+  if (!plan) return;
+
+  plan.name = document.getElementById('editPlanName')?.value.trim() || plan.name;
+  plan.price = Number(document.getElementById('editPlanPrice')?.value) || 0;
+  plan.credits = Number(document.getElementById('editPlanCredits')?.value) || plan.credits;
+  plan.offerBadge = document.getElementById('editPlanBadge')?.value.trim() || '';
+  const featText = document.getElementById('editPlanFeatures')?.value || '';
+  plan.features = featText.split('\n').map(s => s.trim()).filter(Boolean);
+
+  closeModal();
+  await persistAdminPlans();
+  renderAdminPlanManagement(document.getElementById('mainContentArea'));
+  showToast(`✓ Updated ${plan.name} plan configuration successfully!`);
+}
+
+async function saveNewPlan() {
+  const name = document.getElementById('newPlanName')?.value.trim();
+  if (!name) { alert('Please enter a plan name.'); return; }
+
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const price = Number(document.getElementById('newPlanPrice')?.value) || 0;
+  const credits = Number(document.getElementById('newPlanCredits')?.value) || 1000;
+  const offerBadge = document.getElementById('newPlanBadge')?.value.trim() || '';
+  const featText = document.getElementById('newPlanFeatures')?.value || '';
+  const features = featText.split('\n').map(s => s.trim()).filter(Boolean);
+
+  AtomXState.plans.push({
+    id,
+    name,
+    price,
+    credits,
+    offerBadge,
+    popular: false,
+    features: features.length > 0 ? features : ['Full AI Access', 'Autonomous Agents']
+  });
+
+  closeModal();
+  await persistAdminPlans();
+  renderAdminPlanManagement(document.getElementById('mainContentArea'));
+  showToast(`✓ Created new promotional offer plan: ${name}`);
+}
+
+async function persistAdminPlans() {
+  try {
+    await fetch(`${API_BASE}/api/admin/save-plans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plans: AtomXState.plans })
+    });
+  } catch (e) {
+    console.warn('Could not post plans to backend', e);
+  }
+}
           </div>
         </div>
       </div>

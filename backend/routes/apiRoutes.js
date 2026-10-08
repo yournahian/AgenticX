@@ -64,6 +64,7 @@ router.get('/admin/access-requests', adminController.getAccessRequests);
 router.post('/admin/approve-request', adminController.approveRequest);
 router.post('/admin/adjust-credits', adminController.adjustCredits);
 router.get('/admin/plans', adminController.getPlans);
+router.post('/admin/save-plans', adminController.savePlans);
 router.get('/admin/ledger', adminController.getGlobalLedger);
 
 // Curated Lists & Sorsa Score Targets Management

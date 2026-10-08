@@ -141,19 +141,80 @@ function getMainPostArticle() {
  */
 function getLoggedInUserHandle() {
   try {
+    // 1. AppTabBar_Profile_Link href="/<handle>"
     const profileLink = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
     if (profileLink) {
       const href = profileLink.getAttribute('href') || '';
-      const clean = href.replace('/', '').toLowerCase();
-      if (clean) return clean;
+      const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
+      if (clean && !['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(clean)) {
+        return clean;
+      }
     }
-    const switcher = document.querySelector('div[data-testid="SideNav_AccountSwitcher_Button"]');
+    // 2. SideNav_AccountSwitcher_Button inner text contains @<handle>
+    const switcher = document.querySelector('div[data-testid="SideNav_AccountSwitcher_Button"], button[data-testid="SideNav_AccountSwitcher_Button"]');
     if (switcher) {
-      const match = switcher.innerText.match(/@([\w_]+)/);
+      const text = switcher.innerText || switcher.textContent || '';
+      const match = text.match(/@([\w_]{1,30})/);
       if (match) return match[1].toLowerCase();
+    }
+    // 3. Header/Nav link check
+    const sideNavLinks = document.querySelectorAll('header nav a[role="link"]');
+    for (const link of sideNavLinks) {
+      const href = link.getAttribute('href') || '';
+      const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
+      if (clean && !['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'settings'].includes(clean) && clean.length > 1) {
+        return clean;
+      }
     }
   } catch (e) {}
   return null;
+}
+
+function showAccountMismatchModal(expectedHandle, actualHandle) {
+  const existing = document.getElementById('atomx-account-mismatch-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'atomx-account-mismatch-banner';
+  banner.style.cssText = `
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0f172a;
+    color: #f8fafc;
+    border: 2px solid #ef4444;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.7);
+    border-radius: 12px;
+    padding: 16px 22px;
+    z-index: 999999999;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 460px;
+    width: 90%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  `;
+  banner.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:15px; color:#ef4444;">
+        <span>⚠️</span>
+        <span>ATOMX ENGAGE — Account Lock</span>
+      </div>
+      <button id="atomx-close-mismatch" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:16px;">✕</button>
+    </div>
+    <div style="font-size:13px; color:#e2e8f0; line-height:1.5;">
+      This extension is <strong>strictly locked</strong> to your approved X ID: <strong style="color:#60a5fa;">@${expectedHandle}</strong>.
+      <br>
+      Active Twitter tab is logged in as: <strong style="color:#ef4444;">@${actualHandle || 'No account logged in'}</strong>.
+    </div>
+    <div style="font-size:12px; color:#94a3b8; margin-top:2px;">
+      👉 Please switch or log into <strong>@${expectedHandle}</strong> on Twitter to enable automated actions.
+    </div>
+  `;
+  document.body.appendChild(banner);
+  document.getElementById('atomx-close-mismatch')?.addEventListener('click', () => banner.remove());
+  setTimeout(() => banner.remove(), 12000);
 }
 
 /**
@@ -327,6 +388,17 @@ async function insertIntoTwitterInput(text) {
 
 // Listen to commands from Extension Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' || message.type === 'GET_CURRENT_X_ACCOUNT') {
+    const handle = getLoggedInUserHandle();
+    sendResponse({
+      success: true,
+      handle: handle ? `@${handle}` : null,
+      rawHandle: handle || null,
+      isLoggedIn: Boolean(handle)
+    });
+    return true;
+  }
+
   if (message.type === 'ABORT_WORKFLOW') {
     isWorkflowAborted = true;
     console.log('[ATOMX] Abort signal received. Stopping all automation.');
@@ -419,6 +491,21 @@ function waitForElement(selector, timeout = 7000) {
 
 async function executeAutonomousTweetWorkflow(params) {
   isWorkflowAborted = false;
+
+  // 1-to-1 Verified Account Enforcement
+  if (params.verifiedXHandle) {
+    const expected = params.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
+    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
+    if (!current || current !== expected) {
+      showAccountMismatchModal(expected, current || 'Not Logged In');
+      return {
+        success: false,
+        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        unauthorizedAccount: true
+      };
+    }
+  }
+
   const actions = params.actions || { like: true, comment: true, repost: false, follow: false, scroll: true };
   const replyText = params.replyText || '';
   const performed = [];
@@ -476,8 +563,47 @@ async function executeAutonomousTweetWorkflow(params) {
 
   if (isWorkflowAborted) return { success: false, aborted: true, performed };
 
-  // 4. Auto-Like Action (MAIN POST ONLY)
-  if (shouldLike && !isWorkflowAborted) {
+/**
+ * Client-side Comment Sanitizer:
+ * Enforces universal anti-bot rules:
+ * - NO $, NO emojis, NO —, NO quotes, NO !
+ * - Strictly 5-10 words
+ */
+function sanitizeClientComment(text, maxWords = 10) {
+  if (!text) return '';
+  let clean = text
+    .replace(/^(Reply|Comment|Tweet|Response|AI Reply|Output)\s*:\s*/i, '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/@[\w_]+/g, '')
+    .replace(/[$]/g, '')
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '')
+    .replace(/[—–]/g, ' ')
+    .replace(/--+/g, ' ')
+    .replace(/["'“”‘’`«»]/g, '')
+    .replace(/!+/g, '.')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length > maxWords) {
+    clean = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
+  }
+  clean = clean.replace(/[$!—"“"'`«»]/g, '').trim();
+  return clean;
+}
+
+  // 4. Auto-Like Action (MAIN POST ONLY) with Natural Human Variance (Skip ~1 in 7-8 posts randomly)
+  let shouldExecuteLike = shouldLike;
+  if (shouldLike && actions.comment) {
+    const skipLikeRandomly = Math.random() < 0.13; // ~12.5% chance to skip like naturally
+    if (skipLikeRandomly) {
+      shouldExecuteLike = false;
+      console.log('[ATOMX] Human variance: Intentionally skipped like on this post (1 in 7-8 skip rule).');
+      performed.push('Like Skipped (Human Variance)');
+    }
+  }
+
+  if (shouldExecuteLike && !isWorkflowAborted) {
     try {
       const likeBtn = mainArticle.querySelector('button[data-testid="like"]');
       if (likeBtn) {
@@ -555,7 +681,7 @@ async function executeAutonomousTweetWorkflow(params) {
               tweetText: liveTweetText || params.tweetUrl || '',
               tweetAuthor: liveAuthor,
               tweetAuthorName: tweetData.authorName || '',
-              style: params.style || 'CT Human Reply',
+              style: params.style || 'Bullish (5-10 words)',
               stylePrompt: params.stylePrompt || null
             }, resolve);
           });
@@ -574,6 +700,9 @@ async function executeAutonomousTweetWorkflow(params) {
       if (!commentToPost) {
         commentToPost = 'Spot on insight. Focused execution is key.';
       }
+
+      // Enforce strict client-side sanitization (5-10 words, zero emojis, zero $, zero —, zero quotes, zero !)
+      commentToPost = sanitizeClientComment(commentToPost, 10);
 
       // Step B: Look for reply input or click reply button on MAIN post
       let textarea = document.querySelector('div[data-testid="tweetTextarea_0"]');
@@ -646,6 +775,23 @@ function extractTwitterMetric(element) {
  */
 async function huntAudienceUsers(options = {}) {
   isWorkflowAborted = false;
+
+  // 1-to-1 Verified Account Enforcement
+  if (options.verifiedXHandle) {
+    const expected = options.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
+    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
+    if (!current || current !== expected) {
+      showAccountMismatchModal(expected, current || 'Not Logged In');
+      return {
+        success: false,
+        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        unauthorizedAccount: true,
+        profiles: [],
+        busyTweets: []
+      };
+    }
+  }
+
   const targetCount = Number(options.targetCount) || 10;
   const dateRange = options.dateRange || '24h';
   const sortBy = options.sortBy || 'replies';
@@ -869,6 +1015,21 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
  */
 async function engageAndFollowProfile(options = {}) {
   isWorkflowAborted = false;
+
+  // 1-to-1 Verified Account Enforcement
+  if (options.verifiedXHandle) {
+    const expected = options.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
+    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
+    if (!current || current !== expected) {
+      showAccountMismatchModal(expected, current || 'Not Logged In');
+      return {
+        success: false,
+        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        unauthorizedAccount: true
+      };
+    }
+  }
+
   const targetHandle = typeof options === 'string' ? options : (options.handle || '');
   const likePosts = options.likePosts !== false;
   const replyPosts = !!options.replyPosts;
@@ -914,9 +1075,11 @@ async function engageAndFollowProfile(options = {}) {
       await sleep(900);
     }
 
-    // Step 4: Like recent posts on user's profile timeline (max 2 non-pinned)
+    // Step 4: Like recent posts on user's profile timeline (randomly 1 or 2 posts)
     if (likePosts) {
-      const postsToLike = (validRecentArticles.length > 0 ? validRecentArticles : allArticles).slice(0, 2);
+      const randomLikesCount = Math.floor(Math.random() * 2) + 1; // randomly 1 or 2 likes
+      const candidatePosts = validRecentArticles.length > 0 ? validRecentArticles : allArticles;
+      const postsToLike = candidatePosts.slice(0, randomLikesCount);
       for (const art of postsToLike) {
         if (isWorkflowAborted) break;
         const likeBtn = art.querySelector('button[data-testid="like"]');
@@ -929,7 +1092,9 @@ async function engageAndFollowProfile(options = {}) {
     }
 
     // Step 5: Generate AI Reply adhering to "Tone & Style (Applied Globally)" and comment on centered recent post
-    if (replyPosts && targetRecentPost && !isWorkflowAborted) {
+    // Human Strategy Variance: ~70% chance to comment, ~30% chance to skip comment and follow directly
+    const shouldCommentThisProfile = replyPosts && (options.forceComment ? true : Math.random() > 0.30);
+    if (shouldCommentThisProfile && targetRecentPost && !isWorkflowAborted) {
       try {
         const tweetData = extractTweetData(targetRecentPost);
         const tweetText = tweetData.text || '';
@@ -980,9 +1145,9 @@ async function engageAndFollowProfile(options = {}) {
           }
         }
 
-        // Clean quotes and preambles
+        // Enforce strict client-side sanitization (5-10 words, zero emojis, zero $, zero —, zero quotes, zero !)
         if (commentToPost) {
-          commentToPost = commentToPost.replace(/^["']|["']$/g, '').trim();
+          commentToPost = sanitizeClientComment(commentToPost, 10);
         }
 
         if (commentToPost) {
@@ -1009,6 +1174,8 @@ async function engageAndFollowProfile(options = {}) {
       } catch (rErr) {
         console.warn('Could not post profile reply:', rErr);
       }
+    } else if (replyPosts && !shouldCommentThisProfile) {
+      console.log(`[ATOMX] Strategy variance: skipped comment on @${targetHandle} to follow naturally without comment.`);
     }
 
     if (isWorkflowAborted) {
@@ -1056,6 +1223,21 @@ const followUserOnPage = (handle) => engageAndFollowProfile({ handle, likePosts:
  */
 async function executeReplyBackCycle(params = {}) {
   isWorkflowAborted = false;
+
+  // 1-to-1 Verified Account Enforcement
+  if (params.verifiedXHandle) {
+    const expected = params.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
+    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
+    if (!current || current !== expected) {
+      showAccountMismatchModal(expected, current || 'Not Logged In');
+      return {
+        success: false,
+        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        unauthorizedAccount: true
+      };
+    }
+  }
+
   const mainArticle = getMainPostArticle();
   const loggedInHandle = getLoggedInUserHandle();
   const style = params.style || 'Natural & Concise';

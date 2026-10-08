@@ -108,11 +108,7 @@ function extractTweetLinks(rawText) {
 }
 
 function filterTweetLinks(extractedLinks, options = {}) {
-  const ignoreEngaged = options.ignoreEngagedHistory ||
-    document.getElementById('tgIgnoreEngagedFilter')?.checked ||
-    false;
-
-  const engagedSet = ignoreEngaged ? new Set() : new Set((options.engagedTweetIds || state.engagedTweetIds || []).map(String));
+  const engagedSet = new Set((options.engagedTweetIds || state.engagedTweetIds || []).map(String));
   const seenInBatch = new Set();
   const freshTweets = [];
   const duplicateLinks = [];
@@ -329,6 +325,23 @@ async function initToneSystem() {
       }
       if (Array.isArray(data.defaultTones) && data.defaultTones.length > 0) {
         state.defaultTones = data.defaultTones;
+        // Dynamically sync updated prompt template from admin dashboard
+        const matching = state.defaultTones.find(t =>
+          (state.selectedToneId && t.id === state.selectedToneId) ||
+          (state.selectedTone && t.name === state.selectedTone)
+        );
+        if (matching) {
+          state.selectedToneId = matching.id;
+          state.selectedTone = matching.name;
+          state.selectedTonePrompt = matching.prompt;
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            chrome.storage.local.set({
+              selectedToneId: matching.id,
+              selectedTone: matching.name,
+              selectedTonePrompt: matching.prompt
+            });
+          }
+        }
       }
     }
   } catch (e) { }
@@ -605,19 +618,20 @@ function initListeners() {
     alert('✓ Invite Code EVAN-X924 copied to clipboard! Share with friends to earn bonus credits.');
   });
 
-  // Save Key
-  document.getElementById('extSaveKeyBtn')?.addEventListener('click', () => {
-    const key = document.getElementById('extAccessKeyInput')?.value.trim();
-    if (key) {
-      state.accessKey = key;
-      chrome.storage?.local.set({ accessKey: key });
-      alert('✓ Access Key saved successfully.');
-    }
+  // 1-to-1 Verified Account Login & Logout Handlers
+  document.getElementById('extLoginSubmitBtn')?.addEventListener('click', handleExtLogin);
+  document.getElementById('extLogoutBtn')?.addEventListener('click', handleExtLogout);
+  document.getElementById('extSyncAccountBtn')?.addEventListener('click', async () => {
+    await loadServerState();
+    alert('✓ Account details & credit balance synchronized with server.');
   });
-
-  // Request Access link
-  document.getElementById('extRequestAccessBtn')?.addEventListener('click', () => {
-    chrome.tabs.create({ url: 'http://localhost:5000/' });
+  document.getElementById('extOpenRequestAccessBtn')?.addEventListener('click', async () => {
+    const backendUrl = await getBackendUrl();
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      chrome.tabs.create({ url: backendUrl });
+    } else {
+      window.open(backendUrl, '_blank');
+    }
   });
 }
 
@@ -687,27 +701,6 @@ function initAgentListeners() {
   // Clean Telegram Input Button (Strip bot tags, emojis, timestamps)
   document.getElementById('cleanTgInputBtn')?.addEventListener('click', handleCleanTgInput);
 
-  // 2nd Twitter Account Support: Clear Engaged History / Reset
-  document.getElementById('clearEngagedHistoryBtn')?.addEventListener('click', async () => {
-    state.engagedTweetIds = [];
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      await chrome.storage.local.set({ engagedTweetIds: [] });
-    }
-    const backendUrl = await getBackendUrl();
-    fetch(`${backendUrl}/api/tweets/clear-engaged`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: 1 })
-    }).catch(() => null);
-    updateTgParseSummaryUI();
-    alert('✓ Engaged history cache cleared for 2nd ID!\nAll previously skipped posts are now marked fresh and ready for your 2nd Twitter account.');
-  });
-
-  // Checkbox: Allow engaging with 2nd ID (ignore previous ID history)
-  document.getElementById('tgIgnoreEngagedFilter')?.addEventListener('change', () => {
-    updateTgParseSummaryUI();
-  });
-
   // Action Checkbox Preset Buttons
   document.getElementById('actionSelectAllBtn')?.addEventListener('click', () => {
     ['actionOptLike', 'actionOptComment', 'actionOptRepost', 'actionOptFollow', 'actionOptScroll'].forEach(id => {
@@ -731,6 +724,8 @@ function initAgentListeners() {
   });
 
   document.getElementById('runTgEngageBtn')?.addEventListener('click', async () => {
+    if (!(await ensureVerifiedAccountOrBlock())) return;
+
     const input = document.getElementById('tgLinksInput')?.value.trim();
     if (!input) {
       alert('Please paste at least one Telegram tweet link or chat dump.');
@@ -1235,6 +1230,8 @@ function initFollowersListsSystem() {
 }
 
 async function startAudienceBuilderWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
   const listSelect = document.getElementById('audienceListSelect')?.value || 'audienceList1';
   let targetUrl = '';
 
@@ -1393,7 +1390,8 @@ async function startAudienceBuilderWorkflow() {
         type: 'AUDIENCE_BUILDER_HUNT_USERS',
         dateRange,
         sortBy,
-        targetCount
+        targetCount,
+        verifiedXHandle: state.verifiedXHandle
       }, (res) => resolve(res || { success: false, profiles: [], topTweets: [] }));
     });
 
@@ -1492,7 +1490,8 @@ async function startAudienceBuilderWorkflow() {
             replyPosts,
             style: state.selectedTone,
             stylePrompt: state.selectedTonePrompt,
-            backendUrl
+            backendUrl,
+            verifiedXHandle: state.verifiedXHandle
           }, (res) => resolve(res || { success: false }));
         });
 
@@ -1566,6 +1565,8 @@ async function startAudienceBuilderWorkflow() {
 // AGENT 3: INCREASE SORSA SCORE WORKFLOW ENGINE (A3, POST-AUTHORS ONLY)
 // =========================================================================
 async function startSorsaScoreBoosterWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
   const tier = document.getElementById('sorsaTierSelect')?.value || 'tier1';
   const tone = document.getElementById('sorsaToneSelect')?.value || 'technical';
   const targetCount = Number(document.getElementById('sorsaCountSelect')?.value || 5);
@@ -1703,14 +1704,14 @@ async function startSorsaScoreBoosterWorkflow() {
 
     await sleep(1500);
 
-    // Map tone to prompt
+    // Map tone to prompt (Strict 5-10 words, no $, no emojis, no —, no quotes, no !)
     let customTonePrompt = null;
     if (tone === 'technical') {
-      customTonePrompt = "Provide sharp, technical alpha with concise developer/architect perspective (5-15 words). No fluff, no generic hype.";
+      customTonePrompt = "Provide sharp, technical developer insight. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
     } else if (tone === 'professional') {
-      customTonePrompt = "Professional operator insight. Focused execution, metrics, and strategic value (6-12 words).";
+      customTonePrompt = "Professional operator insight and strategic value. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
     } else {
-      customTonePrompt = "Bullish and supportive momentum. High confidence in execution and community (5-10 words).";
+      customTonePrompt = "Bullish and supportive momentum. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
     }
 
     // Per-profile engagement loop
@@ -1795,6 +1796,8 @@ async function startSorsaScoreBoosterWorkflow() {
 // AGENT 4: FOLLOWERS INCREASE WORKFLOW ENGINE (A4, THREAD REPLIERS COLLECTION)
 // =========================================================================
 async function startFollowersIncreaseWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
   const niche = document.getElementById('followerNicheSelect')?.value || 'crypto';
   const strategy = document.getElementById('followerStratSelect')?.value || 'High-Resonance Insights';
   const targetCount = Number(document.getElementById('followerDailyTargetSelect')?.value || 8);
@@ -1970,8 +1973,9 @@ async function startFollowersIncreaseWorkflow() {
 
     await sleep(1500);
 
-    // Strategy prompt
-    const strategyPrompt = `Deliver a sharp, insightful observation aligned with "${strategy}" strategy (5-12 words).`;
+    // Use active configured tone and prompt template
+    const activeStyle = state.selectedTone || 'Bullish (5-10 words)';
+    const activePrompt = state.selectedTonePrompt || "Write a bullish, positive comment replying to the post. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
 
     // Per-profile engagement loop
     for (let i = 0; i < collectedCount; i++) {
@@ -1999,8 +2003,8 @@ async function startFollowersIncreaseWorkflow() {
             handle: profile.cleanHandle,
             likePosts: true,
             replyPosts: true,
-            style: strategy,
-            stylePrompt: strategyPrompt,
+            style: activeStyle,
+            stylePrompt: activePrompt,
             backendUrl
           }, (res) => resolve(res || { success: false }));
         });
@@ -2055,6 +2059,8 @@ async function startFollowersIncreaseWorkflow() {
 // AGENT 2: REPLY BACK WORKFLOW ENGINE (A6, POSTS, FULLY AUTO)
 // =========================================================================
 async function startReplyBackLoopWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
   const url1 = document.getElementById('myTweetUrlInput1')?.value.trim();
   const url2 = document.getElementById('myTweetUrlInput2')?.value.trim();
   const url3 = document.getElementById('myTweetUrlInput3')?.value.trim();
@@ -2117,7 +2123,8 @@ async function startReplyBackLoopWorkflow() {
           type: 'EXECUTE_REPLY_BACK_CYCLE',
           postUrl: currentPostUrl,
           style: tone,
-          delaySec
+          delaySec,
+          verifiedXHandle: state.verifiedXHandle
         }, (res) => resolve(res || { success: false, repliedCount: 0 }));
       });
 
@@ -2272,10 +2279,19 @@ function handleVerifyCryptoTx() {
 async function loadServerState() {
   try {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const stored = await chrome.storage.local.get(['credits', 'accessKey', 'creators', 'engagedTweetIds', 'userPlan']);
+      const stored = await chrome.storage.local.get([
+        'credits', 'accessKey', 'creators', 'engagedTweetIds', 'userPlan',
+        'currentUser', 'authToken', 'verifiedXHandle'
+      ]);
       if (stored?.credits !== undefined) state.credits = stored.credits;
       if (stored?.accessKey) state.accessKey = stored.accessKey;
       if (stored?.userPlan) state.userPlan = stored.userPlan;
+      if (stored?.currentUser) state.user = stored.currentUser;
+      if (stored?.verifiedXHandle) {
+        state.verifiedXHandle = stored.verifiedXHandle;
+      } else if (state.user?.handle) {
+        state.verifiedXHandle = state.user.handle;
+      }
       if (Array.isArray(stored?.creators)) state.creators = stored.creators;
       if (Array.isArray(stored?.engagedTweetIds)) state.engagedTweetIds = stored.engagedTweetIds;
     }
@@ -2302,16 +2318,200 @@ async function loadServerState() {
         }
       }
     }
-
-    const accessInput = document.getElementById('extAccessKeyInput');
-    if (accessInput && state.accessKey) {
-      accessInput.value = state.accessKey;
-    }
   } catch (err) {
     console.warn('Backend server offline, using cached state', err);
   }
   updateCreditUI();
   renderCreatorChips();
+  await checkAccountVerificationLock();
+}
+
+/**
+ * 1-to-1 Verified Twitter / X Identity Verification Engine
+ */
+async function checkAccountVerificationLock() {
+  const verifiedHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').toLowerCase().trim();
+  const barText = document.getElementById('barVerifiedHandleText');
+  const barBadge = document.getElementById('barMatchBadge');
+  const barDot = document.getElementById('barLockDot');
+  const mismatchBanner = document.getElementById('accountMismatchBanner');
+  const mismatchExpected = document.getElementById('mismatchExpectedHandle');
+  const mismatchActual = document.getElementById('mismatchActualHandle');
+
+  const loggedInCard = document.getElementById('extLoggedInCard');
+  const loggedOutCard = document.getElementById('extLoggedOutCard');
+
+  if (!state.user && !verifiedHandle) {
+    if (barText) barText.textContent = 'Not Authenticated';
+    if (barBadge) {
+      barBadge.textContent = 'LOG IN REQUIRED';
+      barBadge.style.color = '#F59E0B';
+      barBadge.style.background = 'rgba(245, 158, 11, 0.15)';
+    }
+    if (barDot) barDot.style.background = '#F59E0B';
+    if (mismatchBanner) mismatchBanner.style.display = 'none';
+
+    if (loggedInCard) loggedInCard.style.display = 'none';
+    if (loggedOutCard) loggedOutCard.style.display = 'block';
+    return { isAllowed: false, reason: 'NOT_AUTHENTICATED' };
+  }
+
+  // User is authenticated
+  if (loggedInCard) loggedInCard.style.display = 'block';
+  if (loggedOutCard) loggedOutCard.style.display = 'none';
+
+  const displayHandle = verifiedHandle ? `@${verifiedHandle}` : '@user';
+  if (barText) barText.textContent = displayHandle;
+  const extHandleText = document.getElementById('extHandleText');
+  if (extHandleText) extHandleText.textContent = displayHandle;
+  const extName = document.getElementById('extLoggedInName');
+  if (extName) extName.textContent = state.user?.fullName || state.user?.name || 'Verified Member';
+  const extPlan = document.getElementById('extLoggedInPlan');
+  if (extPlan) extPlan.textContent = state.user?.plan || state.userPlan || 'Growth Plan';
+  const extCredits = document.getElementById('extLoggedInCredits');
+  if (extCredits) extCredits.textContent = `${(state.credits || 0).toLocaleString()} Credits`;
+
+  // Real-time tab check with active Twitter/X tab
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs && tabs[0];
+    if (activeTab && (activeTab.url?.includes('x.com') || activeTab.url?.includes('twitter.com'))) {
+      const response = await chrome.tabs.sendMessage(activeTab.id, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }).catch(() => null);
+      if (response && response.success) {
+        state.activeTwitterHandle = (response.rawHandle || '').toLowerCase().trim();
+        if (!state.activeTwitterHandle) {
+          // Twitter is open but no user is logged in
+          if (mismatchBanner) {
+            mismatchBanner.style.display = 'block';
+            if (mismatchExpected) mismatchExpected.textContent = displayHandle;
+            if (mismatchActual) mismatchActual.textContent = 'Not Logged In on X';
+          }
+          if (barBadge) {
+            barBadge.textContent = 'NOT LOGGED IN ON X';
+            barBadge.style.color = '#EF4444';
+            barBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+          }
+          if (barDot) barDot.style.background = '#EF4444';
+          return { isAllowed: false, reason: 'X_NOT_LOGGED_IN' };
+        } else if (state.activeTwitterHandle !== verifiedHandle) {
+          // Twitter is logged into another ID
+          if (mismatchBanner) {
+            mismatchBanner.style.display = 'block';
+            if (mismatchExpected) mismatchExpected.textContent = displayHandle;
+            if (mismatchActual) mismatchActual.textContent = `@${state.activeTwitterHandle}`;
+          }
+          if (barBadge) {
+            barBadge.textContent = 'ID MISMATCH';
+            barBadge.style.color = '#EF4444';
+            barBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+          }
+          if (barDot) barDot.style.background = '#EF4444';
+          return { isAllowed: false, reason: 'ID_MISMATCH', current: state.activeTwitterHandle };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Tab handle verification notice:', e);
+  }
+
+  // Matched and locked
+  if (mismatchBanner) mismatchBanner.style.display = 'none';
+  if (barBadge) {
+    barBadge.textContent = '1-TO-1 LOCKED & MATCHED';
+    barBadge.style.color = '#10B981';
+    barBadge.style.background = 'rgba(16, 185, 129, 0.15)';
+  }
+  if (barDot) barDot.style.background = '#10B981';
+  return { isAllowed: true };
+}
+
+async function ensureVerifiedAccountOrBlock() {
+  const check = await checkAccountVerificationLock();
+  if (!check.isAllowed) {
+    if (check.reason === 'NOT_AUTHENTICATED') {
+      alert('⚠️ Access Required:\nPlease sign in with your verified Twitter / X ID and password in the "Access" tab to unlock this extension.');
+      switchExtTab('access');
+    } else if (check.reason === 'ID_MISMATCH') {
+      alert(`⚠️ Account Lock Mismatch!\n\nThis extension is strictly bound to your verified Twitter account: @${(state.verifiedXHandle || '').replace(/^@/, '')}.\nYour browser is currently logged into @${check.current} on Twitter.\n\nPlease log into @${(state.verifiedXHandle || '').replace(/^@/, '')} on x.com to use this extension.`);
+    } else if (check.reason === 'X_NOT_LOGGED_IN') {
+      alert(`⚠️ Twitter Session Inactive:\nPlease log into your verified Twitter account (@${(state.verifiedXHandle || '').replace(/^@/, '')}) on x.com before launching automation.`);
+    }
+    return false;
+  }
+  return true;
+}
+
+async function handleExtLogin() {
+  const identifierInput = document.getElementById('extLoginHandleInput');
+  const passwordInput = document.getElementById('extLoginPasswordInput');
+  const identifier = identifierInput?.value.trim();
+  const password = passwordInput?.value.trim();
+
+  if (!identifier) {
+    alert('Please enter your approved Twitter / X ID (e.g. @yourhandle) or email.');
+    return;
+  }
+
+  const backendUrl = await getBackendUrl();
+  const submitBtn = document.getElementById('extLoginSubmitBtn');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Verifying Credentials...';
+  }
+
+  try {
+    const res = await fetch(`${backendUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, password })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || data.message || 'Invalid credentials. Please request access if not registered.');
+    }
+
+    state.user = data.user;
+    state.verifiedXHandle = data.user.handle ? (data.user.handle.startsWith('@') ? data.user.handle : `@${data.user.handle}`) : identifier;
+    if (typeof data.user.credits === 'number') state.credits = data.user.credits;
+    if (data.user.plan) state.userPlan = data.user.plan;
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({
+        currentUser: data.user,
+        authToken: data.token,
+        verifiedXHandle: state.verifiedXHandle,
+        credits: state.credits,
+        userPlan: state.userPlan
+      });
+    }
+
+    updateCreditUI();
+    await checkAccountVerificationLock();
+    alert(`✓ Successfully signed in as ${state.verifiedXHandle}!\nExtension is now locked to your verified identity.`);
+  } catch (err) {
+    alert(`❌ Sign In Failed: ${err.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Sign In & Unlock Extension';
+    }
+  }
+}
+
+async function handleExtLogout() {
+  if (!confirm('Are you sure you want to log out from this extension?')) return;
+
+  state.user = null;
+  state.verifiedXHandle = '';
+  state.activeTwitterHandle = null;
+
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    await chrome.storage.local.remove(['currentUser', 'authToken', 'verifiedXHandle']);
+  }
+
+  await checkAccountVerificationLock();
+  alert('You have logged out. Sign in with your approved X ID and password to use the extension.');
 }
 
 function updateTgParseSummaryUI() {
@@ -2900,7 +3100,8 @@ async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
       backendUrl,
       tweetAuthor,
       tweetUrl,
-      generateContextual
+      generateContextual,
+      verifiedXHandle: state.verifiedXHandle
     }, (response) => {
       if (chrome.runtime?.lastError) {
         resolve({ success: false, error: chrome.runtime.lastError.message });

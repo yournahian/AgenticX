@@ -124,11 +124,24 @@ module.exports = {
     }));
   },
 
+  async getUserByHandle(handle) {
+    if (!supabase) return null;
+    const clean = handle.replace(/^@/, '');
+    const { data } = await supabase.from('users').select('*').or(`handle.eq.@${clean},handle.eq.${clean}`).maybeSingle();
+    return data;
+  },
+
   // Access Requests & Approval
   async getAccessRequests() {
     if (!supabase) return [];
     const { data } = await supabase.from('access_requests').select('*').order('requested_at', { ascending: false });
-    return data || [];
+    return (data || []).map(r => {
+      const match = (r.use_case || '').match(/X_ID:(@?[\w_]+)/i);
+      return {
+        ...r,
+        handle: match ? (match[1].startsWith('@') ? match[1] : '@' + match[1]) : '@' + r.email.split('@')[0]
+      };
+    });
   },
 
   async createAccessRequest(fullName, email, useCase) {
@@ -149,13 +162,17 @@ module.exports = {
     const { data: req } = await supabase.from('access_requests').select('*').eq('id', requestId).maybeSingle();
     if (!req) throw new Error('Access request not found');
 
+    // Extract real X Handle / ID from use_case note
+    const handleMatch = (req.use_case || '').match(/X_ID:(@?[\w_]+)/i);
+    const assignedHandle = handleMatch ? (handleMatch[1].startsWith('@') ? handleMatch[1] : '@' + handleMatch[1]) : ('@' + req.email.split('@')[0]);
+
     // Create user with 100 initial free credits
     const initials = req.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'US';
     const { data: newUser, error: userErr } = await supabase.from('users').insert({
       email: req.email,
       password_hash: 'approved_hash',
       full_name: req.full_name,
-      handle: '@' + req.email.split('@')[0],
+      handle: assignedHandle,
       role: 'USER',
       status: 'ACTIVE',
       plan_tier: 'Free Plan',
@@ -181,7 +198,7 @@ module.exports = {
       reviewed_at: new Date().toISOString()
     }).eq('id', requestId);
 
-    return { userId: newUser.id, credits: 100 };
+    return { userId: newUser.id, credits: 100, handle: assignedHandle };
   },
 
   // Campaigns & Queue

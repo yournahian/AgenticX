@@ -72,16 +72,60 @@ exports.adjustCredits = async (req, res) => {
   }
 };
 
+const plansPath = path.join(__dirname, '../data/plans.json');
+const tmpPlansPath = path.join('/tmp', 'plans.json');
+let inMemoryPlans = null;
+
 exports.getPlans = async (req, res) => {
   try {
-    const rawPlans = await db.getPlans();
-    const plans = rawPlans.map(p => ({
-      ...p,
-      features: typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || JSON.parse(p.features_json || '[]'))
-    }));
-    res.json({ plans });
+    if (inMemoryPlans) {
+      return res.json({ plans: inMemoryPlans });
+    }
+    if (fs.existsSync(tmpPlansPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(tmpPlansPath, 'utf8'));
+        inMemoryPlans = data;
+        return res.json({ plans: data });
+      } catch (e) {}
+    }
+    if (fs.existsSync(plansPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(plansPath, 'utf8'));
+        inMemoryPlans = data;
+        return res.json({ plans: data });
+      } catch (e) {}
+    }
+    // Fallback to db or default plans
+    const defaultPlans = [
+      { id: 'free', name: 'FREE', credits: 100, price: 0, popular: false, offerBadge: '', features: ['100 AI replies', 'Basic reply styles', 'Reply queue', 'Basic history'] },
+      { id: 'growth', name: 'GROWTH', credits: 10000, price: 12, popular: true, offerBadge: 'MOST POPULAR', features: ['10,000 AI replies', 'All reply styles', 'Advanced queue', 'Full history', 'Priority generation'] },
+      { id: 'pro', name: 'PRO', credits: 25000, price: 29, popular: false, offerBadge: 'BEST VALUE', features: ['25,000 AI replies', 'Premium AI models', 'Advanced agents', 'Priority generation', 'Advanced analytics'] }
+    ];
+    inMemoryPlans = defaultPlans;
+    res.json({ plans: defaultPlans });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+exports.savePlans = async (req, res) => {
+  try {
+    const { plans } = req.body;
+    if (!Array.isArray(plans)) {
+      return res.status(400).json({ error: 'Plans array is required' });
+    }
+    inMemoryPlans = plans;
+    try {
+      fs.mkdirSync(path.dirname(plansPath), { recursive: true });
+      fs.writeFileSync(plansPath, JSON.stringify(plans, null, 2), 'utf8');
+    } catch (fsErr) {
+      try {
+        fs.writeFileSync(tmpPlansPath, JSON.stringify(plans, null, 2), 'utf8');
+      } catch (tmpErr) {}
+    }
+    res.json({ message: 'Plans and pricing offers updated successfully!', plans });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save plans: ' + err.message });
   }
 };
 
@@ -180,22 +224,36 @@ exports.saveActiveModel = (req, res) => {
 };
 
 const toneStylesPath = path.join(__dirname, '../data/toneStyles.json');
+const tmpToneStylesPath = path.join('/tmp', 'toneStyles.json');
+let inMemoryToneStyles = null;
 
 exports.getToneStyles = (req, res) => {
   try {
+    if (inMemoryToneStyles) {
+      return res.json(inMemoryToneStyles);
+    }
+    if (fs.existsSync(tmpToneStylesPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(tmpToneStylesPath, 'utf8'));
+        inMemoryToneStyles = data;
+        return res.json(data);
+      } catch (e) {}
+    }
     if (fs.existsSync(toneStylesPath)) {
       const data = JSON.parse(fs.readFileSync(toneStylesPath, 'utf8'));
+      inMemoryToneStyles = data;
       return res.json(data);
     }
     const defaultData = {
       maxCustomTemplatesPerUser: 2,
       defaultTones: [
-        { id: 'natural', name: 'Natural & Concise', description: 'Casual, human-sounding 1-2 sentences with high signal', prompt: 'Write a casual, highly human, 1-2 sentence response. Direct and concise. Avoid robotic hashtags or buzzwords.' },
-        { id: 'professional', name: 'Professional', description: 'Authoritative, insightful, industry-savvy perspective', prompt: 'Sound authoritative, sharp, and executive-level. Offer a structured perspective in 1-2 sentences.' },
-        { id: 'question', name: 'Engaging Question', description: 'Provocative observation ending with an engaging question', prompt: 'Offer an astute observation on the post and conclude with an insightful, thought-provoking question to invite replies.' },
-        { id: 'witty', name: 'Witty', description: 'Clever, witty banter with sharp intelligence', prompt: 'Deliver a clever, witty, and humorous observation. Keep it light, sharp, and entertaining.' }
+        { id: 'bullish-short', name: 'Bullish (5-10 words)', description: 'Strictly 5-10 words positive bullish community comment, zero clichés or emojis', prompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nAUTHOR RULE: Never use the post author\'s name or username. Do not tag anyone.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no preamble, no exclamation marks (!).' },
+        { id: 'ct-human', name: 'CT Human Reply', description: 'Authentic Crypto Twitter peer reply, 5-10 words', prompt: 'Write a highly authentic, natural human reply to the post as a Crypto Twitter (CT) community member.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human friend/peer. Zero robotic AI clichés.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no preamble, no exclamation marks (!).' },
+        { id: 'natural', name: 'Natural & Concise', description: 'Casual, human-sounding 5-10 words', prompt: 'Write a casual, highly human response.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nSTYLE: Sound natural, direct and concise. Avoid robotic hashtags or buzzwords.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no exclamation marks (!).' },
+        { id: 'professional', name: 'Professional', description: 'Authoritative, insightful 5-10 words', prompt: 'Sound authoritative and sharp.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no exclamation marks (!).' }
       ]
     };
+    inMemoryToneStyles = defaultData;
     res.json(defaultData);
   } catch (err) {
     res.status(500).json({ error: 'Failed to read tone styles: ' + err.message });
@@ -205,9 +263,13 @@ exports.getToneStyles = (req, res) => {
 exports.saveToneStyles = (req, res) => {
   try {
     const { maxCustomTemplatesPerUser, defaultTones } = req.body;
-    const current = fs.existsSync(toneStylesPath)
-      ? JSON.parse(fs.readFileSync(toneStylesPath, 'utf8'))
-      : { maxCustomTemplatesPerUser: 2, defaultTones: [] };
+    let current = inMemoryToneStyles;
+    if (!current && fs.existsSync(toneStylesPath)) {
+      try { current = JSON.parse(fs.readFileSync(toneStylesPath, 'utf8')); } catch (e) {}
+    }
+    if (!current) {
+      current = { maxCustomTemplatesPerUser: 2, defaultTones: [] };
+    }
 
     const updated = {
       maxCustomTemplatesPerUser: typeof maxCustomTemplatesPerUser === 'number'
@@ -218,8 +280,17 @@ exports.saveToneStyles = (req, res) => {
       updatedBy: 'Admin Control Center'
     };
 
-    fs.mkdirSync(path.dirname(toneStylesPath), { recursive: true });
-    fs.writeFileSync(toneStylesPath, JSON.stringify(updated, null, 2), 'utf8');
+    inMemoryToneStyles = updated;
+
+    // Attempt persistent write; handle read-only filesystems (e.g. Vercel) gracefully
+    try {
+      fs.mkdirSync(path.dirname(toneStylesPath), { recursive: true });
+      fs.writeFileSync(toneStylesPath, JSON.stringify(updated, null, 2), 'utf8');
+    } catch (fsErr) {
+      try {
+        fs.writeFileSync(tmpToneStylesPath, JSON.stringify(updated, null, 2), 'utf8');
+      } catch (tmpErr) {}
+    }
 
     res.json({
       message: 'Tone and Style settings updated successfully!',

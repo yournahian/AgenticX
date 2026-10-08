@@ -5,16 +5,27 @@ const db = require('../config/db');
 
 exports.login = async (req, res) => {
   try {
-    const { email = 'evan@atomx.io', password } = req.body;
-    let user = await db.getUserByEmail(email);
+    const { identifier, email, handle, xHandle, username, password } = req.body;
+    const loginKey = (identifier || email || handle || xHandle || username || 'evan@atomx.io').trim();
+    const cleanHandle = loginKey.replace(/^@/, '').toLowerCase();
 
+    let user = null;
+    if (loginKey.includes('@') && loginKey.includes('.')) {
+      user = await db.getUserByEmail(loginKey);
+    }
+    if (!user && db.getUserByHandle) {
+      user = await db.getUserByHandle(cleanHandle);
+    }
     if (!user) {
-      // Default fallback to first active user
+      user = await db.getUserByEmail(loginKey);
+    }
+    if (!user) {
+      // Default fallback to primary user if no match found
       user = await db.getUserById(1);
     }
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'User not found. Please submit an access request with your X ID.' });
     }
 
     if (user.status === 'SUSPENDED') {
@@ -24,13 +35,15 @@ exports.login = async (req, res) => {
       });
     }
 
+    const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : `@${cleanHandle || 'user'}`;
+
     res.json({
       token: `atomx_session_${user.id}_${Date.now()}`,
       user: {
         id: user.id,
         email: user.email,
         fullName: user.full_name,
-        handle: user.handle,
+        handle: userHandle,
         role: user.role,
         status: user.status,
         plan: user.plan_tier,
@@ -45,10 +58,17 @@ exports.login = async (req, res) => {
 };
 
 exports.requestAccess = async (req, res) => {
-  const { fullName, email, useCase } = req.body;
+  const { fullName, email, handle, xHandle, password, useCase } = req.body;
   if (!fullName || !email) {
     return res.status(400).json({ error: 'Full name and email are required' });
   }
+
+  const rawHandle = (handle || xHandle || '').trim().replace(/^@/, '');
+  if (!rawHandle) {
+    return res.status(400).json({ error: 'Your X (Twitter) ID or handle is required to verify your account.' });
+  }
+
+  const formattedHandle = '@' + rawHandle;
 
   try {
     const existing = await db.getUserByEmail(email);
@@ -56,10 +76,13 @@ exports.requestAccess = async (req, res) => {
       return res.status(400).json({ error: 'An account with this email already exists' });
     }
 
-    await db.createAccessRequest(fullName, email, useCase || 'Engagement automation');
+    const note = `X_ID:${formattedHandle} | Note: ${useCase || 'User access request'}`;
+    await db.createAccessRequest(fullName, email, note, formattedHandle, password);
+
     res.status(201).json({
-      message: 'Access request submitted successfully. You will receive 100 free credits upon approval.',
-      status: 'PENDING'
+      message: `Access request submitted for ${formattedHandle}! Waiting for admin approval.`,
+      status: 'PENDING',
+      handle: formattedHandle
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

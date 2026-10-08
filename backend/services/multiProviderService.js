@@ -265,14 +265,16 @@ async function fetchLiveModels(provider, customApiKey = null) {
 }
 
 /**
- * Sanitize AI output to guarantee strict compliance with user negative constraints
+ * Sanitize AI output to guarantee strict compliance with user negative constraints:
+ * - BANNED: $, emojis, —, quotes (" '), exclamation marks (!)
+ * - LENGTH: Strictly 5-10 words (or user-defined max words)
  */
 function sanitizeReplyOutput(rawReply, styleInstruction = '', authorHandle = '', authorName = '') {
   if (!rawReply) return '';
   let reply = rawReply.trim();
 
-  // 1. Strip wrapping quotes (double quotes, single quotes, backticks, smart quotes)
-  reply = reply.replace(/^["'“`«»]+|["'”`«»]+$/g, '').trim();
+  // 1. Strip accidental prefixes like "Reply:", "Comment:", "Tweet:"
+  reply = reply.replace(/^(Reply|Comment|Tweet|Response|AI Reply|Output)\s*:\s*/i, '').trim();
 
   // 2. Strip any author @handles or usernames completely
   reply = reply.replace(/@[\w_]+/g, '').replace(/\s{2,}/g, ' ').trim();
@@ -291,30 +293,34 @@ function sanitizeReplyOutput(rawReply, styleInstruction = '', authorHandle = '',
     reply = reply.replace(regName, '');
   }
 
-  // 4. Strip accidental prefixes like "Reply:", "Comment:", "Tweet:"
-  reply = reply.replace(/^(Reply|Comment|Tweet|Response|AI Reply|Output)\s*:\s*/i, '').trim();
+  // 4. BANNED CHARACTERS: Strip $, emojis, —, quotes, and replace ! with .
+  reply = reply
+    .replace(/[$]/g, '')
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '')
+    .replace(/[—–]/g, ' ')
+    .replace(/--+/g, ' ')
+    .replace(/["'“”‘’`«»]/g, '')
+    .replace(/!+/g, '.');
 
-  // Again strip quotes in case prefix had quotes
-  reply = reply.replace(/^["'“`«»]+|["'”`«»]+$/g, '').trim();
-
-  // 5. If instruction explicitly forbids exclamation marks, replace '!' with '.'
-  if (styleInstruction && /no exclamation marks?/i.test(styleInstruction)) {
-    reply = reply.replace(/!+/g, '.');
+  // 5. Length check: strictly 5-10 words (or match user-specified constraint)
+  let maxWords = 10;
+  const matchMax = (styleInstruction || '').match(/between \d+ and (\d+) words/i) ||
+                   (styleInstruction || '').match(/(?:max|up to|exceed)\s*(\d+)\s*words/i) ||
+                   (styleInstruction || '').match(/(\d+)\s*words/i);
+  if (matchMax && parseInt(matchMax[1], 10) > 0) {
+    maxWords = parseInt(matchMax[1], 10);
   }
 
-  // 6. If instruction specifies strict maximum word count (e.g. "Do not exceed 10 words")
-  const maxWordMatch = styleInstruction.match(/Do not exceed (\d+) words/i) || styleInstruction.match(/between \d+ and (\d+) words/i);
-  if (maxWordMatch) {
-    const maxWords = parseInt(maxWordMatch[1], 10);
-    const words = reply.split(/\s+/).filter(Boolean);
-    if (words.length > maxWords) {
-      // Find a punctuation boundary or truncate cleanly
-      reply = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
-    }
+  const words = reply.split(/\s+/).filter(Boolean);
+  if (words.length > maxWords) {
+    reply = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
   }
 
-  // 7. Clean up duplicate spaces and punctuation artifacts
-  reply = reply.replace(/\s{2,}/g, ' ').replace(/\s+([.,!?])/g, '$1').trim();
+  // 6. Clean up duplicate spaces and punctuation artifacts
+  reply = reply.replace(/\s{2,}/g, ' ').replace(/\s+([.,])/g, '$1').trim();
+
+  // Final sanity scrub for any lingering banned chars
+  reply = reply.replace(/[$!—"“"'`«»]/g, '').trim();
 
   return reply;
 }
@@ -369,14 +375,19 @@ function resolveStyleInstruction(style, stylePrompt) {
 function buildPromptMessages(tweetText, styleInstruction) {
   const systemPrompt = [
     "You are an AI assistant generating a single authentic reply to a social media post.",
-    "CRITICAL CONSTRAINTS (HIGHEST PRIORITY - STRICT COMPLIANCE REQUIRED):",
-    "1. ABSOLUTE COMPLIANCE: Obey every rule, length constraint, and formatting directive given below strictly and verbatim.",
-    "2. NO AUTHOR NAMES OR USERNAMES: NEVER use or mention the post author's name, display name, or username. NEVER include any @handle or @username in your response.",
-    "3. NO QUOTES: Output raw text only. NEVER wrap your reply in quotes (no \" or ' or “).",
-    "4. NO AI EXPLANATIONS OR PREAMBLE: Output ONLY the exact single reply text itself, nothing else.",
+    "CRITICAL CONSTRAINTS (HIGHEST PRIORITY - STRICT UNIVERSAL COMPLIANCE):",
+    "1. ABSOLUTE COMPLIANCE: Obey every rule and negative constraint strictly.",
+    "2. NO AUTHOR NAMES: Never mention or tag author names or usernames (@handle).",
+    "3. NO QUOTES: Raw text only. Never wrap reply in quotes (\", ', “).",
+    "4. NO EMOJIS: Never include any emojis or emoticons.",
+    "5. NO DOLLAR SIGNS: Never include any dollar signs ($).",
+    "6. NO DASHES: Never use em-dashes (—) or double dashes (--).",
+    "7. NO EXCLAMATION MARKS: Never use exclamation marks (!). Use periods (.) only.",
+    "8. STRICT WORD COUNT: Your reply MUST be strictly between 5 and 10 words long. Never output long essays.",
+    "9. NO PREAMBLE: Output ONLY the single reply text itself.",
     "",
     "USER INSTRUCTIONS & STYLE DIRECTIVES:",
-    styleInstruction || "Write a casual, highly human, 1-2 sentence response."
+    styleInstruction || "Write a casual, highly human reply between 5 and 10 words."
   ].join('\n');
 
   const userContent = `Post Content:\n"""\n${tweetText}\n"""\n\nGenerate the reply now:`;
@@ -639,33 +650,28 @@ function createSynthesizedReply(tweet, author, style, styleInstruction = '') {
   const cleanSnippet = tweet.replace(/https?:\/\/\S+/g, '').slice(0, 42).trim();
   const lowerPrompt = (styleInstruction || '').toLowerCase();
 
-  // If user requested 5-10 words constraint or bullish constraint
+  // Bullish variations (5-10 words, no banned chars)
   if (lowerPrompt.includes('5 and 10 words') || lowerPrompt.includes('bullish') || style === 'Bullish (5-10 words)') {
     const bullishVariations = [
-      'Market momentum is strongly in our favor right now',
-      'The upside potential here is looking better every day',
-      'Strong execution and clear momentum building on this update',
-      'High conviction on this project and the direction forward',
-      'Solid progress and looking very promising for the future',
-      'Really great vision and steady progress on this development'
+      'Market momentum is looking very strong right now.',
+      'Solid progress and looking very promising ahead.',
+      'High conviction on this project and team direction.',
+      'Steady execution and consistent growth on this update.',
+      'Great vision and remarkable progress being built here.',
+      'Clear momentum building across the ecosystem right now.'
     ];
-    const picked = bullishVariations[Math.floor(Math.random() * bullishVariations.length)];
-    return picked;
+    return bullishVariations[Math.floor(Math.random() * bullishVariations.length)];
   }
 
-  switch (style) {
-    case 'Professional':
-      return `A grounded perspective on "${cleanSnippet}...". Systematic execution and disciplined focus consistently separate category leaders from the rest.`;
-    case 'Engaging Question':
-      return `Spot on analysis regarding "${cleanSnippet}...". What primary leading indicator do you prioritize to validate this shift in practice?`;
-    case 'Friendly':
-      return `Completely agree with this! The nuance around "${cleanSnippet}..." is so often overlooked. Great share!`;
-    case 'Witty':
-      return `Simple lessons that take founders a decade to figure out: "${cleanSnippet}...".`;
-    case 'Natural & Concise':
-    default:
-      return `Focused execution on "${cleanSnippet}..." is what really drives compounding returns.`;
-  }
+  // All other styles also strictly 5-10 words, no quotes, no $, no emojis, no dashes, no !
+  const variations = [
+    'Solid execution and very consistent focus on this.',
+    'Clear perspective and really thoughtful take on this update.',
+    'Steady momentum and looking forward to seeing this progress.',
+    'Focused approach and disciplined execution make all the difference.',
+    'Very well articulated thoughts on this direction.'
+  ];
+  return variations[Math.floor(Math.random() * variations.length)];
 }
 
 // Telemetry & API Key Health Testing Engine
