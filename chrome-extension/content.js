@@ -683,50 +683,44 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   console.log('[ATOMX COMMENT ENGINE] Posting comment:', commentText);
 
-  // 1. Check if a reply modal dialog is ALREADY open
-  let dialog = document.querySelector('div[role="dialog"][aria-modal="true"], div[role="dialog"]');
   let textarea = null;
+  let dialog = null;
   let isDialog = false;
 
-  if (dialog) {
-    textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
-    if (textarea) isDialog = true;
+  // 1. Locate and click Reply button on targetArticle
+  let replyBtn = targetArticle?.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+  if (!replyBtn && !window.location.pathname.includes('/compose/post')) {
+    replyBtn = document.querySelector('button[data-testid="reply"]');
   }
 
-  // 2. If no reply dialog is open, locate and click Reply button on targetArticle
+  if (replyBtn) {
+    console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
+    await simulateHumanReplyClick(replyBtn);
+  }
+
+  // 2. Wait up to 7000ms directly for the editable textarea to mount in the modal dialog or compose view
+  textarea = await waitForElement(
+    'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[role="dialog"] div[role="textbox"][contenteditable="true"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"], div.public-DraftEditor-content',
+    7000
+  );
+
+  if (textarea) {
+    dialog = textarea.closest('div[role="dialog"], div[aria-modal="true"]') || document.querySelector('div[role="dialog"]');
+    isDialog = !!dialog;
+  }
+
+  // 3. Status page fallback ONLY: If targetArticle is the main focal tweet and no textarea was found above,
+  // look for the status page's inline reply composer directly under the main tweet
   if (!textarea) {
-    let replyBtn = targetArticle?.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+    const isStatusPage = window.location.pathname.includes('/status/');
+    const mainArt = getMainPostArticle();
+    const isMainTarget = !targetArticle || targetArticle === mainArt;
 
-    // If targetArticle is missing or has no reply button, fallback to page reply button
-    if (!replyBtn) {
-      replyBtn = document.querySelector('button[data-testid="reply"]');
-    }
-
-    if (replyBtn) {
-      console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
-      await simulateHumanReplyClick(replyBtn);
-
-      // Wait for Twitter modal dialog to appear
-      dialog = await waitForElement('div[role="dialog"]', 4000);
-      if (dialog) {
-        isDialog = true;
-        textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
-      }
-    }
-
-    // 3. Status page fallback ONLY: If targetArticle is the main focal tweet and no dialog appeared,
-    // look for the status page's inline reply composer directly under the main tweet
-    if (!textarea) {
-      const isStatusPage = window.location.pathname.includes('/status/');
-      const mainArt = getMainPostArticle();
-      const isMainTarget = !targetArticle || targetArticle === mainArt;
-
-      if (isStatusPage && isMainTarget) {
-        const inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"]');
-        if (inlineBox) {
-          textarea = inlineBox;
-          isDialog = false;
-        }
+    if (isStatusPage && isMainTarget) {
+      const inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"]');
+      if (inlineBox) {
+        textarea = inlineBox;
+        isDialog = false;
       }
     }
   }
@@ -1406,12 +1400,6 @@ async function huntAudienceUsers(options = {}) {
       }
     }
 
-    // TARGET SATISFACTION: Stop scrolling ONLY when full target count is met
-    if (directProfiles.length >= targetCount) {
-      console.log(`[ATOMX AUDIENCE DEEP SCAN] Target reached: collected ${directProfiles.length}/${targetCount} profiles!`);
-      break;
-    }
-
     // Check if feed is stuck or needs retry button clicked
     if (directProfiles.length === prevDiscoveredCount) {
       consecutiveStalls++;
@@ -1425,8 +1413,8 @@ async function huntAudienceUsers(options = {}) {
         await sleep(1000);
       }
 
-      // Allow up to 10 consecutive attempts before giving up on truly exhausted feeds
-      if (consecutiveStalls >= 10) {
+      // Allow up to 8 consecutive attempts before giving up on truly exhausted feeds
+      if (consecutiveStalls >= 8) {
         console.log(`[ATOMX AUDIENCE DEEP SCAN] Timeline exhausted at ${directProfiles.length} profiles.`);
         break;
       }
@@ -1436,8 +1424,15 @@ async function huntAudienceUsers(options = {}) {
     }
 
     // Smooth scroll down to load next batch of timeline posts
-    window.scrollBy({ top: 1200, behavior: 'smooth' });
-    await sleep(850);
+    window.scrollBy({ top: 900, behavior: 'smooth' });
+    await sleep(1000);
+
+    // TARGET SATISFACTION: Require at least 4 visible scroll cycles so user visibly sees feed exploration
+    const minScrollCycles = 4;
+    if (cycle >= minScrollCycles && directProfiles.length >= targetCount) {
+      console.log(`[ATOMX AUDIENCE DEEP SCAN] Target reached: collected ${directProfiles.length}/${targetCount} profiles across ${cycle + 1} scroll cycles!`);
+      break;
+    }
   }
 
   const allDiscovered = Array.from(tweetMap.values());
