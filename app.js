@@ -820,9 +820,8 @@ function renderAdminPasswordGate(container, targetScreenId = '12') {
           </button>
         </form>
 
-        <div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; font-size:12px;">
-          <a href="javascript:void(0)" onclick="navigateToScreen('04')" style="color:var(--text-secondary); text-decoration:none;">← User Dashboard</a>
-          <a href="javascript:void(0)" onclick="navigateToScreen('01')" style="color:var(--blue-primary); text-decoration:none;">User Sign In</a>
+        <div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border-subtle); text-align:center; font-size:12px; color:var(--text-secondary);">
+          ATOMX ENGAGE &bull; Admin Security Control Center
         </div>
       </div>
     </div>
@@ -1025,129 +1024,24 @@ function updateSidebarActiveState(screenId) {
 // SCREEN 01: LOGIN
 // -------------------------------------------------------------
 // -------------------------------------------------------------
-// SCREEN 01: LOGIN (WITH ADMIN ACCESS KEY GATE)
+// -------------------------------------------------------------
+// SCREEN 01: ADMIN AUTHENTICATION (STRICT ADMIN ACCESS ONLY)
 // -------------------------------------------------------------
 function renderLogin(container) {
-  const isTabAdmin = AtomXState.authTab === 'admin';
-
-  container.innerHTML = `
-    <div class="auth-wrapper">
-      <div class="auth-card">
-        <div class="auth-logo">
-          <div class="atomx-brand" style="font-size: 24px;">
-            <div class="atomx-logo-icon" style="width: 26px; height: 26px;"></div>
-            <span class="atomx-brand-main">ATOMX</span>
-            <span class="atomx-brand-sub">ENGAGE</span>
-          </div>
-        </div>
-        <h1 class="auth-title">${isTabAdmin ? 'Admin Authentication' : 'Welcome back'}</h1>
-        <p class="auth-desc">${isTabAdmin ? 'Enter your master Access Key from .env to enter Admin Panel.' : 'Sign in to continue to ATOMX ENGAGE.'}</p>
-
-        <!-- Auth Mode Switcher -->
-        <div style="display:flex; background:var(--bg-canvas); padding:4px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); margin-bottom:20px; gap:4px;">
-          <button type="button" class="btn btn-sm" style="flex:1; border:none; background:${isTabAdmin ? 'var(--blue-primary)' : 'transparent'}; color:${isTabAdmin ? '#FFF' : 'var(--text-secondary)'}; font-weight:600;" onclick="switchAuthTab('admin')">
-            🔑 Admin Access Key
-          </button>
-          <button type="button" class="btn btn-sm" style="flex:1; border:none; background:${!isTabAdmin ? 'var(--blue-primary)' : 'transparent'}; color:${!isTabAdmin ? '#FFF' : 'var(--text-secondary)'}; font-weight:600;" onclick="switchAuthTab('user')">
-            👤 User Login
-          </button>
-        </div>
-
-        ${isTabAdmin ? `
-          <div style="background:rgba(0,102,255,0.06); border:1px solid rgba(0,102,255,0.2); border-radius:var(--radius-sm); padding:12px; margin-bottom:16px;">
-            <div style="font-weight:700; font-size:12px; color:var(--blue-primary); margin-bottom:4px;">🔒 PROTECTED ADMIN CONSOLE</div>
-            <div style="font-size:11px; color:var(--text-secondary);">Authenticate using the <code>ADMIN_PASSWORD</code> saved in your server <code>.env</code> file.</div>
-          </div>
-
-          <form onsubmit="handleAdminKeyLoginSubmit(event)">
-            <div class="form-group">
-              <label class="form-label">Admin Password</label>
-              <input type="password" id="adminMasterAccessKeyInput" class="form-input" required placeholder="Enter ADMIN_PASSWORD from .env" value="${AtomXState.adminAccessKey || localStorage.getItem('atomx_admin_password') || localStorage.getItem('atomx_admin_key') || ''}" style="font-family:monospace; letter-spacing:1px; font-size:13px;">
-            </div>
-            <div id="adminLoginErrorMsg" style="display:none; color:var(--status-error); font-size:12px; margin-bottom:12px; font-weight:600;"></div>
-            <button type="submit" id="adminLoginBtn" class="btn btn-primary btn-block">Verify Password & Access Admin Dashboard</button>
-          </form>
-        ` : `
-          <form onsubmit="handleLoginSubmit(event)">
-            <div class="form-group">
-              <label class="form-label">Email</label>
-              <input type="email" id="loginEmail" class="form-input" value="alex@atomx.io" required placeholder="name@company.com">
-            </div>
-            <div class="form-group">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <label class="form-label" style="margin-bottom:0;">Password</label>
-                <a href="javascript:void(0)" onclick="navigateToScreen('19')" style="font-size:12px; color:var(--blue-primary); text-decoration:none;">Forgot password?</a>
-              </div>
-              <input type="password" id="loginPassword" class="form-input" value="••••••••••••" required placeholder="Enter your password">
-            </div>
-            <button type="submit" class="btn btn-primary btn-block">Sign In as User</button>
-          </form>
-        `}
-
-        <div class="auth-footer" style="margin-top:20px;">
-          Need support? Contact <a href="mailto:evan@atomx.io" style="color:var(--blue-primary);">evan@atomx.io</a>
-        </div>
-      </div>
-    </div>
-  `;
+  renderAdminPasswordGate(container, '12');
 }
 
 function switchAuthTab(tab) {
-  AtomXState.authTab = tab;
   renderLogin(document.getElementById('mainContentArea'));
 }
 
 async function handleAdminKeyLoginSubmit(e) {
+  await handleAdminGateSubmit(e, '12');
+}
+
+function handleLoginSubmit(e) {
   if (e) e.preventDefault();
-  const input = document.getElementById('adminMasterAccessKeyInput');
-  const key = input ? input.value.trim() : '';
-  const errEl = document.getElementById('adminLoginErrorMsg');
-  const btn = document.getElementById('adminLoginBtn');
-  
-  if (!key) {
-    if (errEl) { errEl.textContent = 'Please enter your Admin Password.'; errEl.style.display = 'block'; }
-    return;
-  }
-
-  if (btn) btn.textContent = 'Verifying with server...';
-
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/admin-login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: key, accessKey: key })
-    });
-    const data = await res.json();
-    if (res.ok && data.success) {
-      localStorage.setItem('atomx_admin_password', key);
-      localStorage.setItem('atomx_admin_key', key);
-      if (data.token) sessionStorage.setItem('atomx_admin_token', data.token);
-      AtomXState.adminAccessKey = key;
-      AtomXState.isAdminAuthenticated = true;
-      showToast('✓ Admin Password Verified! Welcome to Admin Panel.');
-      await loadAdminServerData();
-      navigateToScreen('12');
-    } else {
-      if (errEl) {
-        errEl.textContent = data.error || 'Invalid Admin Password. Check ADMIN_PASSWORD in backend/.env';
-        errEl.style.display = 'block';
-      }
-      showToast('❌ Invalid Admin Password.');
-    }
-  } catch (err) {
-    if (key === 'atomx2026' || key === 'atomx-admin-key-2026') {
-      localStorage.setItem('atomx_admin_password', key);
-      localStorage.setItem('atomx_admin_key', key);
-      AtomXState.adminAccessKey = key;
-      AtomXState.isAdminAuthenticated = true;
-      showToast('✓ Admin Access Granted (Offline fallback).');
-      navigateToScreen('12');
-    } else {
-      if (errEl) { errEl.textContent = 'Connection error or invalid password.'; errEl.style.display = 'block'; }
-    }
-  } finally {
-    if (btn) btn.textContent = 'Verify Password & Access Admin Dashboard';
-  }
+  handleAdminGateSubmit(e, '12');
 }
 
 function handleLoginSubmit(e) {
