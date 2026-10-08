@@ -2452,11 +2452,14 @@ function renderAdminDashboard(container) {
             <h1 class="page-title">Admin Dashboard</h1>
             <p class="page-subtitle">Complete control over your platform.</p>
           </div>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <button class="btn btn-sm" onclick="adminWipeAllUserData()" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--status-error); font-size:12px; font-weight:600; cursor:pointer;" title="Wipe all users & access requests to clean slate">
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="adminWipeAllUserData()" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--status-error); font-size:12px; font-weight:600; cursor:pointer; padding:6px 12px;" title="Wipe all users & access requests to clean slate">
               🗑️ Fresh Reset (Wipe All Users)
             </button>
-            <button class="btn btn-primary btn-sm" onclick="loadAdminServerData(); showToast('↻ Synced live platform state');">↻ Refresh</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadAdminServerData(); showToast('↻ Synced live platform state');" style="padding:6px 12px; font-size:12px;">↻ Refresh</button>
+            <button class="btn btn-sm" onclick="adminLogout()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); color:#EF4444; font-size:12px; font-weight:700; cursor:pointer; padding:6px 14px; display:inline-flex; align-items:center; gap:6px; border-radius:6px;" title="Lock Admin Dashboard">
+              🔒 Lock Dashboard
+            </button>
           </div>
         </div>
 
@@ -2792,12 +2795,15 @@ function renderAdminUsers(container) {
             <h1 class="page-title">Users & Access</h1>
             <p class="page-subtitle">Unified management for user accounts, pending access requests, credits, and passwords.</p>
           </div>
-          <div style="display:flex; gap:8px; align-items:center;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <button class="btn btn-sm" onclick="adminWipeAllUserData()" style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--status-error); font-size:12px; font-weight:600; cursor:pointer;" title="Wipe all users & access requests to clean slate">
               🗑️ Fresh Reset (Wipe All Users)
             </button>
             <button class="btn btn-secondary btn-sm" onclick="loadAdminServerData(); showToast('↻ Synced live accounts');">↻ Refresh</button>
             <button class="btn btn-primary btn-sm" onclick="openAdminInviteUserModal()">+ Add User Account</button>
+            <button class="btn btn-sm" onclick="adminLogout()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); color:#EF4444; font-size:12px; font-weight:700; cursor:pointer; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; border-radius:6px;" title="Lock Admin Dashboard">
+              🔒 Lock
+            </button>
           </div>
         </div>
 
@@ -4892,6 +4898,11 @@ function renderAdminSidebarHTML(activeId) {
         <div class="nav-item" onclick="adminWipeAllUserData()" style="color:var(--status-error); margin-top:8px; cursor:pointer;" title="Reset all users & data fresh">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
           <span style="font-weight:600;">Fresh Reset (Wipe)</span>
+        </div>
+
+        <div class="nav-item" onclick="adminLogout()" style="color:#EF4444; margin-top:4px; cursor:pointer;" title="Lock Admin Dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span style="font-weight:700;">🔒 Lock Dashboard</span>
         </div>
       </nav>
 
