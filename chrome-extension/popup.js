@@ -279,12 +279,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   initExtTheme();
   initTabs();
-  await initToneSystem();
   initListeners();
   initAgentListeners();
-  await loadServerState();
-  await initAudienceBuilderSystem();
-  await autoDetectTweet();
+
+  // Instant render path from cache (0 delay)
+  await Promise.all([
+    initToneSystem(),
+    loadServerState()
+  ]);
+
+  // Non-blocking background operations
+  initAudienceBuilderSystem().catch(console.warn);
+  autoDetectTweet().catch(console.warn);
 });
 
 // Tab switching
@@ -307,14 +313,22 @@ function switchExtTab(tabKey) {
 // ==============================================================
 async function initToneSystem() {
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    const stored = await chrome.storage.local.get(['customTones', 'selectedTone', 'selectedTonePrompt', 'selectedToneId']);
-    if (Array.isArray(stored.customTones)) state.customTones = stored.customTones;
-    if (stored.selectedTone) state.selectedTone = stored.selectedTone;
-    if (stored.selectedTonePrompt) state.selectedTonePrompt = stored.selectedTonePrompt;
-    if (stored.selectedToneId) state.selectedToneId = stored.selectedToneId;
+    const stored = await chrome.storage.local.get(['customTones', 'selectedTone', 'selectedTonePrompt', 'selectedToneId']).catch(() => ({}));
+    if (Array.isArray(stored?.customTones)) state.customTones = stored.customTones;
+    if (stored?.selectedTone) state.selectedTone = stored.selectedTone;
+    if (stored?.selectedTonePrompt) state.selectedTonePrompt = stored.selectedTonePrompt;
+    if (stored?.selectedToneId) state.selectedToneId = stored.selectedToneId;
   }
 
-  // Fetch backend tone styles (admin configurable)
+  // Render tone pills immediately from cache
+  renderTonePills();
+  setupCustomToneDrawer();
+
+  // Non-blocking network sync
+  syncToneStylesFromServer();
+}
+
+async function syncToneStylesFromServer() {
   try {
     const backendUrl = await getBackendUrl();
     const res = await fetch(`${backendUrl}/api/tone-styles`).catch(() => null);
@@ -325,7 +339,6 @@ async function initToneSystem() {
       }
       if (Array.isArray(data.defaultTones) && data.defaultTones.length > 0) {
         state.defaultTones = data.defaultTones;
-        // Dynamically sync updated prompt template from admin dashboard
         const matching = state.defaultTones.find(t =>
           (state.selectedToneId && t.id === state.selectedToneId) ||
           (state.selectedTone && t.name === state.selectedTone)
@@ -342,12 +355,10 @@ async function initToneSystem() {
             });
           }
         }
+        renderTonePills();
       }
     }
   } catch (e) { }
-
-  renderTonePills();
-  setupCustomToneDrawer();
 }
 
 function renderTonePills() {
@@ -2302,7 +2313,7 @@ async function loadServerState() {
       const stored = await chrome.storage.local.get([
         'credits', 'accessKey', 'creators', 'engagedTweetIds', 'userPlan',
         'currentUser', 'authToken', 'verifiedXHandle', 'pendingRequest'
-      ]);
+      ]).catch(() => ({}));
       if (stored?.credits !== undefined) state.credits = stored.credits;
       if (stored?.accessKey) state.accessKey = stored.accessKey;
       if (stored?.userPlan) state.userPlan = stored.userPlan;
@@ -2316,11 +2327,36 @@ async function loadServerState() {
       if (Array.isArray(stored?.creators)) state.creators = stored.creators;
       if (Array.isArray(stored?.engagedTweetIds)) state.engagedTweetIds = stored.engagedTweetIds;
     }
+  } catch (err) {
+    console.warn('Error reading local cache:', err);
+  }
 
+  // Instant UI render from local cache
+  updateCreditUI();
+  renderCreatorChips();
+  await checkAccountVerificationLock();
+
+  if (!state.user && !state.pendingRequest) {
+    switchExtTab('access');
+  }
+
+  // Non-blocking parallel network sync
+  syncServerStateNetwork();
+}
+
+async function syncServerStateNetwork() {
+  try {
     const backendUrl = await getBackendUrl();
-    const res = await fetch(`${backendUrl}/api/credits/balance`, { credentials: 'omit' }).catch(() => null);
-    if (res && res.ok) {
-      const data = await res.json();
+    const [balRes, stRes, engRes] = await Promise.allSettled([
+      fetch(`${backendUrl}/api/credits/balance`, { credentials: 'omit' }),
+      (state.user && (state.user.handle || state.user.email))
+        ? fetch(`${backendUrl}/api/auth/check-status?handle=${encodeURIComponent(state.user.handle || '')}&email=${encodeURIComponent(state.user.email || '')}`, { credentials: 'omit' })
+        : Promise.resolve(null),
+      fetch(`${backendUrl}/api/tweets/engaged`, { credentials: 'omit' })
+    ]);
+
+    if (balRes.status === 'fulfilled' && balRes.value?.ok) {
+      const data = await balRes.value.json().catch(() => ({}));
       if (typeof data.credits === 'number') state.credits = data.credits;
       if (data.plan) {
         state.userPlan = data.plan;
@@ -2328,28 +2364,20 @@ async function loadServerState() {
       }
     }
 
-    // Live account status check (detects if admin suspended or modified account)
-    if (state.user && (state.user.handle || state.user.email)) {
-      const qHandle = encodeURIComponent(state.user.handle || '');
-      const qEmail = encodeURIComponent(state.user.email || '');
-      const stRes = await fetch(`${backendUrl}/api/auth/check-status?handle=${qHandle}&email=${qEmail}`, { credentials: 'omit' }).catch(() => null);
-      if (stRes && stRes.ok) {
-        const stData = await stRes.json();
-        if (stData.status) {
-          state.user.status = stData.status;
-          if (typeof stData.credits === 'number') state.credits = stData.credits;
-          if (stData.plan) state.userPlan = stData.plan;
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            chrome.storage.local.set({ user: state.user, credits: state.credits, userPlan: state.userPlan });
-          }
+    if (stRes.status === 'fulfilled' && stRes.value?.ok) {
+      const stData = await stRes.value.json().catch(() => ({}));
+      if (stData.status && state.user) {
+        state.user.status = stData.status;
+        if (typeof stData.credits === 'number') state.credits = stData.credits;
+        if (stData.plan) state.userPlan = stData.plan;
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({ user: state.user, credits: state.credits, userPlan: state.userPlan });
         }
       }
     }
 
-    // Sync engaged tweet IDs from backend SQLite
-    const engRes = await fetch(`${backendUrl}/api/tweets/engaged`, { credentials: 'omit' }).catch(() => null);
-    if (engRes && engRes.ok) {
-      const engData = await engRes.json();
+    if (engRes.status === 'fulfilled' && engRes.value?.ok) {
+      const engData = await engRes.value.json().catch(() => ({}));
       if (Array.isArray(engData.engagedIds) && engData.engagedIds.length > 0) {
         state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), ...engData.engagedIds]));
         if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -2357,16 +2385,11 @@ async function loadServerState() {
         }
       }
     }
-  } catch (err) {
-    console.warn('Backend server offline, using cached state', err);
-  }
-  updateCreditUI();
-  renderCreatorChips();
-  await checkAccountVerificationLock();
 
-  // If user is not authenticated and has not requested yet, automatically open Access tab
-  if (!state.user && !state.pendingRequest) {
-    switchExtTab('access');
+    updateCreditUI();
+    checkAccountVerificationLock();
+  } catch (err) {
+    console.warn('Background server sync offline, keeping cached state', err);
   }
 }
 

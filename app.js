@@ -1083,7 +1083,7 @@ function renderPendingApproval(container) {
           <span class="badge badge-warning" style="font-size: 13px; padding: 6px 14px;">PENDING APPROVAL</span>
         </div>
 
-        <div style="background:#FAFAFC; border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:13px; margin-bottom:24px;">
+        <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:16px; text-align:left; font-size:13px; margin-bottom:24px;">
           <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
             <span style="color:var(--text-secondary);">Request submitted:</span>
             <span style="font-weight:600; color:var(--text-primary);">Oct 06, 2026</span>
@@ -1925,7 +1925,7 @@ function renderCreditsPlans(container) {
 
         <div class="workspace-body">
           <!-- Balance Banner -->
-          <div class="atomx-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; background:linear-gradient(135deg, #FFF, #F5F8FF); border-color:var(--blue-soft-border);">
+          <div class="atomx-card balance-banner" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; border-color:var(--blue-soft-border);">
             <div>
               <div style="font-size:12px; font-weight:700; color:var(--blue-primary); letter-spacing:0.5px; text-transform:uppercase;">AVAILABLE CREDITS</div>
               <div style="font-size:36px; font-weight:800; color:var(--text-primary); margin:4px 0;">${AtomXState.currentUser.credits.toLocaleString()}</div>
@@ -3105,7 +3105,7 @@ function renderAdminCreditManagement(container) {
             </div>
 
             <!-- Server Rule Notification -->
-            <div class="atomx-card" style="background:#FAFAFC;">
+            <div class="atomx-card" style="background:var(--bg-canvas); border:1px solid var(--border-subtle);">
               <h3 style="font-size:15px; font-weight:700; color:var(--blue-primary); margin-bottom:10px;">Server Validation Truth</h3>
               <p style="font-size:13px; color:var(--text-secondary); line-height:1.5; margin-bottom:12px;">
                 Credit balances are calculated and validated exclusively on the server database. Neither the web frontend nor Chrome extension can tamper with balances. Each generation deducts 1 credit atomic transaction.
@@ -4551,7 +4551,7 @@ function renderSystemArchitecture(container) {
                 <span>→</span>
                 <span class="badge badge-success" style="padding:8px 12px;">Deliver Reply to Client</span>
               </div>
-              <div style="font-size:12px; color:var(--text-secondary); background:#F4F6F9; padding:12px; border-radius:var(--radius-sm);">
+              <div style="font-size:12px; color:var(--text-secondary); background:var(--bg-canvas); border:1px solid var(--border-subtle); padding:12px; border-radius:var(--radius-sm);">
                 <strong>🔒 CRITICAL SECURITY GUARANTEE:</strong> OpenAI API secret keys never exist in client-side extension or mobile storage. All credit deductions are transactional and atomic in the server database.
               </div>
             </div>

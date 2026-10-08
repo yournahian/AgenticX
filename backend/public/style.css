@@ -810,13 +810,19 @@ body {
 .style-pill {
   padding: 6px 14px;
   border-radius: var(--radius-full);
-  background: #F4F6F9;
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.style-pill:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--border-focus);
 }
 
 .style-pill.active {
@@ -1209,4 +1215,78 @@ body {
 @keyframes scaleUp {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
+}
+
+/* ===================================================================
+   TRUE DARK MODE ENHANCEMENTS
+   =================================================================== */
+
+[data-theme="dark"] .style-pill {
+  background: #151A24;
+  border-color: #242C3D;
+  color: #9DA3AF;
+}
+
+[data-theme="dark"] .style-pill:hover {
+  background: #1D2331;
+  color: #F4F5F8;
+  border-color: #3B66FF;
+}
+
+[data-theme="dark"] .style-pill.active {
+  background: #2563EB;
+  border-color: #3B82F6;
+  color: #FFFFFF;
+}
+
+[data-theme="dark"] .badge-neutral {
+  background: #1F2633;
+  color: #9DA3AF;
+}
+
+[data-theme="dark"] .pricing-card {
+  background: #131722;
+  border-color: #222938;
+}
+
+[data-theme="dark"] .pricing-card.featured {
+  background: #151C2C;
+  border-color: #3B66FF;
+  box-shadow: 0 8px 30px rgba(59, 102, 255, 0.2);
+}
+
+[data-theme="dark"] .balance-banner {
+  background: linear-gradient(135deg, #131824, #182033) !important;
+  border-color: rgba(59, 102, 255, 0.3) !important;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-canvas);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: #0A0C10;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #232B3B;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #374258;
 }
