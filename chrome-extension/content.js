@@ -965,6 +965,35 @@ function waitForElement(selector, timeout = 7000) {
   });
 }
 
+/**
+ * Client-side Comment Sanitizer:
+ * Enforces universal anti-bot rules:
+ * - NO $, NO emojis, NO —, NO quotes, NO !
+ * - Strictly 5-10 words
+ */
+function sanitizeClientComment(text, maxWords = 10) {
+  if (!text) return '';
+  let clean = text
+    .replace(/^(Reply|Comment|Tweet|Response|AI Reply|Output)\s*:\s*/i, '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/@[\w_]+/g, '')
+    .replace(/[$]/g, '')
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '')
+    .replace(/[—–]/g, ' ')
+    .replace(/--+/g, ' ')
+    .replace(/["'“”‘’`«»]/g, '')
+    .replace(/!+/g, '.')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length > maxWords) {
+    clean = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
+  }
+  clean = clean.replace(/[$!—"“"'`«»]/g, '').trim();
+  return clean;
+}
+
 async function executeAutonomousTweetWorkflow(params) {
   isWorkflowAborted = false;
 
@@ -1118,35 +1147,6 @@ async function executeAutonomousTweetWorkflow(params) {
   }
 
   if (isWorkflowAborted) return { success: false, aborted: true, performed };
-
-/**
- * Client-side Comment Sanitizer:
- * Enforces universal anti-bot rules:
- * - NO $, NO emojis, NO —, NO quotes, NO !
- * - Strictly 5-10 words
- */
-function sanitizeClientComment(text, maxWords = 10) {
-  if (!text) return '';
-  let clean = text
-    .replace(/^(Reply|Comment|Tweet|Response|AI Reply|Output)\s*:\s*/i, '')
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/@[\w_]+/g, '')
-    .replace(/[$]/g, '')
-    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}]/gu, '')
-    .replace(/[—–]/g, ' ')
-    .replace(/--+/g, ' ')
-    .replace(/["'“”‘’`«»]/g, '')
-    .replace(/!+/g, '.')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const words = clean.split(' ').filter(Boolean);
-  if (words.length > maxWords) {
-    clean = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
-  }
-  clean = clean.replace(/[$!—"“"'`«»]/g, '').trim();
-  return clean;
-}
 
   // 5. Auto-Like Action (MAIN POST ONLY) — 100% reliable execution with visual pulse
   if (shouldLike && !isWorkflowAborted) {
