@@ -2157,24 +2157,8 @@ async function startAudienceBuilderWorkflow() {
     const collectedHandles = new Set();
     const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
 
-    // 1. Immediately extract high-value targets from curated list or direct handles
-    if (listSelect !== 'custom') {
-      const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect] || FALLBACK_CURATED_LISTS.audienceList1;
-      const rawTargets = curated?.targets || [];
-      const cleanTargets = rawTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
-      for (const h of cleanTargets) {
-        if (collectedProfiles.length >= targetCount) break;
-        const lower = h.toLowerCase();
-        if (lower !== loggedInHandle && !collectedHandles.has(lower) && !followedSet.has(lower)) {
-          collectedHandles.add(lower);
-          collectedProfiles.push({
-            cleanHandle: h,
-            handle: `@${h}`,
-            name: h
-          });
-        }
-      }
-    } else {
+    // 1. If user entered explicit comma-separated handles in custom mode, use them directly
+    if (listSelect === 'custom') {
       const rawCustomUrl = document.getElementById('customListUrlInput')?.value.trim() || '';
       if (rawCustomUrl && !rawCustomUrl.includes('x.com') && !rawCustomUrl.includes('twitter.com') && !rawCustomUrl.includes('/')) {
         const extractedHandles = rawCustomUrl
@@ -2198,7 +2182,7 @@ async function startAudienceBuilderWorkflow() {
 
     if (colEl) colEl.textContent = collectedProfiles.length;
 
-    // 2. If more targets needed to satisfy targetCount, hunt dynamically from active niche live feed
+    // 2. Always dynamically open and scroll the target list/niche live feed on Twitter/X
     if (collectedProfiles.length < targetCount && !state.isAborted) {
       let targetUrl = '';
       if (listSelect === 'custom') {
@@ -2213,14 +2197,14 @@ async function startAudienceBuilderWorkflow() {
           targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR tech) -filter:retweets') + '&f=live';
         }
       } else if (listSelect === 'audienceList2') {
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public" OR #buildinpublic) -filter:retweets') + '&f=live';
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public" OR #buildinpublic OR "tech founder") -filter:retweets') + '&f=live';
       } else {
         // Default: Web3 & Crypto active creators
         targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR #crypto OR #web3) -filter:retweets') + '&f=live';
       }
 
       if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
-      if (statusText) statusText.textContent = `Scanning live timeline feed for ${targetCount - collectedProfiles.length} active creator profiles...`;
+      if (statusText) statusText.textContent = `Opening live feed to scroll & collect active profiles...`;
       if (barEl) barEl.style.width = '20%';
 
       const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
@@ -2230,6 +2214,7 @@ async function startAudienceBuilderWorkflow() {
       await sleep(2500);
 
       if (!state.isAborted) {
+        if (statusText) statusText.textContent = `Scrolling timeline to collect ${targetCount - collectedProfiles.length} active creator profiles...`;
         const scanResult = await new Promise((resolve) => {
           chrome.tabs.sendMessage(audienceWorkingTabId, {
             type: 'AUDIENCE_BUILDER_HUNT_USERS',
@@ -2250,6 +2235,26 @@ async function startAudienceBuilderWorkflow() {
               if (colEl) colEl.textContent = collectedProfiles.length;
             }
           }
+        }
+      }
+    }
+
+    // 3. Fallback: If live feed produced fewer profiles, backfill from curated targets
+    if (collectedProfiles.length < targetCount && !state.isAborted && listSelect !== 'custom') {
+      const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect] || FALLBACK_CURATED_LISTS.audienceList1;
+      const rawTargets = curated?.targets || [];
+      const cleanTargets = rawTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
+      for (const h of cleanTargets) {
+        if (collectedProfiles.length >= targetCount) break;
+        const lower = h.toLowerCase();
+        if (lower !== loggedInHandle && !collectedHandles.has(lower) && !followedSet.has(lower)) {
+          collectedHandles.add(lower);
+          collectedProfiles.push({
+            cleanHandle: h,
+            handle: `@${h}`,
+            name: h
+          });
+          if (colEl) colEl.textContent = collectedProfiles.length;
         }
       }
     }
@@ -2497,8 +2502,43 @@ async function startSorsaScoreBoosterWorkflow() {
     let collectedProfiles = [];
     const collectedHandles = new Set();
 
-    // 1. Instantly populate high-weight targets from curated list
-    if (customTargets.length > 0) {
+    // 1. Open target feed and dynamically hunt active KOL / ecosystem accounts
+    if (stateBadge) stateBadge.textContent = 'FINDING_KOLS';
+    if (statusText) statusText.textContent = `Opening ${tier === 'tier1' ? 'Tier 1 KOLs' : 'Tier 2 Ecosystem Projects'} live feed to scroll & collect accounts...`;
+    if (barEl) barEl.style.width = '15%';
+
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+    sorsaWorkingTabId = listTab.id;
+    shouldCloseWorkingTab = true;
+    await waitForTabComplete(sorsaWorkingTabId);
+    await sleep(2500);
+
+    if (!state.isAborted) {
+      if (statusText) statusText.textContent = `Scrolling feed to collect active ecosystem accounts...`;
+      const scanResult = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(sorsaWorkingTabId, {
+          type: 'AUDIENCE_BUILDER_HUNT_USERS',
+          dateRange: 'all',
+          sortBy: 'replies',
+          targetCount: targetCount
+        }, (res) => resolve(res || { success: false, profiles: [] }));
+      });
+
+      if (scanResult?.profiles && scanResult.profiles.length > 0) {
+        for (const p of scanResult.profiles) {
+          if (collectedProfiles.length >= targetCount) break;
+          const handleKey = (p.cleanHandle || '').toLowerCase();
+          if (handleKey && !collectedHandles.has(handleKey)) {
+            collectedHandles.add(handleKey);
+            collectedProfiles.push(p);
+            if (colEl) colEl.textContent = collectedProfiles.length;
+          }
+        }
+      }
+    }
+
+    // 2. Fallback: If feed produced fewer profiles, backfill from curated targets
+    if (collectedProfiles.length < targetCount && !state.isAborted && customTargets.length > 0) {
       const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
       for (const h of clean) {
         if (collectedProfiles.length >= targetCount) break;
@@ -2510,41 +2550,7 @@ async function startSorsaScoreBoosterWorkflow() {
             handle: `@${h}`,
             name: h
           });
-        }
-      }
-    }
-
-    // 2. If more targets needed to satisfy targetCount, hunt dynamically from live feed
-    if (collectedProfiles.length < targetCount && !state.isAborted) {
-      if (stateBadge) stateBadge.textContent = 'FINDING_KOLS';
-      if (statusText) statusText.textContent = `Scanning ${tier === 'tier1' ? 'Tier 1 KOLs' : 'Tier 2 Ecosystem Projects'} feed for more accounts...`;
-      if (barEl) barEl.style.width = '15%';
-
-      const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
-      sorsaWorkingTabId = listTab.id;
-      shouldCloseWorkingTab = true;
-      await waitForTabComplete(sorsaWorkingTabId);
-      await sleep(2500);
-
-      if (!state.isAborted) {
-        const scanResult = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(sorsaWorkingTabId, {
-            type: 'AUDIENCE_BUILDER_HUNT_USERS',
-            dateRange: 'all',
-            sortBy: 'replies',
-            targetCount: targetCount - collectedProfiles.length
-          }, (res) => resolve(res || { success: false, profiles: [] }));
-        });
-
-        if (scanResult?.profiles && scanResult.profiles.length > 0) {
-          for (const p of scanResult.profiles) {
-            if (collectedProfiles.length >= targetCount) break;
-            const handleKey = (p.cleanHandle || '').toLowerCase();
-            if (handleKey && !collectedHandles.has(handleKey)) {
-              collectedHandles.add(handleKey);
-              collectedProfiles.push(p);
-            }
-          }
+          if (colEl) colEl.textContent = collectedProfiles.length;
         }
       }
     }

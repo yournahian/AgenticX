@@ -425,6 +425,116 @@ async function simulateHumanLikeClick(targetArticle) {
 }
 
 /**
+ * 100% reliable Reply Click with visual highlighting & full pointer events.
+ * Opens the Twitter / X reply modal dialog or focuses the composer.
+ */
+async function simulateHumanReplyClick(replyBtn) {
+  if (!replyBtn) return false;
+  try {
+    gentleScrollIntoView(replyBtn);
+
+    // Visual glowing indicator on reply button so action is clearly visible
+    const origOutline = replyBtn.style.outline;
+    const origShadow = replyBtn.style.boxShadow;
+    const origTrans = replyBtn.style.transition;
+    const origScale = replyBtn.style.transform;
+
+    replyBtn.style.transition = 'box-shadow 0.25s ease, outline 0.25s ease, transform 0.2s ease';
+    replyBtn.style.outline = '2px solid #10B981';
+    replyBtn.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.7)';
+    replyBtn.style.transform = 'scale(1.1)';
+    await sleep(250);
+
+    const rect = replyBtn.getBoundingClientRect();
+    const evtInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2
+    };
+
+    replyBtn.focus();
+    replyBtn.dispatchEvent(new PointerEvent('pointerdown', evtInit));
+    replyBtn.dispatchEvent(new MouseEvent('mousedown', evtInit));
+    replyBtn.click();
+    replyBtn.dispatchEvent(new PointerEvent('pointerup', evtInit));
+    replyBtn.dispatchEvent(new MouseEvent('mouseup', evtInit));
+
+    // Also trigger on child SVG/div in case Twitter attached listener to inner element
+    const inner = replyBtn.querySelector('svg, div');
+    if (inner) {
+      inner.dispatchEvent(new PointerEvent('pointerdown', evtInit));
+      inner.dispatchEvent(new MouseEvent('mousedown', evtInit));
+      if (typeof inner.click === 'function') inner.click();
+      inner.dispatchEvent(new PointerEvent('pointerup', evtInit));
+      inner.dispatchEvent(new MouseEvent('mouseup', evtInit));
+    }
+
+    await sleep(350);
+    replyBtn.style.transform = origScale || 'none';
+    replyBtn.style.outline = origOutline || 'none';
+    replyBtn.style.boxShadow = origShadow || 'none';
+    replyBtn.style.transition = origTrans || 'none';
+    return true;
+  } catch (e) {
+    replyBtn.click();
+    return true;
+  }
+}
+
+/**
+ * 100% reliable single-click Submit with visual blue pulse & pointer events.
+ * Submits the reply/comment without triggering duplicate submission warnings.
+ */
+async function simulateHumanSubmitClick(btn) {
+  if (!btn) return false;
+  try {
+    gentleScrollIntoView(btn);
+    await sleep(150);
+
+    btn.style.transition = 'box-shadow 0.2s ease, outline 0.2s ease, transform 0.2s ease';
+    btn.style.outline = '2px solid #3B82F6';
+    btn.style.boxShadow = '0 0 14px rgba(59, 130, 246, 0.7)';
+    btn.style.transform = 'scale(1.05)';
+    await sleep(200);
+
+    const rect = btn.getBoundingClientRect();
+    const evtInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2
+    };
+
+    btn.focus();
+    btn.dispatchEvent(new PointerEvent('pointerdown', evtInit));
+    btn.dispatchEvent(new MouseEvent('mousedown', evtInit));
+    btn.click();
+    btn.dispatchEvent(new PointerEvent('pointerup', evtInit));
+    btn.dispatchEvent(new MouseEvent('mouseup', evtInit));
+
+    const inner = btn.querySelector('span, div');
+    if (inner) {
+      inner.dispatchEvent(new PointerEvent('pointerdown', evtInit));
+      inner.dispatchEvent(new MouseEvent('mousedown', evtInit));
+      inner.dispatchEvent(new PointerEvent('pointerup', evtInit));
+      inner.dispatchEvent(new MouseEvent('mouseup', evtInit));
+    }
+
+    await sleep(300);
+    btn.style.transform = 'none';
+    btn.style.outline = 'none';
+    btn.style.boxShadow = 'none';
+    return true;
+  } catch (e) {
+    btn.click();
+    return true;
+  }
+}
+
+/**
  * Human-like letter-by-letter typing with intentional typos & backspace corrections.
  * Fully compatible with modern X (Twitter) DraftJS & Lexical rich-text editors.
  */
@@ -565,35 +675,59 @@ async function typeTextHumanLike(editor, text) {
 
 /**
  * Universal, rock-solid Twitter / X Comment & Reply Engine
- * Works with both inline reply boxes and modal dialogs on modern X (Twitter).
+ * Reliably opens modal dialogs for comments and timeline posts,
+ * scopes typing & submit strictly to the dialog, and prevents self-commenting bugs.
  */
 async function postCommentOnTargetArticle(targetArticle, commentText) {
   if (!commentText || isWorkflowAborted) return { success: false, error: 'Empty text or aborted' };
 
   console.log('[ATOMX COMMENT ENGINE] Posting comment:', commentText);
 
-  // 1. Locate Reply button on the target article
-  let replyBtn = targetArticle?.querySelector('button[data-testid="reply"], div[data-testid="reply"]') ||
-                 document.querySelector('button[data-testid="reply"]');
+  // 1. Check if a reply modal dialog is ALREADY open
+  let dialog = document.querySelector('div[role="dialog"][aria-modal="true"], div[role="dialog"]');
+  let textarea = null;
+  let isDialog = false;
 
-  // Check if reply box is already visible on page without clicking reply button
-  let textarea = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
-
-  if (!textarea && replyBtn) {
-    gentleScrollIntoView(replyBtn);
-    await sleep(200);
-    replyBtn.click();
-    await sleep(800);
+  if (dialog) {
+    textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+    if (textarea) isDialog = true;
   }
 
-  // 2. Wait for textarea in dialog OR inline
-  textarea = await waitForElement('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 5000);
-
+  // 2. If no reply dialog is open, locate and click Reply button on targetArticle
   if (!textarea) {
+    let replyBtn = targetArticle?.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+
+    // If targetArticle is missing or has no reply button, fallback to page reply button
+    if (!replyBtn) {
+      replyBtn = document.querySelector('button[data-testid="reply"]');
+    }
+
     if (replyBtn) {
-      replyBtn.click();
-      await sleep(1000);
-      textarea = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+      console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
+      await simulateHumanReplyClick(replyBtn);
+
+      // Wait for Twitter modal dialog to appear
+      dialog = await waitForElement('div[role="dialog"]', 4000);
+      if (dialog) {
+        isDialog = true;
+        textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+      }
+    }
+
+    // 3. Status page fallback ONLY: If targetArticle is the main focal tweet and no dialog appeared,
+    // look for the status page's inline reply composer directly under the main tweet
+    if (!textarea) {
+      const isStatusPage = window.location.pathname.includes('/status/');
+      const mainArt = getMainPostArticle();
+      const isMainTarget = !targetArticle || targetArticle === mainArt;
+
+      if (isStatusPage && isMainTarget) {
+        const inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"]');
+        if (inlineBox) {
+          textarea = inlineBox;
+          isDialog = false;
+        }
+      }
     }
   }
 
@@ -602,19 +736,18 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     return { success: false, error: 'Textarea not found' };
   }
 
-  // 3. Type human-like into the editor
+  // 4. Type human-like into the editor
   await typeTextHumanLike(textarea, commentText);
 
   if (isWorkflowAborted) return { success: false, aborted: true };
 
   await sleep(600);
 
-  // 4. Find Submit Reply Button
+  // 5. Find Submit Reply Button scoped to dialog if open
+  const scope = (isDialog && dialog) ? dialog : document;
   const getSubmitBtn = () => {
-    const dialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
-    const scope = dialog || document;
-    let btn = scope.querySelector('button[data-testid="tweetButtonInline"]') ||
-              scope.querySelector('button[data-testid="tweetButton"]') ||
+    let btn = scope.querySelector('button[data-testid="tweetButton"]') ||
+              scope.querySelector('button[data-testid="tweetButtonInline"]') ||
               document.querySelector('div[role="dialog"] button[data-testid="tweetButton"]') ||
               document.querySelector('button[data-testid="tweetButtonInline"]') ||
               document.querySelector('button[data-testid="tweetButton"]');
@@ -643,7 +776,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
         clipboardData: dt
       });
       textarea.dispatchEvent(pasteEvt);
-      await sleep(350);
+      await sleep(300);
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       textarea.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(300);
@@ -658,17 +791,20 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     return { success: false, error: 'Submit button not found' };
   }
 
-  // Force-enable button attributes
+  // Wait briefly if aria-disabled is still true to let React state catch up
+  let waitCount = 0;
+  while ((submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled) && waitCount < 12) {
+    await sleep(200);
+    waitCount++;
+  }
+
+  // Force-enable button attributes if React is still lagging
   submitBtn.removeAttribute('disabled');
   submitBtn.setAttribute('aria-disabled', 'false');
   await sleep(150);
 
-  // 5. Click Submit EXACTLY ONCE (No duplicate click dispatch, no retry clicks!)
-  gentleScrollIntoView(submitBtn);
-  await sleep(150);
-
-  submitBtn.focus();
-  submitBtn.click();
+  // 6. Click Submit EXACTLY ONCE with human pointer events (No double tap, avoids duplicate error)
+  await simulateHumanSubmitClick(submitBtn);
 
   console.log('[ATOMX COMMENT ENGINE] Clicked Submit button once successfully!');
   await sleep(2500);
@@ -678,12 +814,12 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   if (remainingDialog) {
     const closeBtn = remainingDialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"]');
     if (closeBtn) {
-      closeBtn.click();
+      try { closeBtn.click(); } catch (e) {}
       await sleep(300);
     }
   }
 
-  return { success: true, commentPosted: true, commentText };
+  return { success: true };
 }
 
 async function insertIntoTwitterInput(text) {
@@ -1485,11 +1621,17 @@ async function engageAndFollowProfile(options = {}) {
     // Step 2: Smooth scroll down past profile header/bio to reveal recent posts
     window.scrollBy({ top: 550, behavior: 'smooth' });
     await sleep(900);
-    window.scrollBy({ top: 400, behavior: 'smooth' });
-    await sleep(800);
 
-    // Step 3: Find Recent Posts and SKIP Pinned Tweets & Reposts
-    const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    // Step 3: Wait for timeline posts to hydrate with retry scrolling
+    let allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    if (allArticles.length === 0) {
+      for (let retries = 0; retries < 4 && allArticles.length === 0; retries++) {
+        window.scrollBy({ top: 400, behavior: 'smooth' });
+        await sleep(1000);
+        allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+      }
+    }
+
     const validRecentArticles = allArticles.filter(art => {
       const socialCtx = art.querySelector('div[data-testid="socialContext"]')?.innerText?.toLowerCase() || '';
       return !socialCtx.includes('pinned') && !socialCtx.includes('pin');
