@@ -553,20 +553,56 @@ exports.saveOffer = (req, res) => {
   }
 };
 
-// System Version & Universal Update API
-exports.getSystemVersion = (req, res) => {
-  res.json({
-    currentVersion: '1.0.1',
-    minSupportedVersion: '1.0.0',
+// System Version & Universal Update API (Dynamically synced with GitHub Releases)
+let cachedRelease = null;
+let lastReleaseFetch = 0;
+
+exports.getSystemVersion = async (req, res) => {
+  const DEFAULT_VERSION = '1.0.0';
+  const now = Date.now();
+
+  // Cache GitHub release check for 5 minutes
+  if (cachedRelease && (now - lastReleaseFetch < 5 * 60 * 1000)) {
+    return res.json(cachedRelease);
+  }
+
+  try {
+    const ghRes = await fetch('https://api.github.com/repos/yournahian/AgenticX/releases/latest', {
+      headers: {
+        'User-Agent': 'AtomX-Update-Checker',
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+
+    if (ghRes.ok) {
+      const release = await ghRes.json();
+      const tagName = (release.tag_name || '').replace(/^v/, '').trim();
+      if (tagName) {
+        cachedRelease = {
+          currentVersion: tagName,
+          minSupportedVersion: DEFAULT_VERSION,
+          releaseDate: (release.published_at || '').split('T')[0] || new Date().toISOString().split('T')[0],
+          releaseNotes: release.name || release.body || 'New release available on GitHub',
+          downloadUrl: release.html_url || 'https://github.com/yournahian/AgenticX/releases',
+          hasRealRelease: true
+        };
+        lastReleaseFetch = now;
+        return res.json(cachedRelease);
+      }
+    }
+  } catch (err) {
+    // GitHub API fallback
+  }
+
+  // Fallback when no GitHub release has been published yet
+  cachedRelease = {
+    currentVersion: DEFAULT_VERSION,
+    minSupportedVersion: DEFAULT_VERSION,
     releaseDate: '2026-10-08',
-    releaseNotes: 'Security hardening, Telegram ID integration, and Auto-calculate plan credits',
+    releaseNotes: 'Base version',
     downloadUrl: 'https://github.com/yournahian/AgenticX/releases',
-    features: [
-      'Telegram ID capture & display',
-      'Auto-calculated plan credits with bonus',
-      'Promotional Founding 100 offer with live countdown',
-      'Direct Level-1 referral rewards (150 + 150 Cr)',
-      'Single X ID per account enforcement'
-    ]
-  });
+    hasRealRelease: false
+  };
+  lastReleaseFetch = now;
+  return res.json(cachedRelease);
 };

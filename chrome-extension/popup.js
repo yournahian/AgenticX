@@ -304,15 +304,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupExtReferralFeatures();
 });
 
-// Universal Extension Version Check
+// Universal Extension Version Check (Real-time GitHub Release sync)
+function isNewerVersion(remote, local) {
+  if (!remote || !local) return false;
+  const cleanRemote = remote.replace(/^v/, '').trim();
+  const cleanLocal = local.replace(/^v/, '').trim();
+  const rParts = cleanRemote.split('.').map(n => parseInt(n, 10) || 0);
+  const lParts = cleanLocal.split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(rParts.length, lParts.length); i++) {
+    const r = rParts[i] || 0;
+    const l = lParts[i] || 0;
+    if (r > l) return true;
+    if (r < l) return false;
+  }
+  return false;
+}
+
 async function checkExtensionVersion() {
-  const CURRENT_EXT_VERSION = '1.0.0';
+  const currentVer = chrome.runtime?.getManifest?.()?.version || '1.0.0';
   try {
     const backendUrl = await getBackendUrl();
     const res = await fetch(`${backendUrl}/api/system/version`).catch(() => null);
     if (res && res.ok) {
       const data = await res.json();
-      if (data.currentVersion && data.currentVersion !== CURRENT_EXT_VERSION) {
+      // Only display update banner if an actual release has been published on GitHub
+      if (data && data.hasRealRelease && data.currentVersion && isNewerVersion(data.currentVersion, currentVer)) {
         const banner = document.getElementById('extUpdateBanner');
         const verText = document.getElementById('extUpdateVersionText');
         const dlBtn = document.getElementById('extUpdateDownloadBtn');
