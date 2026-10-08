@@ -43,7 +43,8 @@
     "tabs",
     "contextMenus",
     "scripting",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
   "host_permissions": [
     "*://twitter.com/*",

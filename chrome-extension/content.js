@@ -461,16 +461,6 @@ async function simulateHumanReplyClick(replyBtn) {
     replyBtn.dispatchEvent(new PointerEvent('pointerup', evtInit));
     replyBtn.dispatchEvent(new MouseEvent('mouseup', evtInit));
 
-    // Also trigger on child SVG/div in case Twitter attached listener to inner element
-    const inner = replyBtn.querySelector('svg, div');
-    if (inner) {
-      inner.dispatchEvent(new PointerEvent('pointerdown', evtInit));
-      inner.dispatchEvent(new MouseEvent('mousedown', evtInit));
-      if (typeof inner.click === 'function') inner.click();
-      inner.dispatchEvent(new PointerEvent('pointerup', evtInit));
-      inner.dispatchEvent(new MouseEvent('mouseup', evtInit));
-    }
-
     await sleep(350);
     replyBtn.style.transform = origScale || 'none';
     replyBtn.style.outline = origOutline || 'none';
@@ -687,53 +677,56 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   let dialog = null;
   let isDialog = false;
 
-  // 1. Locate and click Reply button on targetArticle
-  let replyBtn = targetArticle?.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
-  if (!replyBtn && !window.location.pathname.includes('/compose/post')) {
-    replyBtn = document.querySelector('button[data-testid="reply"]');
+  const isStatusPage = window.location.pathname.includes('/status/');
+  const mainArt = getMainPostArticle();
+  const isMainTarget = !targetArticle || targetArticle === mainArt;
+
+  // 1. On tweet status pages, check if inline reply box is already sitting under the tweet
+  if (isStatusPage && isMainTarget) {
+    const inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
+    if (inlineBox) {
+      console.log('[ATOMX COMMENT ENGINE] Direct inline reply box detected, focusing...');
+      inlineBox.focus();
+      inlineBox.click();
+      textarea = inlineBox;
+      isDialog = false;
+      await sleep(300);
+    }
   }
 
-  if (replyBtn) {
-    console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
-    await simulateHumanReplyClick(replyBtn);
-  }
-
-  // 2. Wait up to 7000ms directly for the editable textarea to mount in the modal dialog or compose view
-  textarea = await waitForElement(
-    'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[role="dialog"] div[role="textbox"][contenteditable="true"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"], div.public-DraftEditor-content',
-    7000
-  );
-
-  if (textarea) {
-    dialog = textarea.closest('div[role="dialog"], div[aria-modal="true"]') || document.querySelector('div[role="dialog"]');
-    isDialog = !!dialog;
-  }
-
-  // 3. Status page fallback ONLY: If targetArticle is the main focal tweet and no textarea was found above,
-  // look for the status page's inline reply composer directly under the main tweet
+  // 2. If no textarea mounted yet, locate and click Reply button on targetArticle
   if (!textarea) {
-    const isStatusPage = window.location.pathname.includes('/status/');
-    const mainArt = getMainPostArticle();
-    const isMainTarget = !targetArticle || targetArticle === mainArt;
+    let replyBtn = targetArticle?.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+    if (!replyBtn && !window.location.pathname.includes('/compose/post')) {
+      replyBtn = document.querySelector('button[data-testid="reply"]');
+    }
 
-    if (isStatusPage && isMainTarget) {
-      const inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"]');
-      if (inlineBox) {
-        textarea = inlineBox;
-        isDialog = false;
-      }
+    if (replyBtn) {
+      console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
+      await simulateHumanReplyClick(replyBtn);
+    }
+
+    // Wait for the editable textarea to mount in dialog, inline, or compose view
+    textarea = await waitForElement(
+      'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[role="dialog"] div[role="textbox"][contenteditable="true"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"], div.public-DraftEditor-content',
+      7000
+    );
+
+    if (textarea) {
+      dialog = textarea.closest('div[role="dialog"], div[aria-modal="true"]') || document.querySelector('div[role="dialog"]');
+      isDialog = !!dialog;
     }
   }
 
   if (!textarea) {
     console.warn('[ATOMX COMMENT ENGINE] Reply textarea not found!');
-    return { success: false, error: 'Textarea not found' };
+    return { success: false, error: 'Textarea not found on page' };
   }
 
-  // 4. Type human-like into the editor
+  // 3. Type human-like into the editor
   await typeTextHumanLike(textarea, commentText);
 
-  if (isWorkflowAborted) return { success: false, aborted: true };
+  if (isWorkflowAborted) return { success: false, aborted: true, error: 'Workflow was aborted by user' };
 
   await sleep(600);
 
@@ -853,7 +846,7 @@ function checkTwitterRateLimit() {
   const toasts = document.querySelectorAll('div[data-testid="toast"]');
   for (const t of toasts) {
     const txt = (t.textContent || '').toLowerCase();
-    if (txt.includes('rate') || txt.includes('limit') || txt.includes('try again later')) {
+    if (txt.includes('rate limit') || txt.includes('rate-limit') || txt.includes('try again later') || txt.includes('sorry, you are rate limited') || txt.includes('over capacity')) {
       return true;
     }
   }
@@ -878,6 +871,7 @@ function triggerRateLimitAbort(reason = 'Sorry, you are rate limited.') {
 // ATOMX FLOATING MINI HUD (ON-PAGE OVERLAY WIDGET)
 // =========================================================================
 let floatingHudEl = null;
+let isHudDismissedLocally = false;
 
 function ensureFloatingHud() {
   if (floatingHudEl && document.body.contains(floatingHudEl)) return floatingHudEl;
@@ -918,7 +912,8 @@ function ensureFloatingHud() {
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
         <span id="hud-indicator" style="font-size: 11px; font-weight: 600; color: #60A5FA;">Active</span>
-        <button id="hud-minimize-btn" title="Minimize" style="background: transparent; border: none; color: #94A3B8; font-size: 14px; cursor: pointer; padding: 0 4px; line-height: 1;">−</button>
+        <button id="hud-minimize-btn" title="Minimize / Expand" style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); color: #CBD5E1; font-size: 14px; font-weight: 700; border-radius: 6px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">−</button>
+        <button id="hud-close-btn" title="Close & Hide HUD (✕)" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #FCA5A5; font-size: 13px; font-weight: 800; border-radius: 6px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">✕</button>
       </div>
     </div>
 
@@ -949,10 +944,18 @@ function ensureFloatingHud() {
         Initializing agent automation...
       </div>
 
-      <!-- Action Button -->
-      <button id="hud-stop-btn" style="width: 100%; padding: 7px 0; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; color: #F87171; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;">
-        ⏹️ STOP WORKFLOW
-      </button>
+      <!-- Countdown text (shown during pacing delays) -->
+      <div id="hud-countdown-text" style="font-size: 11px; color: #10B981; font-weight: 700; font-family: monospace; display: none;"></div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <button id="hud-stop-btn" style="width: 100%; padding: 7px 0; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; color: #F87171; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;">
+          ⏹️ STOP WORKFLOW
+        </button>
+        <button id="hud-dismiss-btn" style="width: 100%; padding: 6px 0; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; color: #94A3B8; font-size: 11px; font-weight: 600; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;">
+          ✕ Dismiss / Close Widget
+        </button>
+      </div>
     </div>
   `;
 
@@ -983,6 +986,23 @@ function ensureFloatingHud() {
     const minBtn = hud.querySelector('#hud-minimize-btn');
     if (body) body.style.display = isMinimized ? 'none' : 'flex';
     if (minBtn) minBtn.textContent = isMinimized ? '+' : '−';
+  });
+
+  // Dismiss / Close HUD handler
+  const handleDismissHud = () => {
+    isHudDismissedLocally = true;
+    hud.style.display = 'none';
+    chrome.storage.local.set({ atomx_hud_dismissed: true }).catch(() => null);
+  };
+
+  hud.querySelector('#hud-close-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleDismissHud();
+  });
+
+  hud.querySelector('#hud-dismiss-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleDismissHud();
   });
 
   // Make draggable
@@ -1018,6 +1038,20 @@ function ensureFloatingHud() {
 }
 
 function updateFloatingHud(data = {}) {
+  // If explicitly requested a new workflow, or active workflow running, clear dismiss flag
+  if (data.isNewWorkflow || data.active) {
+    isHudDismissedLocally = false;
+    if (data.isNewWorkflow && typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
+    }
+  }
+
+  // If user dismissed HUD on this page instance and it's not active/forced, hide it
+  if (isHudDismissedLocally && !data.forceShow && !data.isNewWorkflow && !data.active) {
+    if (floatingHudEl) floatingHudEl.style.display = 'none';
+    return;
+  }
+
   const hud = ensureFloatingHud();
   if (!hud) return;
 
@@ -1073,11 +1107,26 @@ function updateFloatingHud(data = {}) {
       el.title = data.statusText;
     }
   }
-  if (data.isStopped) {
-    const btn = hud.querySelector('#hud-stop-btn');
-    if (btn) {
-      btn.style.display = 'none';
+  // Countdown text (pacing delay)
+  if (data.countdownText !== undefined) {
+    const cd = hud.querySelector('#hud-countdown-text');
+    if (cd) {
+      if (data.countdownText) {
+        cd.style.display = 'block';
+        cd.textContent = data.countdownText;
+      } else {
+        cd.style.display = 'none';
+      }
     }
+  }
+  const stopBtn = hud.querySelector('#hud-stop-btn');
+  const dismissBtn = hud.querySelector('#hud-dismiss-btn');
+  if (data.isStopped || data.stateBadge === 'DONE' || data.stateBadge === 'STOPPED') {
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (dismissBtn) dismissBtn.style.display = 'flex';
+  } else {
+    if (stopBtn) stopBtn.style.display = 'flex';
+    if (dismissBtn) dismissBtn.style.display = 'none';
   }
 }
 
@@ -1089,25 +1138,52 @@ function hideFloatingHud() {
 
 // Automatically sync & hydrate on-page floating HUD from chrome.storage.local
 if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-  chrome.storage.local.get(['atomx_active_hud'], (res) => {
-    if (res?.atomx_active_hud && res.atomx_active_hud.active) {
-      updateFloatingHud(res.atomx_active_hud);
+  chrome.storage.local.get(['atomx_active_hud', 'atomx_hud_dismissed'], (res) => {
+    const isDismissed = Boolean(res?.atomx_hud_dismissed);
+    const activeHud = res?.atomx_active_hud;
+
+    // If an automation is actively running, always show HUD even if previous run was dismissed
+    if (activeHud && activeHud.active) {
+      isHudDismissedLocally = false;
+      chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
+      updateFloatingHud(activeHud);
+    } else if (activeHud && (activeHud.isStopped || activeHud.stateBadge === 'DONE')) {
+      if (!isDismissed) {
+        updateFloatingHud(activeHud);
+      }
     }
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes.atomx_active_hud) {
+    if (area !== 'local') return;
+
+    if (changes.atomx_hud_dismissed) {
+      isHudDismissedLocally = Boolean(changes.atomx_hud_dismissed.newValue);
+      if (isHudDismissedLocally) {
+        hideFloatingHud();
+      }
+    }
+
+    if (changes.atomx_active_hud) {
       const val = changes.atomx_active_hud.newValue;
+
       if (val && val.active) {
+        // Active automation running: always display
+        isHudDismissedLocally = false;
         updateFloatingHud(val);
-      } else if (val && val.isStopped) {
-        updateFloatingHud(val);
+      } else if (val && (val.isStopped || val.stateBadge === 'DONE')) {
+        if (!isHudDismissedLocally) {
+          updateFloatingHud(val);
+        } else {
+          hideFloatingHud();
+        }
       } else {
         hideFloatingHud();
       }
     }
   });
 }
+
 
 async function insertIntoTwitterInput(text) {
   const editor = document.querySelector('div[data-testid="tweetTextarea_0"]') ||
@@ -1145,6 +1221,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'HIDE_FLOATING_HUD') {
+    isHudDismissedLocally = true;
     hideFloatingHud();
     sendResponse({ success: true });
     return true;

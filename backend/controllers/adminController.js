@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('../config/db');
+const supabase = require('../config/supabase');
 
 exports.getUsers = async (req, res) => {
   try {
@@ -203,30 +204,106 @@ exports.getStats = async (req, res) => {
 };
 
 const curatedPath = path.join(__dirname, '../data/curatedLists.json');
+let inMemoryCuratedLists = null;
 
-exports.getCuratedLists = (req, res) => {
+exports.getCuratedLists = async (req, res) => {
   try {
+    // 1. Return in-memory cache if available
+    if (inMemoryCuratedLists && Object.keys(inMemoryCuratedLists).length > 0) {
+      return res.json({ lists: inMemoryCuratedLists });
+    }
+
+    // 2. Fetch from Supabase cloud database
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('plans')
+          .select('features')
+          .eq('id', 'system_curated_lists')
+          .maybeSingle();
+
+        if (!error && data && data.features && typeof data.features === 'object' && Object.keys(data.features).length > 0) {
+          inMemoryCuratedLists = data.features;
+          return res.json({ lists: inMemoryCuratedLists });
+        }
+      } catch (dbErr) {
+        console.warn('⚠️ [Admin] Supabase getCuratedLists read warning:', dbErr.message);
+      }
+    }
+
+    // 3. Fallback to local JSON file
     if (fs.existsSync(curatedPath)) {
       const data = JSON.parse(fs.readFileSync(curatedPath, 'utf8'));
+      inMemoryCuratedLists = data;
       return res.json({ lists: data });
     }
+
     res.json({ lists: {} });
   } catch (err) {
+    console.error('Failed to read curated lists:', err);
     res.status(500).json({ error: 'Failed to read curated lists' });
   }
 };
 
-exports.saveCuratedLists = (req, res) => {
+exports.saveCuratedLists = async (req, res) => {
   try {
     const { lists } = req.body;
     if (!lists || typeof lists !== 'object') {
       return res.status(400).json({ error: 'Valid lists object required' });
     }
-    fs.mkdirSync(path.dirname(curatedPath), { recursive: true });
-    fs.writeFileSync(curatedPath, JSON.stringify(lists, null, 2), 'utf8');
-    res.json({ message: 'Curated lists updated successfully!', lists });
+
+    // Always update in-memory immediately
+    inMemoryCuratedLists = lists;
+
+    // 1. Persist to Supabase cloud database (survives Vercel restarts & serverless limits)
+    let persistedToCloud = false;
+    if (supabase) {
+      try {
+        const { error: upsertErr } = await supabase
+          .from('plans')
+          .upsert({
+            id: 'system_curated_lists',
+            name: 'Curated Lists Storage',
+            price_monthly: 0,
+            credits_monthly: 0,
+            is_popular: false,
+            is_active: false,
+            features: lists
+          }, { onConflict: 'id' });
+
+        if (upsertErr) {
+          console.warn('⚠️ [Admin] Supabase saveCuratedLists warning:', upsertErr.message);
+        } else {
+          persistedToCloud = true;
+          console.log('✓ [Admin] Curated lists persisted to Supabase cloud successfully');
+        }
+      } catch (dbErr) {
+        console.warn('⚠️ [Admin] Supabase saveCuratedLists exception:', dbErr.message);
+      }
+    }
+
+    // 2. Local file write (best-effort, wrapped in try/catch to avoid EROFS read-only filesystem crash on Vercel)
+    try {
+      fs.mkdirSync(path.dirname(curatedPath), { recursive: true });
+      fs.writeFileSync(curatedPath, JSON.stringify(lists, null, 2), 'utf8');
+    } catch (fsErr) {
+      // Vercel serverless /var/task is read-only; try /tmp if possible
+      try {
+        const tmpPath = path.join('/tmp', 'curatedLists.json');
+        fs.writeFileSync(tmpPath, JSON.stringify(lists, null, 2), 'utf8');
+      } catch (tmpErr) {
+        // Safe to ignore on serverless environments
+      }
+    }
+
+    return res.json({
+      message: 'Curated lists updated successfully!',
+      persistedToCloud,
+      lists
+    });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to save curated lists' });
+    console.error('Failed to save curated lists:', err);
+    res.status(500).json({ error: 'Failed to save curated lists: ' + err.message });
   }
 };
 

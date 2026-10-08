@@ -398,7 +398,7 @@ module.exports = {
   // Plans & Transactions
   async getPlans() {
     if (!supabase) return [];
-    const { data } = await supabase.from('plans').select('*');
+    const { data } = await supabase.from('plans').select('*').neq('id', 'system_curated_lists');
     return (data || []).map(p => ({
       ...p,
       features_json: JSON.stringify(p.features || [])

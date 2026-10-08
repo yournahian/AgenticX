@@ -3973,7 +3973,7 @@ async function renderAdminCuratedLists(container) {
                     <!-- Header with Title, Status & Delete -->
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                       <div style="flex:1; margin-right:10px;">
-                        <input type="text" value="${l.name}" onchange="updateListName('${k}', this.value)" class="form-input" style="font-size:15px; font-weight:700; padding:4px 8px; margin-bottom:6px; width:100%;" title="Click to rename list">
+                        <input type="text" id="listname-${k}" value="${l.name}" oninput="updateListName('${k}', this.value)" class="form-input" style="font-size:15px; font-weight:700; padding:4px 8px; margin-bottom:6px; width:100%;" title="Click to rename list">
                       </div>
                       <div style="display:flex; gap:6px; align-items:center;">
                         <button onclick="deleteCustomList('${k}')" style="background:none; border:none; color:var(--status-error); cursor:pointer; font-size:14px; padding:2px;" title="Delete List">🗑️</button>
@@ -3984,7 +3984,7 @@ async function renderAdminCuratedLists(container) {
                     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:12px; background:var(--bg-canvas); padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
                       <div>
                         <label style="font-size:9.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:2px;">ASSIGNED AGENT:</label>
-                        <select onchange="updateListCategory('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%;">
+                        <select id="listcat-${k}" onchange="updateListCategory('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%;">
                           <option value="Audience Builder" ${l.category === 'Audience Builder' ? 'selected' : ''}>Audience Builder</option>
                           <option value="Increase Sorsa Score" ${l.category === 'Increase Sorsa Score' ? 'selected' : ''}>Sorsa Score</option>
                           <option value="Followers Increase" ${l.category === 'Followers Increase' ? 'selected' : ''}>Followers Growth</option>
@@ -3992,14 +3992,14 @@ async function renderAdminCuratedLists(container) {
                       </div>
                       <div>
                         <label style="font-size:9.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:2px;">ACCESS PLAN:</label>
-                        <select onchange="updateListAccessTier('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%; font-weight:700; color:${(l.accessTier || 'free') === 'paid' ? '#f59e0b' : '#38bdf8'};">
+                        <select id="listtier-${k}" onchange="updateListAccessTier('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%; font-weight:700; color:${(l.accessTier || 'free') === 'paid' ? '#f59e0b' : '#38bdf8'};">
                           <option value="free" ${(l.accessTier || 'free') === 'free' ? 'selected' : ''}>🔓 Free (All)</option>
                           <option value="paid" ${l.accessTier === 'paid' ? 'selected' : ''}>🔒 Paid / Pro</option>
                         </select>
                       </div>
                       <div>
                         <label style="font-size:9.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:2px;">STATUS:</label>
-                        <select onchange="updateListStatus('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%; font-weight:700; color:${isPub ? 'var(--status-success)' : 'var(--status-warning)'};">
+                        <select id="liststatus-${k}" onchange="updateListStatus('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%; font-weight:700; color:${isPub ? 'var(--status-success)' : 'var(--status-warning)'};">
                           <option value="published" ${isPub ? 'selected' : ''}>🟢 Live</option>
                           <option value="draft" ${l.status === 'draft' ? 'selected' : ''}>🟡 Draft</option>
                         </select>
@@ -4103,31 +4103,69 @@ function removeTargetFromList(listKey, index) {
 
 function promptAddNewCustomList() {
   const name = prompt('Enter List Name (e.g., "Solana Ecosystem Alpha Builders"):');
-  if (!name) return;
-  const cat = prompt('Enter Category (1 for "Audience Builder", 2 for "Increase Sorsa Score"):', '1');
-  const category = cat === '2' ? 'Increase Sorsa Score' : 'Audience Builder';
+  if (!name || !name.trim()) return;
+  const cat = prompt('Enter Category:\n1 = Audience Builder\n2 = Increase Sorsa Score\n3 = Followers Increase', '1');
+  let category = 'Audience Builder';
+  if (cat === '2') category = 'Increase Sorsa Score';
+  else if (cat === '3') category = 'Followers Increase';
+  
   const listUrl = prompt('Enter Twitter/X List URL (optional, leave blank to use target handles):', '') || '';
   const newKey = 'custom_' + Date.now();
 
+  if (!AtomXState.curatedLists) AtomXState.curatedLists = {};
   AtomXState.curatedLists[newKey] = {
     id: newKey,
-    name: name,
+    name: name.trim(),
     category: category,
-    description: `Custom curated list for ${category}.`,
+    status: 'published',
+    accessTier: 'free',
+    description: `Curated target list for ${category}.`,
     listUrl: listUrl.trim(),
     targets: []
   };
 
   renderAdminCuratedLists(document.getElementById('mainContentArea'));
-  showToast(`✓ Created new list: ${name}`);
+  showToast(`✓ Created new list: ${name.trim()}`);
 }
 
 async function saveCuratedListsToServer() {
-  // Sync all on-screen listUrl inputs
+  if (!AtomXState.curatedLists || typeof AtomXState.curatedLists !== 'object') {
+    AtomXState.curatedLists = {};
+  }
+
+  // Synchronously sync all on-screen inputs directly from the DOM before sending
   Object.keys(AtomXState.curatedLists).forEach(k => {
-    const inp = document.getElementById(`listurl-${k}`);
-    if (inp) {
-      AtomXState.curatedLists[k].listUrl = inp.value.trim();
+    const item = AtomXState.curatedLists[k];
+    if (!item) return;
+
+    const nameInp = document.getElementById(`listname-${k}`);
+    if (nameInp && nameInp.value.trim()) {
+      item.name = nameInp.value.trim();
+    }
+    const catInp = document.getElementById(`listcat-${k}`);
+    if (catInp && catInp.value) {
+      item.category = catInp.value;
+    }
+    const tierInp = document.getElementById(`listtier-${k}`);
+    if (tierInp && tierInp.value) {
+      item.accessTier = tierInp.value;
+    }
+    const statusInp = document.getElementById(`liststatus-${k}`);
+    if (statusInp && statusInp.value) {
+      item.status = statusInp.value;
+    }
+    const urlInp = document.getElementById(`listurl-${k}`);
+    if (urlInp) {
+      item.listUrl = urlInp.value.trim();
+    }
+    if (!item.status) {
+      item.status = 'published';
+    }
+    if (!item.accessTier) {
+      item.accessTier = 'free';
+    }
+    if (!Array.isArray(item.targets)) {
+      item.targets = [];
     }
   });
 
@@ -4137,15 +4175,28 @@ async function saveCuratedListsToServer() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lists: AtomXState.curatedLists })
     });
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
+      if (data && data.lists) {
+        AtomXState.curatedLists = data.lists;
+      }
       showToast('✓ Curated lists successfully saved and broadcasted to all extensions!');
       alert('✓ Curated lists successfully saved and broadcasted to all user extensions!');
-      return;
+      renderAdminCuratedLists(document.getElementById('mainContentArea'));
+      return true;
+    } else {
+      const errMsg = data?.error || res.statusText || 'Server error';
+      console.error('Failed to save curated lists:', errMsg);
+      showToast('⚠️ Save failed: ' + errMsg);
+      alert('⚠️ Failed to save curated lists to server:\n' + errMsg);
+      return false;
     }
   } catch (e) {
-    console.warn('Could not post to backend, saved in memory', e);
+    console.error('Network error saving curated lists:', e);
+    showToast('⚠️ Network error while saving lists: ' + e.message);
+    alert('⚠️ Network error while saving lists: ' + e.message);
+    return false;
   }
-  showToast('✓ Lists updated in memory and ready for broadcast.');
 }
 
 // -------------------------------------------------------------

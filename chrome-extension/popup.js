@@ -5,6 +5,18 @@
 
 const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
+function safeRemoveTab(tabId) {
+  if (typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0) {
+    try {
+      chrome.tabs.remove(tabId, () => {
+        if (chrome.runtime?.lastError) { /* ignore silently */ }
+      });
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
 let state = {
   credits: 0,
   isAborted: false,
@@ -74,12 +86,15 @@ let followerWorkingTabId = null;
 let replyBackWorkingTabId = null;
 let autoUnfollowWorkingTabId = null;
 let reciprocatorWorkingTabId = null;
+let tgWorkingTabId = null; // Telegram Group Engage working tab
 
-// Real-time synchronization helper for on-page Floating Mini HUD & Detached Mini Window
 async function syncFloatingHud(tabId, data = {}) {
   // 1. Save state to chrome.storage.local so all tabs hydrate it immediately
   try {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      if (!data.isStopped) {
+        await chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
+      }
       const stored = await chrome.storage.local.get(['atomx_active_hud']).catch(() => ({}));
       const current = stored?.atomx_active_hud || {};
       const merged = { ...current, ...data, active: !data.isStopped };
@@ -90,11 +105,12 @@ async function syncFloatingHud(tabId, data = {}) {
   // 2. Broadcast UPDATE_FLOATING_HUD to active tab and all Twitter/X tabs
   if (typeof chrome !== 'undefined' && chrome.tabs) {
     try {
+      const payload = { ...data, active: !data.isStopped };
       const tabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }).catch(() => []);
       for (const t of tabs) {
         chrome.tabs.sendMessage(t.id, {
           type: 'UPDATE_FLOATING_HUD',
-          data
+          data: payload
         }).catch(() => null);
       }
       const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
@@ -388,6 +404,188 @@ if (typeof window !== 'undefined') {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TELEGRAM & AGENT BACKGROUND WORKFLOW SYNCHRONIZATION
+// Keeps popup trackers 100% in sync with background execution & survives closes
+// ─────────────────────────────────────────────────────────────────────────────
+
+function updateTelegramProgressUI(raidState) {
+  if (!raidState) return;
+  const progressCard = document.getElementById('tgProgressCard');
+  const tgStateBadge = document.getElementById('tgStateBadge');
+  const tgQueueInd   = document.getElementById('tgQueueIndicator');
+  const tgDoneEl     = document.getElementById('tgDoneCount');
+  const tgColEl      = document.getElementById('tgCollectedCount');
+  const tgSkipEl     = document.getElementById('tgSkippedCount');
+  const tgBar        = document.getElementById('tgProgressBar');
+  const tgStatus     = document.getElementById('tgLiveStatusText');
+  const tgCountdown  = document.getElementById('tgCountdownText');
+  const runBtn       = document.getElementById('runTgEngageBtn');
+  const stopBtn      = document.getElementById('stopTgEngageBtn');
+
+  if (progressCard) progressCard.style.display = 'block';
+
+  const total = raidState.total || raidState.tweets?.length || 0;
+  const current = raidState.currentIndex || 0;
+  const done = raidState.successCount || 0;
+  const skipped = raidState.ignoredCount || 0;
+
+  if (tgQueueInd) tgQueueInd.textContent = `Tweet ${Math.min(current + 1, total)}/${total}`;
+  if (tgDoneEl) tgDoneEl.textContent = String(done);
+  if (tgColEl) tgColEl.textContent = String(total);
+  if (tgSkipEl) tgSkipEl.textContent = String(skipped);
+
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  if (tgBar) tgBar.style.width = `${raidState.active ? Math.max(5, pct) : (done + skipped >= total ? 100 : pct)}%`;
+
+  if (raidState.active) {
+    if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
+    if (stopBtn) stopBtn.style.display = 'inline-block';
+    if (tgStateBadge) tgStateBadge.textContent = raidState.stateBadge || 'ENGAGING';
+    if (tgStatus && raidState.statusText) tgStatus.textContent = raidState.statusText;
+    if (tgCountdown) {
+      if (raidState.countdownText) {
+        tgCountdown.style.display = 'block';
+        tgCountdown.textContent = raidState.countdownText;
+      } else {
+        tgCountdown.style.display = 'none';
+      }
+    }
+  } else if (raidState.isStopped) {
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (tgStateBadge) tgStateBadge.textContent = 'STOPPED';
+    if (tgStatus) tgStatus.textContent = raidState.statusText || 'Workflow stopped by user.';
+    if (tgCountdown) tgCountdown.style.display = 'none';
+  } else if (done + skipped >= total && total > 0) {
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (tgStateBadge) tgStateBadge.textContent = 'DONE';
+    if (tgStatus) tgStatus.textContent = `✓ Completed! ${done} engaged, ${skipped} skipped.`;
+    if (tgCountdown) tgCountdown.style.display = 'none';
+    if (tgBar) tgBar.style.width = '100%';
+  }
+}
+
+function updateAgentWorkflowProgressUI(wf) {
+  if (!wf || !wf.agentId) return;
+  const cardMap = {
+    audience: {
+      card: 'audienceProgressCard', badge: 'audienceStateBadge', ind: 'audienceQueueIndicator',
+      done: 'audienceDoneCount', col: 'audienceCollectedCount', skip: 'audienceSkippedCount',
+      bar: 'audienceProgressBar', status: 'audienceLiveStatusText', cd: 'audienceCountdownText',
+      startBtn: 'runAudienceBuilderBtn', stopBtn: 'stopAudienceBuilderBtn'
+    },
+    sorsa: {
+      card: 'sorsaProgressCard', badge: 'sorsaStateBadge', ind: 'sorsaQueueIndicator',
+      done: 'sorsaDoneCount', col: 'sorsaCollectedCount', skip: 'sorsaSkippedCount',
+      bar: 'sorsaProgressBar', status: 'sorsaLiveStatusText', cd: 'sorsaCountdownText',
+      startBtn: 'runSorsaBoosterBtn', stopBtn: 'stopSorsaBoosterBtn'
+    },
+    followers: {
+      card: 'followerProgressCard', badge: 'followerStateBadge', ind: 'followerQueueIndicator',
+      done: 'followerDoneCount', col: 'followerCollectedCount', skip: 'followerSkippedCount',
+      bar: 'followerProgressBar', status: 'followerLiveStatusText', cd: 'followerCountdownText',
+      startBtn: 'runFollowerIncreaseBtn', stopBtn: 'stopFollowerIncreaseBtn'
+    },
+    replyback: {
+      card: 'replyBackProgressCard', badge: 'replyBackStateBadge', ind: 'replyBackQueueIndicator',
+      done: 'replyBackDoneCount', col: 'replyBackCollectedCount', skip: 'replyBackSkippedCount',
+      bar: 'replyBackProgressBar', status: 'replyBackLiveStatusText', cd: 'replyBackCountdownText',
+      startBtn: 'runReplyBackBtn', stopBtn: 'stopReplyBackBtn'
+    },
+    reciprocator: {
+      card: 'reciprocatorProgressCard', badge: 'reciprocatorStateBadge', ind: 'reciprocatorQueueIndicator',
+      done: 'reciprocatorDoneCount', col: 'reciprocatorCollectedCount', skip: 'reciprocatorSkippedCount',
+      bar: 'reciprocatorProgressBar', status: 'reciprocatorLiveStatusText', cd: 'reciprocatorCountdownText',
+      startBtn: 'runReciprocatorBtn', stopBtn: 'stopReciprocatorBtn'
+    }
+  };
+
+  const map = cardMap[wf.agentId];
+  if (!map) return;
+
+  const card = document.getElementById(map.card);
+  const badge = document.getElementById(map.badge);
+  const ind = document.getElementById(map.ind);
+  const doneEl = document.getElementById(map.done);
+  const colEl = document.getElementById(map.col);
+  const skipEl = document.getElementById(map.skip);
+  const bar = document.getElementById(map.bar);
+  const status = document.getElementById(map.status);
+  const cd = document.getElementById(map.cd);
+  const startBtn = document.getElementById(map.startBtn);
+  const stopBtn = document.getElementById(map.stopBtn);
+
+  if (card) card.style.display = 'block';
+
+  const total = wf.total || wf.items?.length || 0;
+  const current = wf.currentIndex || 0;
+  const done = wf.successCount || 0;
+  const skipped = wf.ignoredCount || 0;
+
+  if (ind) ind.textContent = `${wf.agentId === 'replyback' ? 'Reply' : (wf.agentId === 'sorsa' ? 'Account' : 'Profile')} ${Math.min(current + 1, total)}/${total}`;
+  if (doneEl) doneEl.textContent = String(done);
+  if (colEl) colEl.textContent = String(total);
+  if (skipEl) skipEl.textContent = String(skipped);
+
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  if (bar) bar.style.width = `${wf.active ? Math.max(5, pct) : (done + skipped >= total ? 100 : pct)}%`;
+
+  if (wf.active) {
+    if (startBtn) startBtn.style.display = 'none';
+    if (stopBtn) stopBtn.style.display = 'inline-block';
+    if (badge) badge.textContent = wf.stateBadge || 'RUNNING';
+    if (status && wf.statusText) status.textContent = wf.statusText;
+    if (cd) {
+      if (wf.countdownText) {
+        cd.style.display = 'block';
+        cd.textContent = wf.countdownText;
+      } else {
+        cd.style.display = 'none';
+      }
+    }
+  } else if (wf.isStopped) {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (badge) badge.textContent = 'STOPPED';
+    if (status) status.textContent = wf.statusText || 'Workflow stopped by user.';
+    if (cd) cd.style.display = 'none';
+  } else if (done + skipped >= total && total > 0) {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (badge) badge.textContent = 'DONE';
+    if (status) status.textContent = `✓ Completed! ${done} processed, ${skipped} skipped.`;
+    if (cd) cd.style.display = 'none';
+    if (bar) bar.style.width = '100%';
+  }
+}
+
+function initBackgroundWorkflowSync() {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+
+  // Hydrate current state on popup open
+  chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow'], (res) => {
+    if (res?.atomx_tg_raid && (res.atomx_tg_raid.active || res.atomx_tg_raid.currentIndex > 0)) {
+      updateTelegramProgressUI(res.atomx_tg_raid);
+    }
+    if (res?.atomx_agent_workflow && (res.atomx_agent_workflow.active || res.atomx_agent_workflow.currentIndex > 0)) {
+      updateAgentWorkflowProgressUI(res.atomx_agent_workflow);
+    }
+  });
+
+  // Listen to background updates in real-time
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.atomx_tg_raid && changes.atomx_tg_raid.newValue) {
+      updateTelegramProgressUI(changes.atomx_tg_raid.newValue);
+    }
+    if (changes.atomx_agent_workflow && changes.atomx_agent_workflow.newValue) {
+      updateAgentWorkflowProgressUI(changes.atomx_agent_workflow.newValue);
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     chrome.storage.local.set({ backendUrl: DEFAULT_BACKEND_URL });
@@ -397,6 +595,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTabs();
   initListeners();
   initAgentListeners();
+  initBackgroundWorkflowSync();
 
   // Instant render path from cache (0 delay)
   await Promise.all([
@@ -1052,18 +1251,86 @@ function initAgentListeners() {
     }
 
     const runBtn = document.getElementById('runTgEngageBtn');
-    if (runBtn) {
-      runBtn.disabled = true;
-      runBtn.textContent = '⏳ Autonomous Raid Running...';
-    }
+    const stopBtn = document.getElementById('stopTgEngageBtn');
+    const progressCard = document.getElementById('tgProgressCard');
+    const tgStateBadge = document.getElementById('tgStateBadge');
+    const tgQueueInd = document.getElementById('tgQueueIndicator');
+    const tgDoneEl = document.getElementById('tgDoneCount');
+    const tgColEl = document.getElementById('tgCollectedCount');
+    const tgSkipEl = document.getElementById('tgSkippedCount');
+    const tgBar = document.getElementById('tgProgressBar');
+    const tgStatus = document.getElementById('tgLiveStatusText');
+    const tgCountdown = document.getElementById('tgCountdownText');
 
-    // Launch Autonomous Engagement Loop across all links
-    executeAutonomousRaidWorkflow(filtered.freshTweets, actions).finally(() => {
-      if (runBtn) {
-        runBtn.disabled = false;
-        runBtn.textContent = '▶ Launch Auto Engage';
+    if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
+    if (stopBtn) stopBtn.style.display = 'inline-block';
+    if (progressCard) progressCard.style.display = 'block';
+    if (tgStateBadge) tgStateBadge.textContent = 'ENGAGING';
+    if (tgQueueInd) tgQueueInd.textContent = `Tweet 0/${filtered.freshCount}`;
+    if (tgDoneEl) tgDoneEl.textContent = '0';
+    if (tgColEl) tgColEl.textContent = String(filtered.freshCount);
+    if (tgSkipEl) tgSkipEl.textContent = '0';
+    if (tgBar) tgBar.style.width = '5%';
+    if (tgStatus) tgStatus.textContent = 'Starting Telegram Raid engagement...';
+    if (tgCountdown) tgCountdown.style.display = 'none';
+
+    // Mark workflow as running (for pagehide mini-hud auto-open)
+    state.isWorkflowRunning = true;
+
+    // Delegate to background service worker — continues even after popup closes
+    chrome.runtime.sendMessage({
+      type: 'BG_START_TG_RAID',
+      tweets: filtered.freshTweets,
+      actions,
+      options: {
+        delaySeconds: state.delaySeconds || 7,
+        style: state.selectedTone,
+        stylePrompt: state.selectedTonePrompt,
+        verifiedXHandle: state.verifiedXHandle || '',
+        backendUrl: await getBackendUrl()
+      }
+    }, (res) => {
+      if (chrome.runtime?.lastError || !res?.ok) {
+        // Background relay failed — fall back to popup-based execution
+        executeAutonomousRaidWorkflow(filtered.freshTweets, actions).finally(() => {
+          if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+          if (stopBtn) stopBtn.style.display = 'none';
+          state.isWorkflowRunning = false;
+        });
       }
     });
+  });
+
+  // Stop button for Telegram Group Engage
+  document.getElementById('stopTgEngageBtn')?.addEventListener('click', () => {
+    state.isAborted = true;
+    state.isWorkflowRunning = false;
+    // Tell background to abort
+    chrome.runtime.sendMessage({ type: 'BG_ABORT_TG_RAID' }).catch(() => null);
+    // Also abort any local running instance
+    if (tgWorkingTabId) {
+      chrome.tabs.sendMessage(tgWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      safeRemoveTab(tgWorkingTabId);
+      tgWorkingTabId = null;
+    }
+    syncFloatingHud(null, {
+      title: 'Telegram Group Engage',
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      isStopped: true
+    });
+    const runBtn = document.getElementById('runTgEngageBtn');
+    const stopBtn = document.getElementById('stopTgEngageBtn');
+    const tgStateBadge = document.getElementById('tgStateBadge');
+    const tgStatus = document.getElementById('tgLiveStatusText');
+    const tgCountdown = document.getElementById('tgCountdownText');
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (tgStateBadge) tgStateBadge.textContent = 'STOPPED';
+    if (tgStatus) tgStatus.textContent = 'Workflow stopped by user.';
+    if (tgCountdown) tgCountdown.style.display = 'none';
+    setAutomationRunningUI(false);
+    showExtToast('Telegram Engage Stopped', '⏹');
   });
 
   // Agent 2: Audience Builder (A2, Growth, Fully Auto)
@@ -1079,6 +1346,7 @@ function initAgentListeners() {
   document.getElementById('stopAudienceBuilderBtn')?.addEventListener('click', () => {
     state.isAborted = true;
     state.isWorkflowRunning = false;
+    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
     syncFloatingHud(null, {
       title: 'Audience Builder',
       stateBadge: 'STOPPED',
@@ -1087,7 +1355,7 @@ function initAgentListeners() {
     });
     if (audienceWorkingTabId) {
       chrome.tabs.sendMessage(audienceWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-      chrome.tabs.remove(audienceWorkingTabId).catch(() => null);
+      safeRemoveTab(audienceWorkingTabId);
       audienceWorkingTabId = null;
     }
     updateAgentConsole('⏹️ Stopped', 'Audience Builder stopped by user.');
@@ -1137,6 +1405,7 @@ function initAgentListeners() {
   document.getElementById('stopSorsaBoosterBtn')?.addEventListener('click', () => {
     state.isAborted = true;
     state.isWorkflowRunning = false;
+    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
     syncFloatingHud(null, {
       title: 'Sorsa Booster',
       stateBadge: 'STOPPED',
@@ -1145,7 +1414,7 @@ function initAgentListeners() {
     });
     if (sorsaWorkingTabId) {
       chrome.tabs.sendMessage(sorsaWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-      chrome.tabs.remove(sorsaWorkingTabId).catch(() => null);
+      safeRemoveTab(sorsaWorkingTabId);
       sorsaWorkingTabId = null;
     }
     updateAgentConsole('⏹️ Stopped', 'Sorsa Booster stopped by user.');
@@ -1169,6 +1438,7 @@ function initAgentListeners() {
   document.getElementById('stopFollowerIncreaseBtn')?.addEventListener('click', () => {
     state.isAborted = true;
     state.isWorkflowRunning = false;
+    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
     syncFloatingHud(null, {
       title: 'Followers Growth',
       stateBadge: 'STOPPED',
@@ -1177,7 +1447,7 @@ function initAgentListeners() {
     });
     if (followerWorkingTabId) {
       chrome.tabs.sendMessage(followerWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-      chrome.tabs.remove(followerWorkingTabId).catch(() => null);
+      safeRemoveTab(followerWorkingTabId);
       followerWorkingTabId = null;
     }
     updateAgentConsole('⏹️ Stopped', 'Follower Growth stopped by user.');
@@ -1265,6 +1535,7 @@ function initAgentListeners() {
   document.getElementById('stopReplyBackBtn')?.addEventListener('click', () => {
     state.isAborted = true;
     state.isWorkflowRunning = false;
+    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
     syncFloatingHud(null, {
       title: 'Reply Back Loop',
       stateBadge: 'STOPPED',
@@ -1273,7 +1544,7 @@ function initAgentListeners() {
     });
     if (replyBackWorkingTabId) {
       chrome.tabs.sendMessage(replyBackWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-      chrome.tabs.remove(replyBackWorkingTabId).catch(() => null);
+      safeRemoveTab(replyBackWorkingTabId);
       replyBackWorkingTabId = null;
     }
     updateAgentConsole('⏹️ Stopped', 'Reply Back loop stopped by user.');
@@ -1299,7 +1570,7 @@ function initAgentListeners() {
     state.isAborted = true;
     if (autoUnfollowWorkingTabId) {
       chrome.tabs.sendMessage(autoUnfollowWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-      chrome.tabs.remove(autoUnfollowWorkingTabId).catch(() => null);
+      safeRemoveTab(autoUnfollowWorkingTabId);
       autoUnfollowWorkingTabId = null;
     }
     updateAgentConsole('⏹️ Stopped', 'Auto Unfollow stopped by user.');
@@ -1411,9 +1682,11 @@ function initAgentListeners() {
   document.getElementById('runReciprocatorBtn')?.addEventListener('click', startCommenterReciprocatorWorkflow);
   document.getElementById('stopReciprocatorBtn')?.addEventListener('click', () => {
     state.isAborted = true;
+    state.isWorkflowRunning = false;
+    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
     if (reciprocatorWorkingTabId) {
       chrome.tabs.sendMessage(reciprocatorWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-      chrome.tabs.remove(reciprocatorWorkingTabId).catch(() => null);
+      safeRemoveTab(reciprocatorWorkingTabId);
       reciprocatorWorkingTabId = null;
     }
     updateAgentConsole('⏹️ Stopped', 'Commenter Reciprocator stopped by user.');
@@ -1538,7 +1811,7 @@ async function startDefaulterAuditWorkflow() {
       chrome.tabs.sendMessage(tab.id, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, (res) => resolve(res || { success: false, commenters: [] }));
     });
 
-    try { await chrome.tabs.remove(tab.id); } catch (e) { }
+    safeRemoveTab(tab?.id);
     defaulterActiveTabId = null;
 
     if (state.isAborted) {
@@ -1597,7 +1870,7 @@ async function startDefaulterAuditWorkflow() {
     console.error('Defaulter audit error:', err);
     if (heading) heading.textContent = 'Audit Failed: ' + (err.message || 'Error');
     if (defaulterActiveTabId) {
-      try { await chrome.tabs.remove(defaulterActiveTabId); } catch (e) { }
+      safeRemoveTab(defaulterActiveTabId);
       defaulterActiveTabId = null;
     }
   } finally {
@@ -1609,7 +1882,7 @@ async function startDefaulterAuditWorkflow() {
 function stopDefaulterAuditWorkflow() {
   state.isAborted = true;
   if (defaulterActiveTabId) {
-    try { chrome.tabs.remove(defaulterActiveTabId); } catch (e) { }
+    safeRemoveTab(defaulterActiveTabId);
     defaulterActiveTabId = null;
   }
   const startBtn = document.getElementById('startDefaulterAuditBtn');
@@ -1798,177 +2071,48 @@ async function startCommenterReciprocatorWorkflow() {
   const countdownEl = document.getElementById('reciprocatorCountdownText');
 
   state.isAborted = false;
+  state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
 
-  if (stateBadge) stateBadge.textContent = 'COLLECTING_COMMENTERS';
+  if (stateBadge) stateBadge.textContent = 'SCANNING';
   if (doneEl) doneEl.textContent = '0';
-  if (queueEl) queueEl.textContent = '0';
+  if (queueEl) queueEl.textContent = String(maxCount);
   if (skipEl) skipEl.textContent = '0';
-  if (barEl) barEl.style.width = '0%';
+  if (barEl) barEl.style.width = '5%';
   if (countdownEl) countdownEl.style.display = 'none';
-  if (queueIndicator) queueIndicator.textContent = 'Commenter 0/0';
+  if (queueIndicator) queueIndicator.textContent = `Commenter 0/${maxCount}`;
+  if (statusText) statusText.textContent = `Accessing post: ${postUrl}... Scanning commenters.`;
 
-  let doneCount = 0;
-  let skippedCount = 0;
-  let shouldCloseWorkingTab = false;
+  syncFloatingHud(null, {
+    title: 'Commenter Reciprocator',
+    stateBadge: 'SCANNING',
+    indicator: `Commenter 0/${maxCount}`,
+    done: 0,
+    collected: maxCount,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: `Accessing post to scan commenters...`
+  });
 
-  // Load persisted reciprocated accounts to avoid duplicate runs
-  let persistedReciprocated = [];
-  try {
-    const stored = await chrome.storage.local.get(['atomx_reciprocated_commenters']).catch(() => ({}));
-    if (Array.isArray(stored?.atomx_reciprocated_commenters)) persistedReciprocated = stored.atomx_reciprocated_commenters;
-  } catch (e) {}
-  const reciprocatedSet = new Set(persistedReciprocated.map(h => h.toLowerCase()));
-
-  try {
-    // Phase 1: Open post and collect commenters list
-    if (statusText) statusText.textContent = `Opening post: ${postUrl}... Collecting commenters.`;
-    updateAgentConsole('Scanning Commenters', `Accessing post: ${postUrl}`);
-
-    const tab = await chrome.tabs.create({ url: postUrl, active: false });
-    reciprocatorWorkingTabId = tab.id;
-    shouldCloseWorkingTab = true;
-    await waitForTabComplete(reciprocatorWorkingTabId);
-    await sleep(3000);
-
-    if (state.isAborted) return;
-
-    if (statusText) statusText.textContent = `Scanning all comments on your post to build queue...`;
-    const scanResult = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(reciprocatorWorkingTabId, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, (res) => resolve(res || { success: false, commenters: [] }));
-    });
-
-    if (state.isAborted) return;
-
-    const rawCommenters = Array.isArray(scanResult?.commenters) ? scanResult.commenters : [];
-    const mainAuthor = (scanResult?.mainAuthor || '').toLowerCase();
-    const myHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').toLowerCase();
-
-    // Filter out self and deduplicate
-    const uniqueCommenters = [];
-    const seenHandles = new Set();
-
-    for (const raw of rawCommenters) {
-      const clean = raw.toLowerCase().trim();
-      if (!clean || clean === mainAuthor || clean === myHandle || seenHandles.has(clean)) continue;
-      if (reciprocatedSet.has(clean)) continue;
-
-      seenHandles.add(clean);
-      uniqueCommenters.push(clean);
-      if (uniqueCommenters.length >= maxCount) break;
+  // Delegate immediately to background service worker — survives extension popup closing!
+  const backendUrl = await getBackendUrl();
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'reciprocator',
+    title: 'Commenter Reciprocator',
+    items: [],
+    options: {
+      postUrl,
+      maxCount,
+      delaySec,
+      likeRecent: optLike,
+      commentRecent: true,
+      style: tone,
+      backendUrl
     }
-
-    if (uniqueCommenters.length === 0) {
-      alert(`⚠️ No new commenters found on this post!\n\n• Scanned ${rawCommenters.length} comments.\n• Either all commenters were already engaged, or no comments exist.`);
-      return;
-    }
-
-    const totalInQueue = uniqueCommenters.length;
-    if (queueEl) queueEl.textContent = totalInQueue;
-    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
-    if (statusText) statusText.textContent = `Queue ready! Found ${totalInQueue} unique commenters to reciprocate. Starting profile loop...`;
-    await sleep(1500);
-
-    const backendUrl = await getBackendUrl();
-
-    // Phase 2: Per-Commenter Loop
-    for (let i = 0; i < totalInQueue; i++) {
-      if (state.isAborted) break;
-
-      const commenterHandle = uniqueCommenters[i];
-      const progPercent = Math.round(((i + 1) / totalInQueue) * 100);
-      if (barEl) barEl.style.width = `${progPercent}%`;
-      if (queueIndicator) queueIndicator.textContent = `Commenter ${i + 1}/${totalInQueue}`;
-
-      if (stateBadge) stateBadge.textContent = 'VISITING_PROFILE';
-      if (statusText) statusText.textContent = `[${i + 1}/${totalInQueue}] Visiting @${commenterHandle}'s profile...`;
-
-      try {
-        await chrome.tabs.update(reciprocatorWorkingTabId, { url: `https://x.com/${commenterHandle}` });
-        await waitForTabComplete(reciprocatorWorkingTabId);
-        await sleep(2200);
-
-        if (state.isAborted) break;
-
-        if (stateBadge) stateBadge.textContent = 'READING_POST';
-        if (statusText) statusText.textContent = `Scanning recent post & generating contextual AI reply for @${commenterHandle}...`;
-
-        const engageRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(reciprocatorWorkingTabId, {
-            type: 'RECIPROCAL_PROFILE_ENGAGEMENT',
-            handle: commenterHandle,
-            likePost: optLike,
-            followUser: optFollow,
-            style: tone,
-            stylePrompt: state.selectedTonePrompt,
-            backendUrl,
-            verifiedXHandle: state.verifiedXHandle
-          }, (res) => resolve(res || { success: false, error: 'No response' }));
-        });
-
-        if (engageRes?.success && engageRes.replyDone) {
-          doneCount++;
-          if (doneEl) doneEl.textContent = doneCount;
-          if (stateBadge) stateBadge.textContent = 'CONFIRMING';
-
-          // Deduct 1 credit per successfully posted reply
-          deductCredits(1);
-
-          reciprocatedSet.add(commenterHandle.toLowerCase());
-          persistedReciprocated.push(commenterHandle);
-          chrome.storage.local.set({ atomx_reciprocated_commenters: persistedReciprocated }).catch(() => null);
-
-          if (statusText) statusText.textContent = `✓ Reciprocated with @${commenterHandle}! Reply: "${(engageRes.replyText || '').slice(0, 30)}..."`;
-        } else {
-          skippedCount++;
-          if (skipEl) skipEl.textContent = skippedCount;
-          if (statusText) statusText.textContent = `Skipped @${commenterHandle} (${engageRes?.reason || engageRes?.error || 'No recent post'}).`;
-        }
-      } catch (cErr) {
-        console.warn(`Error on commenter @${commenterHandle}:`, cErr);
-        skippedCount++;
-        if (skipEl) skipEl.textContent = skippedCount;
-      }
-
-      // Phase 3: Pacing Delay between profiles
-      if (i < totalInQueue - 1 && !state.isAborted) {
-        if (stateBadge) stateBadge.textContent = 'PACING_DELAY';
-        if (countdownEl) countdownEl.style.display = 'inline-block';
-        for (let s = delaySec; s > 0; s--) {
-          if (state.isAborted) break;
-          const pad = s < 10 ? '0' + s : s;
-          if (countdownEl) countdownEl.textContent = `Next commenter in 0:${pad}`;
-          await sleep(1000);
-        }
-        if (countdownEl) countdownEl.style.display = 'none';
-      }
-    }
-
-    if (!state.isAborted) {
-      if (stateBadge) stateBadge.textContent = 'DONE';
-      if (barEl) barEl.style.width = '100%';
-      if (countdownEl) countdownEl.style.display = 'none';
-      if (statusText) statusText.textContent = `✓ Reciprocal loop complete! Commented: ${doneCount}, Skipped: ${skippedCount}.`;
-      alert(`🤝 Reciprocal Commenting Finished!\n\n• Target Commenters: ${totalInQueue}\n• Successfully Commented Back: ${doneCount}\n• Skipped (No post / Protected): ${skippedCount}\n• Cost: ${doneCount} Credit(s)\n\nEngaged your community with contextual AI replies!`);
-    } else {
-      if (stateBadge) stateBadge.textContent = 'STOPPED';
-      if (statusText) statusText.textContent = 'Workflow stopped by user.';
-    }
-  } catch (err) {
-    console.error('Commenter Reciprocator error:', err);
-    if (stateBadge) stateBadge.textContent = 'FAILED';
-    alert('Reciprocator error: ' + err.message);
-  } finally {
-    if (startBtn) startBtn.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && reciprocatorWorkingTabId) {
-      chrome.tabs?.remove(reciprocatorWorkingTabId).catch(() => null);
-    }
-    reciprocatorWorkingTabId = null;
-  }
+  });
 }
 
 // =========================================================================
@@ -1990,7 +2134,12 @@ const FALLBACK_CURATED_LISTS = {
     status: 'published',
     accessTier: 'free',
     listUrl: '',
-    targets: ['@vitalikbuterin', '@sassal0x', '@cobie', '@inversebrah', '@brian_armstrong', '@zachxbt', '@balajis']
+    targets: [
+      '@vitalikbuterin', '@sassal0x', '@cobie', '@inversebrah', '@brian_armstrong',
+      '@zachxbt', '@balajis', '@cz_binance', '@aeyakovenko', '@staniKulechov',
+      '@haydenzadams', '@sreeramkannan', '@shawmakesmagic', '@mertmumtaz',
+      '@hosseeb', '@ercwl', '@danrobinson', '@hasufl', '@bantg', '@Rewkang'
+    ]
   },
   audienceList2: {
     id: 'audienceList2',
@@ -1999,7 +2148,12 @@ const FALLBACK_CURATED_LISTS = {
     status: 'published',
     accessTier: 'paid',
     listUrl: '',
-    targets: ['@elonmusk', '@sama', '@paulg', '@balajis', '@brian_armstrong']
+    targets: [
+      '@elonmusk', '@sama', '@paulg', '@balajis', '@brian_armstrong',
+      '@naval', '@pmarca', '@garrytan', '@levie', '@satyanadella',
+      '@sundarpichai', '@shl', '@levelsio', '@tobi', '@dharmesh',
+      '@cdixon', '@jason', '@rabois', '@alexisohanian', '@Austen'
+    ]
   },
   sorsaTier1: {
     id: 'sorsaTier1',
@@ -2008,7 +2162,12 @@ const FALLBACK_CURATED_LISTS = {
     status: 'published',
     accessTier: 'paid',
     listUrl: '',
-    targets: ['@cz_binance', '@brian_armstrong', '@aeyakovenko', '@staniKulechov', '@haydenzadams']
+    targets: [
+      '@cz_binance', '@brian_armstrong', '@aeyakovenko', '@staniKulechov', '@haydenzadams',
+      '@vitalikbuterin', '@balajis', '@mertmumtaz', '@sreeramkannan', '@shawmakesmagic',
+      '@sassal0x', '@cobie', '@inversebrah', '@zachxbt', '@hosseeb',
+      '@ercwl', '@hasufl', '@danrobinson', '@bantg', '@Rewkang'
+    ]
   },
   sorsaTier2: {
     id: 'sorsaTier2',
@@ -2017,7 +2176,12 @@ const FALLBACK_CURATED_LISTS = {
     status: 'published',
     accessTier: 'free',
     listUrl: '',
-    targets: ['@ethereum', '@solana', '@base', '@arbitrum', '@ton_blockchain']
+    targets: [
+      '@ethereum', '@solana', '@base', '@arbitrum', '@ton_blockchain',
+      '@optimism', '@polygon', '@avalancheavax', '@binance', '@coinbase',
+      '@uniswap', '@aave', '@chainlink', '@monad_xyz', '@berachain',
+      '@eigenlayer', '@hyperliquidX', '@JupiterExchange', '@RaydiumProtocol'
+    ]
   },
   followerList1: {
     id: 'followerList1',
@@ -2026,7 +2190,12 @@ const FALLBACK_CURATED_LISTS = {
     status: 'published',
     accessTier: 'free',
     listUrl: '',
-    targets: ['@CryptoTownHall', '@web3comm', '@SolanaDaily', '@VitalikButerin']
+    targets: [
+      '@CryptoTownHall', '@web3comm', '@SolanaDaily', '@VitalikButerin',
+      '@cz_binance', '@brian_armstrong', '@aeyakovenko', '@binance',
+      '@coinbase', '@CoinMarketCap', '@coingecko', '@BanklessHQ',
+      '@DefiLlama', '@WatcherGuru', '@tier10k'
+    ]
   }
 };
 
@@ -2362,110 +2531,65 @@ async function startAudienceBuilderWorkflow() {
 
     if (colEl) colEl.textContent = collectedProfiles.length;
 
-    // 2. Always dynamically open and scroll the target list/niche live feed on Twitter/X
-    if (collectedProfiles.length < targetCount && !state.isAborted) {
-      let targetUrl = '';
-      if (listSelect === 'custom') {
-        const rawCustomUrl = document.getElementById('customListUrlInput')?.value.trim() || '';
-        const listIdMatch = rawCustomUrl.match(/\/lists\/(\d+)/) || rawCustomUrl.match(/^(\d{15,25})$/);
-        if (listIdMatch) {
-          const listId = listIdMatch[1];
-          targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies`)}&f=live`;
-        } else if (rawCustomUrl.includes('x.com') || rawCustomUrl.includes('twitter.com')) {
-          targetUrl = rawCustomUrl;
-        } else {
-          targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR tech) -filter:retweets -filter:replies') + '&f=live';
-        }
-      } else if (listSelect === 'audienceList2') {
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public" OR #buildinpublic OR "tech founder") -filter:retweets -filter:replies') + '&f=live';
-      } else {
-        // Default: Web3 & Crypto active creators (Strictly posts only, zero replies)
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR #crypto OR #web3) -filter:retweets -filter:replies') + '&f=live';
-      }
-
-      if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
-      if (statusText) statusText.textContent = `Opening live feed to scroll & collect active profiles...`;
-      if (barEl) barEl.style.width = '20%';
-
-      const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
-      audienceWorkingTabId = listTab.id;
-      shouldCloseWorkingTab = true;
-      await waitForTabComplete(audienceWorkingTabId);
-      await sleep(2500);
-
-      if (!state.isAborted) {
-        if (statusText) statusText.textContent = `Scrolling timeline to collect ${targetCount - collectedProfiles.length} active creator profiles...`;
-        const scanResult = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(audienceWorkingTabId, {
-            type: 'AUDIENCE_BUILDER_HUNT_USERS',
-            dateRange: 'all', // Dynamic scan ensures we never starve on strict time windows
-            sortBy,
-            targetCount: targetCount - collectedProfiles.length,
-            verifiedXHandle: state.verifiedXHandle
-          }, (res) => resolve(res || { success: false, profiles: [] }));
-        });
-
-        if (scanResult?.profiles && scanResult.profiles.length > 0) {
-          for (const p of scanResult.profiles) {
-            if (collectedProfiles.length >= targetCount) break;
-            const handleKey = (p.cleanHandle || '').toLowerCase();
-            if (handleKey && handleKey !== loggedInHandle && !collectedHandles.has(handleKey) && !followedSet.has(handleKey)) {
-              collectedHandles.add(handleKey);
-              collectedProfiles.push(p);
-              if (colEl) colEl.textContent = collectedProfiles.length;
-            }
-          }
-        }
-      }
-    }
-
-    // 3. Fallback: If live feed produced fewer profiles, backfill from curated targets
-    if (collectedProfiles.length < targetCount && !state.isAborted && listSelect !== 'custom') {
+    // 2. Resolve from curated list targets
+    if (collectedProfiles.length < targetCount) {
       const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect] || FALLBACK_CURATED_LISTS.audienceList1;
-      const rawTargets = curated?.targets || [];
+      const rawTargets = curated?.targets || FALLBACK_CURATED_LISTS.audienceList1.targets || [];
       const cleanTargets = rawTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
       for (const h of cleanTargets) {
         if (collectedProfiles.length >= targetCount) break;
         const lower = h.toLowerCase();
         if (lower !== loggedInHandle && !collectedHandles.has(lower) && !followedSet.has(lower)) {
           collectedHandles.add(lower);
-          collectedProfiles.push({
-            cleanHandle: h,
-            handle: `@${h}`,
-            name: h
-          });
-          if (colEl) colEl.textContent = collectedProfiles.length;
+          collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
         }
       }
     }
-
-    if (state.isAborted) return;
 
     collectedCount = collectedProfiles.length;
     if (colEl) colEl.textContent = collectedCount;
 
     if (collectedCount === 0) {
-      alert('⚠️ Could not find active creator profiles for Audience Builder. Please try another list or verify your search URL.');
+      alert('⚠️ Could not find active creator profiles for Audience Builder. Please try another list.');
       return;
     }
 
-    // STATE: QUEUE_READY
-    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
-    if (barEl) barEl.style.width = '40%';
-    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount}/${targetCount} active accounts. Beginning profile engagement loop...`;
+    if (stateBadge) stateBadge.textContent = 'RUNNING';
+    if (barEl) barEl.style.width = '10%';
+    if (statusText) statusText.textContent = `Starting Audience Builder for ${collectedCount} accounts in background...`;
     if (queueIndicator) queueIndicator.textContent = `Profile 1/${collectedCount}`;
 
-    // Persist queue
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.set({
-        atomx_audience_queue: collectedProfiles,
-        atomx_audience_queue_pos: 0,
-        atomx_audience_counters: { done: doneCount, collected: collectedCount, skipped: skippedCount }
-      });
-    }
+    syncFloatingHud(null, {
+      title: 'Audience Builder',
+      stateBadge: 'ENGAGING',
+      indicator: `Profile 0/${collectedCount}`,
+      done: 0,
+      collected: collectedCount,
+      skipped: 0,
+      progressPercent: 5,
+      statusText: `Starting Audience Builder for ${collectedCount} accounts...`
+    });
 
-    await sleep(1500);
+    // Delegate immediately to background service worker — survives extension popup closing!
+    const backendUrl = await getBackendUrl();
+    chrome.runtime.sendMessage({
+      type: 'BG_START_AGENT_WORKFLOW',
+      agentId: 'audience',
+      title: 'Audience Builder',
+      items: collectedProfiles,
+      options: {
+        delaySec,
+        likePosts,
+        replyPosts,
+        autoUnfollow,
+        style: state.selectedTone,
+        stylePrompt: state.selectedTonePrompt,
+        backendUrl
+      }
+    });
+    return;
 
+    async function runLocalAudienceLoop() {
     // Phase D: Per-Profile Loop (CHECK_FOLLOWED → (LIKE → REPLY)? → FOLLOW → COUNTDOWN → next)
     for (let i = 0; i < collectedCount; i++) {
       if (state.isAborted) break;
@@ -2642,6 +2766,7 @@ async function startAudienceBuilderWorkflow() {
       });
       alert(`👥 Audience Builder Cycle Complete!\n\n• Profiles Collected: ${collectedCount}\n• New Accounts Followed: ${doneCount}\n• Accounts Skipped (Already Following): ${skippedCount}`);
     }
+    }
   } catch (err) {
     console.error('Audience Builder error:', err);
     alert('Audience Builder error: ' + err.message);
@@ -2726,88 +2851,24 @@ async function startSorsaScoreBoosterWorkflow() {
   if (barEl) barEl.style.width = '0%';
   if (countdownEl) countdownEl.style.display = 'none';
 
-  const customTargets = (tierData?.targets && tierData.targets.length > 0) ? tierData.targets : [];
-
-  let targetUrl = '';
-  if (customTargets.length > 0) {
-    const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
-    const selected = clean.length > 12 ? [...clean].sort(() => 0.5 - Math.random()).slice(0, 12) : clean;
-    const query = selected.map(h => 'from:' + h).join(' OR ');
-    targetUrl = `https://x.com/search?q=${encodeURIComponent(`(${query}) lang:en -filter:retweets -filter:replies`)}&f=live`;
-  } else if (tierData?.listUrl) {
-    const listIdMatch = tierData.listUrl.match(/\/lists\/(\d+)/);
-    if (listIdMatch) {
-      targetUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listIdMatch[1]} lang:en -filter:retweets -filter:replies`)}&f=live`;
-    } else {
-      targetUrl = tierData.listUrl;
-    }
-  } else if (tierKey === 'sorsaTier2' || tier === 'tier2') {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(from:ethereum OR from:solana OR from:base OR from:arbitrum OR from:optimism OR from:binance OR from:polygon) lang:en -filter:retweets -filter:replies') + '&f=live';
-  } else {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(from:cz_binance OR from:brian_armstrong OR from:vitalikbuterin OR from:aeyakovenko OR from:mertmumtaz OR from:balajis OR from:sreeramkannan OR from:shawmakesmagic) lang:en -filter:retweets -filter:replies') + '&f=live';
-  }
-
-  let workingTabId = null;
-  let shouldCloseWorkingTab = false;
+  const customTargets = (tierData?.targets && tierData.targets.length > 0)
+    ? tierData.targets
+    : (FALLBACK_CURATED_LISTS[tierKey]?.targets || FALLBACK_CURATED_LISTS.sorsaTier1.targets);
 
   try {
     let collectedProfiles = [];
     const collectedHandles = new Set();
+    const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
 
-    // 1. Open target feed and dynamically hunt active KOL / ecosystem accounts
-    if (stateBadge) stateBadge.textContent = 'FINDING_KOLS';
-    if (statusText) statusText.textContent = `Opening ${tier === 'tier1' ? 'Tier 1 KOLs' : 'Tier 2 Ecosystem Projects'} live feed to scroll & collect accounts...`;
-    if (barEl) barEl.style.width = '15%';
-
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
-    sorsaWorkingTabId = listTab.id;
-    shouldCloseWorkingTab = true;
-    await waitForTabComplete(sorsaWorkingTabId);
-    await sleep(2500);
-
-    if (!state.isAborted) {
-      if (statusText) statusText.textContent = `Scrolling feed to collect active ecosystem accounts...`;
-      const scanResult = await new Promise((resolve) => {
-        chrome.tabs.sendMessage(sorsaWorkingTabId, {
-          type: 'AUDIENCE_BUILDER_HUNT_USERS',
-          dateRange: 'all',
-          sortBy: 'replies',
-          targetCount: targetCount
-        }, (res) => resolve(res || { success: false, profiles: [] }));
-      });
-
-      if (scanResult?.profiles && scanResult.profiles.length > 0) {
-        for (const p of scanResult.profiles) {
-          if (collectedProfiles.length >= targetCount) break;
-          const handleKey = (p.cleanHandle || '').toLowerCase();
-          if (handleKey && !collectedHandles.has(handleKey)) {
-            collectedHandles.add(handleKey);
-            collectedProfiles.push(p);
-            if (colEl) colEl.textContent = collectedProfiles.length;
-          }
-        }
+    const cleanTargets = customTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
+    for (const h of cleanTargets) {
+      if (collectedProfiles.length >= targetCount) break;
+      const lower = h.toLowerCase();
+      if (lower !== loggedInHandle && !collectedHandles.has(lower)) {
+        collectedHandles.add(lower);
+        collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
       }
     }
-
-    // 2. Fallback: If feed produced fewer profiles, backfill from curated targets
-    if (collectedProfiles.length < targetCount && !state.isAborted && customTargets.length > 0) {
-      const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
-      for (const h of clean) {
-        if (collectedProfiles.length >= targetCount) break;
-        const lower = h.toLowerCase();
-        if (!collectedHandles.has(lower)) {
-          collectedHandles.add(lower);
-          collectedProfiles.push({
-            cleanHandle: h,
-            handle: `@${h}`,
-            name: h
-          });
-          if (colEl) colEl.textContent = collectedProfiles.length;
-        }
-      }
-    }
-
-    if (state.isAborted) return;
 
     collectedCount = collectedProfiles.length;
     if (colEl) colEl.textContent = collectedCount;
@@ -2817,14 +2878,22 @@ async function startSorsaScoreBoosterWorkflow() {
       return;
     }
 
-    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
-    if (barEl) barEl.style.width = '40%';
-    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount}/${targetCount} high-weight ecosystem accounts. Starting Sorsa boost loop...`;
+    if (stateBadge) stateBadge.textContent = 'RUNNING';
+    if (barEl) barEl.style.width = '10%';
+    if (statusText) statusText.textContent = `Starting Sorsa Score Boost for ${collectedCount} accounts in background...`;
     if (queueIndicator) queueIndicator.textContent = `Account 1/${collectedCount}`;
 
-    await sleep(1500);
+    syncFloatingHud(null, {
+      title: 'Sorsa Score Booster',
+      stateBadge: 'ENGAGING',
+      indicator: `Account 0/${collectedCount}`,
+      done: 0,
+      collected: collectedCount,
+      skipped: 0,
+      progressPercent: 5,
+      statusText: `Starting Sorsa Score Boost for ${collectedCount} accounts...`
+    });
 
-    // Map tone to prompt (Strict 5-10 words, no $, no emojis, no —, no quotes, no !)
     let customTonePrompt = null;
     if (tone === 'technical') {
       customTonePrompt = "Provide sharp, technical developer insight. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
@@ -2834,6 +2903,26 @@ async function startSorsaScoreBoosterWorkflow() {
       customTonePrompt = "Bullish and supportive momentum. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
     }
 
+    // Delegate immediately to background service worker — survives extension popup closing!
+    const backendUrl = await getBackendUrl();
+    chrome.runtime.sendMessage({
+      type: 'BG_START_AGENT_WORKFLOW',
+      agentId: 'sorsa',
+      title: 'Sorsa Booster',
+      items: collectedProfiles,
+      options: {
+        delaySec: 12,
+        likePosts,
+        replyPosts,
+        followPosts,
+        style: `Sorsa ${tone}`,
+        stylePrompt: customTonePrompt,
+        backendUrl
+      }
+    });
+    return;
+
+    async function runLocalSorsaLoop() {
     // Per-profile engagement loop
     for (let i = 0; i < collectedCount; i++) {
       if (state.isAborted) break;
@@ -2956,6 +3045,7 @@ async function startSorsaScoreBoosterWorkflow() {
       });
       alert(`⚡ Sorsa Score Booster Cycle Complete!\n\n• High-Weight Accounts Engaged: ${doneCount}\n• Sorsa Multiplier Accelerated!`);
     }
+    }
   } catch (err) {
     console.error('Sorsa Booster error:', err);
     alert('Sorsa Booster error: ' + err.message);
@@ -3053,94 +3143,27 @@ async function startFollowersIncreaseWorkflow() {
     targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) -filter:retweets -filter:replies') + '&f=live';
   }
 
-  let shouldCloseWorkingTab = false;
+  const NICHE_TARGET_MAP = {
+    crypto: ['@CryptoTownHall', '@web3comm', '@SolanaDaily', '@VitalikButerin', '@cz_binance', '@brian_armstrong', '@BanklessHQ', '@DefiLlama', '@WatcherGuru', '@tier10k', '@coinbase', '@binance', '@sassal0x', '@cobie'],
+    ai: ['@sama', '@ylecun', '@AndrewYNg', '@karpathy', '@OpenAI', '@AnthropicAI', '@GoogleDeepMind', '@demishassabis', '@geoffreyhinton', '@gdb', '@EMostaque', '@ilyasut'],
+    founders: ['@paulg', '@pmarca', '@sama', '@naval', '@bchesky', '@jason', '@levelsio', '@garrytan', '@shl', '@dharmesh', '@alexisohanian', '@rabois'],
+    solana: ['@solana', '@aeyakovenko', '@rajgokal', '@SolanaDaily', '@SuperteamDAO', '@JupiterExchange', '@RaydiumProtocol', '@phantom', '@helium', '@tensor_hq'],
+    followerList1: FALLBACK_CURATED_LISTS.followerList1.targets
+  };
 
   try {
-    if (stateBadge) stateBadge.textContent = 'FINDING_THREADS';
-    if (statusText) statusText.textContent = `Opening niche discussion feed: ${niche.toUpperCase()}...`;
-    if (barEl) barEl.style.width = '15%';
-
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
-    followerWorkingTabId = listTab.id;
-    shouldCloseWorkingTab = true;
-    await waitForTabComplete(followerWorkingTabId);
-    await sleep(2500);
-
-    if (state.isAborted) return;
-
-    if (stateBadge) stateBadge.textContent = 'SCANNING_THREADS';
-    if (statusText) statusText.textContent = `Scanning timeline for busy discussion threads with high replies...`;
-    if (barEl) barEl.style.width = '20%';
-
-    const scanResult = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(followerWorkingTabId, {
-        type: 'AUDIENCE_BUILDER_HUNT_USERS',
-        dateRange: 'all',
-        sortBy: 'replies',
-        targetCount: Math.max(targetCount * 2, 20)
-      }, (res) => resolve(res || { success: false, profiles: [], topTweets: [] }));
-    });
-
-    if (state.isAborted) return;
-
-    // RULE: Multi-Thread Replier Collection (extract engaged community repliers from busy discussions)
     let collectedProfiles = [];
     const collectedHandles = new Set();
+    const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
 
-    if (scanResult?.topTweets && scanResult.topTweets.length > 0) {
-      const busyTweets = scanResult.topTweets.filter(t => t.tweetUrl && (t.repliesCount > 0 || !t.tweetUrl.includes('/status/')));
-
-      for (let tIdx = 0; tIdx < busyTweets.length; tIdx++) {
-        if (state.isAborted || collectedProfiles.length >= targetCount) break;
-
-        const busyTweet = busyTweets[tIdx];
-        const remainingToCollect = targetCount - collectedProfiles.length;
-
-        if (stateBadge) stateBadge.textContent = 'COLLECTING_REPLIERS';
-        if (statusText) statusText.textContent = `[${collectedProfiles.length}/${targetCount} Collected] Visiting busy thread #${tIdx + 1} by @${busyTweet.cleanHandle} (${busyTweet.repliesCount || 'active'} replies) to collect repliers...`;
-        if (barEl) barEl.style.width = `${Math.min(38, 20 + Math.round((collectedProfiles.length / targetCount) * 18))}%`;
-
-        try {
-          await chrome.tabs.update(followerWorkingTabId, { url: busyTweet.tweetUrl });
-          await waitForTabComplete(followerWorkingTabId);
-          await sleep(2200);
-
-          if (!state.isAborted) {
-            const repliersRes = await new Promise((resolve) => {
-              chrome.tabs.sendMessage(followerWorkingTabId, {
-                type: 'COLLECT_REPLIERS_FROM_TWEET_THREAD',
-                targetCount: remainingToCollect
-              }, (res) => resolve(res || { success: false, profiles: [] }));
-            });
-
-            if (repliersRes?.profiles && repliersRes.profiles.length > 0) {
-              for (const r of repliersRes.profiles) {
-                const handleKey = (r.cleanHandle || '').toLowerCase();
-                if (handleKey && !collectedHandles.has(handleKey)) {
-                  collectedHandles.add(handleKey);
-                  collectedProfiles.push(r);
-                  if (colEl) colEl.textContent = collectedProfiles.length;
-                  if (collectedProfiles.length >= targetCount) break;
-                }
-              }
-            }
-          }
-        } catch (threadErr) {
-          console.warn(`Error collecting repliers from thread #${tIdx + 1}:`, threadErr);
-        }
-      }
-    }
-
-    // Backfill from scanned profiles if repliers were fewer than targetCount
-    if (collectedProfiles.length < targetCount && scanResult?.profiles && scanResult.profiles.length > 0) {
-      for (const p of scanResult.profiles) {
-        if (collectedProfiles.length >= targetCount) break;
-        const handleKey = (p.cleanHandle || '').toLowerCase();
-        if (handleKey && !collectedHandles.has(handleKey)) {
-          collectedHandles.add(handleKey);
-          collectedProfiles.push(p);
-          if (colEl) colEl.textContent = collectedProfiles.length;
-        }
+    const rawTargets = curatedFollower?.targets || NICHE_TARGET_MAP[niche] || NICHE_TARGET_MAP.crypto;
+    const cleanTargets = rawTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
+    for (const h of cleanTargets) {
+      if (collectedProfiles.length >= targetCount) break;
+      const lower = h.toLowerCase();
+      if (lower !== loggedInHandle && !collectedHandles.has(lower)) {
+        collectedHandles.add(lower);
+        collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
       }
     }
 
@@ -3148,21 +3171,49 @@ async function startFollowersIncreaseWorkflow() {
     if (colEl) colEl.textContent = collectedCount;
 
     if (collectedCount === 0) {
-      alert('⚠️ No active repliers or accounts could be extracted from this niche feed.');
+      alert('⚠️ No active repliers or accounts could be found for this niche.');
       return;
     }
 
-    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
-    if (barEl) barEl.style.width = '40%';
-    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount} engaged niche accounts. Starting engagement loop...`;
+    if (stateBadge) stateBadge.textContent = 'RUNNING';
+    if (barEl) barEl.style.width = '10%';
+    if (statusText) statusText.textContent = `Starting Follower Growth for ${collectedCount} niche accounts in background...`;
     if (queueIndicator) queueIndicator.textContent = `Profile 1/${collectedCount}`;
 
-    await sleep(1500);
+    syncFloatingHud(null, {
+      title: 'Followers Growth',
+      stateBadge: 'ENGAGING',
+      indicator: `Profile 0/${collectedCount}`,
+      done: 0,
+      collected: collectedCount,
+      skipped: 0,
+      progressPercent: 5,
+      statusText: `Starting Follower Growth for ${collectedCount} accounts...`
+    });
 
-    // Use active configured tone and prompt template
     const activeStyle = state.selectedTone || 'Bullish (5-10 words)';
     const activePrompt = state.selectedTonePrompt || "Write a bullish, positive comment replying to the post. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
 
+    // Delegate immediately to background service worker — survives extension popup closing!
+    const backendUrl = await getBackendUrl();
+    chrome.runtime.sendMessage({
+      type: 'BG_START_AGENT_WORKFLOW',
+      agentId: 'followers',
+      title: 'Followers Growth',
+      items: collectedProfiles,
+      options: {
+        delaySec,
+        likePosts: true,
+        replyPosts: true,
+        followPosts: true,
+        style: activeStyle,
+        stylePrompt: activePrompt,
+        backendUrl
+      }
+    });
+    return;
+
+    async function runLocalFollowersLoop() {
     // Per-profile engagement loop
     for (let i = 0; i < collectedCount; i++) {
       if (state.isAborted) break;
@@ -3285,6 +3336,7 @@ async function startFollowersIncreaseWorkflow() {
       });
       alert(`📈 Follower Growth Cycle Complete!\n\n• Profiles Engaged: ${doneCount}\n• Accounts Skipped: ${skippedCount}`);
     }
+    }
   } catch (err) {
     console.error('Follower Growth error:', err);
     alert('Follower Growth error: ' + err.message);
@@ -3375,6 +3427,28 @@ async function startReplyBackLoopWorkflow() {
   let totalSkipped = 0;
   let shouldCloseWorkingTab = false;
 
+  // Delegate to background service worker — survives extension popup closing!
+  const backendUrl = await getBackendUrl();
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'replyback',
+    title: 'Reply Back Loop',
+    items: postUrls.map(u => ({ tweetUrl: u })),
+    options: {
+      delaySec,
+      maxReplies: maxComments,
+      style: tone,
+      autoLike,
+      backendUrl
+    }
+  }, (res) => {
+    if (chrome.runtime?.lastError || !res?.ok) {
+      runLocalReplyBackLoop();
+    }
+  });
+  return;
+
+  async function runLocalReplyBackLoop() {
   try {
     for (let pIdx = 0; pIdx < postUrls.length; pIdx++) {
       if (state.isAborted) break;
@@ -3526,9 +3600,10 @@ async function startReplyBackLoopWorkflow() {
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
     if (shouldCloseWorkingTab && replyBackWorkingTabId) {
-      chrome.tabs?.remove(replyBackWorkingTabId).catch(() => null);
+      safeRemoveTab(replyBackWorkingTabId);
     }
     replyBackWorkingTabId = null;
+    }
   }
 }
 
@@ -5047,14 +5122,50 @@ document.getElementById('autoPostReplyBtn')?.addEventListener('click', async () 
 });
 
 // Autonomous Raid Loop: Visits each tweet, scrolls, likes, comments, reposts & follows
+// (Fallback for when background relay is unavailable; normally background.js handles this)
 async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null) {
   state.isAborted = false;
+  state.isWorkflowRunning = true;
   setAutomationRunningUI(true);
   const total = tweets.length;
   let successCount = 0;
   let ignoredCount = 0;
   let skippedCommentsCount = 0;
   const backendUrl = await getBackendUrl();
+
+  // In-popup UI element refs
+  const progressCard = document.getElementById('tgProgressCard');
+  const tgStateBadge = document.getElementById('tgStateBadge');
+  const tgQueueInd   = document.getElementById('tgQueueIndicator');
+  const tgDoneEl     = document.getElementById('tgDoneCount');
+  const tgColEl      = document.getElementById('tgCollectedCount');
+  const tgSkipEl     = document.getElementById('tgSkippedCount');
+  const tgBar        = document.getElementById('tgProgressBar');
+  const tgStatus     = document.getElementById('tgLiveStatusText');
+  const tgCountdown  = document.getElementById('tgCountdownText');
+  const stopBtn      = document.getElementById('stopTgEngageBtn');
+
+  if (progressCard) progressCard.style.display = 'block';
+  if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (tgStateBadge) tgStateBadge.textContent = 'ENGAGING';
+  if (tgQueueInd) tgQueueInd.textContent = `Tweet 0/${total}`;
+  if (tgDoneEl) tgDoneEl.textContent = '0';
+  if (tgColEl) tgColEl.textContent = String(total);
+  if (tgSkipEl) tgSkipEl.textContent = '0';
+  if (tgBar) tgBar.style.width = '5%';
+  if (tgStatus) tgStatus.textContent = 'Starting Telegram Raid engagement...';
+
+  // Initial floating HUD sync
+  syncFloatingHud(null, {
+    title: 'Telegram Group Engage',
+    stateBadge: 'ENGAGING',
+    indicator: `Tweet 0/${total}`,
+    done: 0,
+    collected: total,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: 'Starting Telegram Raid engagement...'
+  });
 
   const logger = (st, log, prog = '') => {
     if (logCallback) logCallback(st, log, prog);
@@ -5070,12 +5181,28 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
 
       const t = tweets[i];
       const indexStr = `[${i + 1}/${total}]`;
+      const progPercent = Math.round(((i) / total) * 100);
+
+      // Update in-popup progress card
+      if (tgQueueInd) tgQueueInd.textContent = `Tweet ${i + 1}/${total}`;
+      if (tgStatus) tgStatus.textContent = `${indexStr} Visiting @${t.handle || 'user'}...`;
+      if (tgBar) tgBar.style.width = `${progPercent}%`;
+
+      // Sync floating HUD
+      syncFloatingHud(tgWorkingTabId, {
+        title: 'Telegram Group Engage',
+        stateBadge: 'ENGAGING',
+        indicator: `Tweet ${i + 1}/${total}`,
+        done: successCount,
+        collected: total,
+        skipped: ignoredCount,
+        progressPercent: progPercent,
+        statusText: `${indexStr} Visiting @${t.handle || 'user'}...`
+      });
+
       logger(`Processing ${indexStr}`, `Visiting ${t.canonicalUrl}... Checking actions.`, `${i + 1}/${total}`);
 
-      if (state.isAborted) {
-        logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
-        break;
-      }
+      if (state.isAborted) { logger('⏹️ Stopped', 'Autonomous workflow stopped by user.'); break; }
 
       try {
         const outcome = await runAutonomousActionOnTweet(t.canonicalUrl, actions, {
@@ -5086,10 +5213,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
           generateContextual: actions.comment
         });
 
-        if (state.isAborted) {
-          logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
-          break;
-        }
+        if (state.isAborted) { logger('⏹️ Stopped', 'Autonomous workflow stopped by user.'); break; }
 
         // Auto-ignore rule: post already liked & commented OR comment already completed
         const res = outcome && outcome.result;
@@ -5097,79 +5221,120 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
 
         if (isIgnored) {
           ignoredCount++;
-          if (res.commentSkipped) {
-            skippedCommentsCount++;
-          }
+          if (res.commentSkipped) skippedCommentsCount++;
           const reasonStr = res.reason || (res.commentSkipped ? 'Already commented previously' : 'Already completed');
           logger(`Skipped ${indexStr}`, `Auto-ignored: ${reasonStr} (0 credits used)`, `${i + 1}/${total}`);
 
+          if (tgSkipEl) tgSkipEl.textContent = String(ignoredCount);
+
           // Cache so future raids skip this tweet locally
           state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
-          }
+          if (chrome.storage?.local) chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
 
-          if (outcome.shouldClose && outcome.targetTabId) {
-            chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
-          }
-          continue; // No credit deduction, proceed to next tweet
+          if (outcome.shouldClose && outcome.targetTabId) chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
+
+          syncFloatingHud(tgWorkingTabId, {
+            title: 'Telegram Group Engage', stateBadge: 'ENGAGING',
+            indicator: `Tweet ${i + 1}/${total}`, done: successCount,
+            collected: total, skipped: ignoredCount,
+            progressPercent: Math.round(((i + 1) / total) * 100),
+            statusText: `${indexStr} Skipped @${t.handle || 'user'} (already done)`
+          });
+          continue;
         }
 
         successCount++;
+        if (tgDoneEl) tgDoneEl.textContent = String(successCount);
 
         // Deduct credit & persist engaged tweet ID
         deductCredits(1);
         state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-          chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
-        }
+        if (chrome.storage?.local) chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
 
         fetch(`${backendUrl}/api/tweets/mark-engaged`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tweets: [{
-              tweet_id: t.tweetId,
-              handle: t.handle,
-              canonical_url: t.canonicalUrl,
-              action_type: 'autonomous_raid'
-            }]
-          })
+          body: JSON.stringify({ tweets: [{ tweet_id: t.tweetId, handle: t.handle, canonical_url: t.canonicalUrl, action_type: 'autonomous_raid' }] })
         }).catch(() => null);
 
         if (outcome.shouldClose && outcome.targetTabId) {
           await sleep(1500);
           chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
         }
+        tgWorkingTabId = null;
 
         updateTgParseSummaryUI();
+
+        // Update HUD after success
+        const donePercent = Math.round(((i + 1) / total) * 100);
+        if (tgBar) tgBar.style.width = `${donePercent}%`;
+        if (tgStatus) tgStatus.textContent = `${indexStr} ✓ Engaged @${t.handle || 'user'}`;
+        syncFloatingHud(null, {
+          title: 'Telegram Group Engage', stateBadge: 'ENGAGING',
+          indicator: `Tweet ${i + 1}/${total}`, done: successCount,
+          collected: total, skipped: ignoredCount,
+          progressPercent: donePercent,
+          statusText: `${indexStr} ✓ Engaged @${t.handle || 'user'}`
+        });
 
         // Anti-ban randomized pacing sleep before next tweet
         if (i < total - 1 && !state.isAborted) {
           const pacingSleep = Math.max(3, state.delaySeconds + Math.floor(Math.random() * 4 - 2));
+          if (tgCountdown) tgCountdown.style.display = 'block';
           for (let sec = pacingSleep; sec > 0; sec--) {
             if (state.isAborted) break;
-            logger(`Pacing Safety Delay (${indexStr})`, `Waiting ${sec}s before next post to mimic human behavior...`, `${i + 1}/${total}`);
+            if (tgStatus) tgStatus.textContent = `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`;
+            if (tgCountdown) tgCountdown.textContent = `Next tweet in 0:${String(sec).padStart(2, '0')}`;
+            syncFloatingHud(null, {
+              title: 'Telegram Group Engage', stateBadge: 'PACING',
+              indicator: `Tweet ${i + 1}/${total}`, done: successCount,
+              collected: total, skipped: ignoredCount,
+              progressPercent: donePercent,
+              statusText: `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`
+            });
+            logger(`Pacing Safety Delay (${indexStr})`, `Waiting ${sec}s before next post...`, `${i + 1}/${total}`);
             await sleep(1000);
           }
+          if (tgCountdown) tgCountdown.style.display = 'none';
         }
       } catch (err) {
         console.warn(`Error automating tweet ${t.canonicalUrl}:`, err);
+        tgWorkingTabId = null;
       }
     }
 
     if (!state.isAborted) {
+      // Completion HUD sync
+      if (tgStateBadge) tgStateBadge.textContent = 'DONE';
+      if (tgBar) tgBar.style.width = '100%';
+      if (tgStatus) tgStatus.textContent = `✓ Completed! ${successCount} engaged, ${ignoredCount} skipped.`;
+      if (tgCountdown) tgCountdown.style.display = 'none';
+      syncFloatingHud(null, {
+        title: 'Telegram Group Engage',
+        stateBadge: 'DONE',
+        indicator: `${total}/${total}`,
+        done: successCount,
+        collected: total,
+        skipped: ignoredCount,
+        progressPercent: 100,
+        statusText: `✓ Raid complete! ${successCount} engaged, ${ignoredCount} skipped.`,
+        isStopped: true
+      });
       logger('Engagement Completed', `Finished: ${successCount} engaged, ${ignoredCount} auto-ignored (${skippedCommentsCount} comments skipped) of ${total} tweet(s).`, `${successCount}/${total}`);
       let summaryMsg = `✓ Autonomous Engagement Finished!\n\n• Engaged: ${successCount}\n• Auto-Ignored (Already completed): ${ignoredCount}`;
-      if (skippedCommentsCount > 0) {
-        summaryMsg += `\n• Comments Skipped: ${skippedCommentsCount}`;
-      }
+      if (skippedCommentsCount > 0) summaryMsg += `\n• Comments Skipped: ${skippedCommentsCount}`;
       summaryMsg += `\n• Total Processed: ${total}\n\nHuman-like typing and selective action rules applied. 0 credits used for skipped posts.`;
       alert(summaryMsg);
     }
   } finally {
+    state.isWorkflowRunning = false;
+    tgWorkingTabId = null;
     setAutomationRunningUI(false);
     updateCreditUI();
+    const runBtnFinal = document.getElementById('runTgEngageBtn');
+    const stopBtnFinal = document.getElementById('stopTgEngageBtn');
+    if (runBtnFinal) { runBtnFinal.disabled = false; runBtnFinal.textContent = '▶ Launch Auto Engage'; }
+    if (stopBtnFinal) stopBtnFinal.style.display = 'none';
   }
 }
 
@@ -5188,6 +5353,7 @@ async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
   } else if (tweetUrl) {
     const newTab = await chrome.tabs.create({ url: tweetUrl, active: true });
     targetTabId = newTab.id;
+    tgWorkingTabId = newTab.id; // Track globally for stop/abort support
     shouldClose = true;
     await waitForTabComplete(targetTabId);
     await sleep(2500); // Wait for React hydration
