@@ -97,7 +97,7 @@
           <div class="section-intro">
             <div style="font-weight:700; font-size:13px; color:var(--text-primary); display:flex; align-items:center; justify-content:space-between;">
               <span>Autonomous Agents (100% Auto)</span>
-              <span class="badge-mini popular">10 SUITE</span>
+              <span class="badge-mini popular">12 SUITE</span>
             </div>
             <div style="font-size:11px; color:var(--text-secondary);">Click any agent below to launch its dedicated automation workspace.</div>
           </div>
@@ -211,6 +211,28 @@
               <div class="bento-title">1-Click Reply</div>
               <div class="bento-desc">Open dedicated AI reply studio with live page detect</div>
               <div class="bento-action">Open Studio ➔</div>
+            </button>
+
+            <!-- 11. Find Defaulter -->
+            <button type="button" class="bento-card" data-agent-id="defaulter">
+              <div class="bento-top">
+                <span class="bento-emoji">🔍</span>
+                <span class="badge-mini safety">AUDIT POD</span>
+              </div>
+              <div class="bento-title">Find Defaulter</div>
+              <div class="bento-desc">Detect group members who skipped commenting on your post</div>
+              <div class="bento-action">Audit Post ➔</div>
+            </button>
+
+            <!-- 12. Telegram Live Liker -->
+            <button type="button" class="bento-card" data-agent-id="tgliveliker">
+              <div class="bento-top">
+                <span class="bento-emoji">🔴</span>
+                <span class="badge-mini viral">PROOF REC</span>
+              </div>
+              <div class="bento-title">TG Live Liker</div>
+              <div class="bento-desc">Continuous raid liker — keeps tab open for screen record proof</div>
+              <div class="bento-action">Start Raid ➔</div>
             </button>
           </div>
         </div>
@@ -831,6 +853,155 @@
 
               <div style="display:flex; gap:6px; margin-top:2px;">
                 <button class="primary-btn mini-btn" id="runCreatorRadarBtn" style="flex:1; margin-top:0;">⚡ LAUNCH RADAR MONITOR</button>
+              </div>
+            </div>
+
+            <!-- Workspace 11: Find Defaulter (A11, Audit Pod) -->
+            <div class="agent-panel-content" id="panel-agent-defaulter" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Comment Pod Auditor:</strong> Automatically scans all comments on your X post and compares them against your group's expected member list. Instantly pinpoints members who skipped commenting (Defaulters).
+              </div>
+
+              <!-- Tweet Post Link -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Your Tweet Post Link</label>
+                  <button type="button" class="badge-mini" id="defaulterUseCurrentTabBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">⚡ Current Tab</button>
+                </div>
+                <input type="text" id="defaulterPostUrl" class="ext-input" placeholder="https://x.com/yourhandle/status/18420958...">
+              </div>
+
+              <!-- Expected Usernames List -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Expected Group Usernames / Members</label>
+                  <span id="defaulterExpectedCountBadge" style="font-size:10px; color:var(--blue-primary); font-weight:700;">0 Members</span>
+                </div>
+                <textarea id="defaulterExpectedUsers" class="ext-textarea" rows="4" placeholder="Paste telegram group list, e.g.:&#10;@elonmusk, @vitalikbuterin, @cz_binance&#10;or raw text with @handles..."></textarea>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+                  <button type="button" class="badge-mini" id="defaulterCleanListBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">🧹 Clean & Extract @handles</button>
+                  <span style="font-size:10px; color:var(--text-muted);">Cost: 5 Credits / audit scan</span>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="primary-btn mini-btn" id="startDefaulterAuditBtn" style="flex:1; margin-top:0;">🔍 FIND DEFAULTERS NOW</button>
+                <button type="button" class="secondary-btn mini-btn" id="stopDefaulterAuditBtn" style="display:none; flex:1; margin-top:0; color:#EF4444; border-color:#EF4444;">🛑 Stop Audit</button>
+              </div>
+
+              <!-- Live Results Container -->
+              <div id="defaulterResultsCard" style="display:none; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <div style="font-weight:700; font-size:12px;" id="defaulterResultsHeading">Audit Results</div>
+                  <button type="button" class="badge-mini popular" id="copyDefaultersBtn" style="cursor:pointer;">📋 Copy All Defaulters</button>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:10px; text-align:center;">
+                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
+                    <div style="font-size:10px; color:var(--text-muted);">Expected</div>
+                    <div style="font-weight:800; font-size:14px;" id="defaulterStatExpected">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
+                    <div style="font-size:10px; color:#10B981;">Commented</div>
+                    <div style="font-weight:800; font-size:14px; color:#10B981;" id="defaulterStatCommented">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
+                    <div style="font-size:10px; color:#EF4444;">Defaulters</div>
+                    <div style="font-weight:800; font-size:14px; color:#EF4444;" id="defaulterStatDefaulters">0</div>
+                  </div>
+                </div>
+                <div style="font-size:11px; font-weight:700; margin-bottom:4px; color:#EF4444;">Defaulters List (Did not comment):</div>
+                <div id="defaulterChipsContainer" style="display:flex; flex-wrap:wrap; gap:4px; max-height:120px; overflow-y:auto; padding:4px; background:var(--bg-canvas); border-radius:6px; border:1px solid var(--border-subtle);">
+                </div>
+              </div>
+            </div>
+
+            <!-- Workspace 12: Telegram Live Liker & Proof Recorder (A12, Proof Rec) -->
+            <div class="agent-panel-content" id="panel-agent-tgliveliker" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Screen-Record Friendly Liker:</strong> Designed for Telegram raid groups where you need to submit screen recording proof. Opens the target post or timeline, visually scrolls, executes actions, and <strong>keeps the tab open</strong> for recording!
+              </div>
+
+              <!-- Notice Badge -->
+              <div style="background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.3); border-radius:6px; padding:6px 10px; font-size:11px; color:#F87171; display:flex; align-items:center; gap:6px;">
+                <span>🔴</span>
+                <span><strong>Tab Stays Open:</strong> Browser tab will NOT close automatically so your screen recorder captures proof!</span>
+              </div>
+
+              <!-- Raid Links Input -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Raid Links / Target Post / Feed</label>
+                  <button type="button" class="badge-mini" id="tgLiveUseCurrentTabBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">⚡ Current Tab</button>
+                </div>
+                <textarea id="tgLiveRaidInput" class="ext-textarea" rows="3" placeholder="Paste tweet raid links here (supports Telegram messages with timestamps)..."></textarea>
+              </div>
+
+              <!-- Action Selection Mode -->
+              <div>
+                <label class="opt-label">Actions to Execute</label>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="tgLiveOptLike" checked>
+                    <span>❤️ Auto-Like</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="tgLiveOptRepost" checked>
+                    <span>🔁 Auto-Repost</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="tgLiveOptBookmark">
+                    <span>🔖 Auto-Bookmark</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="tgLiveOptGlow" checked>
+                    <span>✨ Recording Glow</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Pacing Delay -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Pacing Speed (Recording Delay)</label>
+                  <span id="tgLivePacingLabel" style="font-size:10px; color:var(--text-muted);">3.5s per action</span>
+                </div>
+                <select id="tgLivePacingSelect" class="ext-select">
+                  <option value="2500">Fast (2.5s) — Quick Proof Recording</option>
+                  <option value="3500" selected>Balanced (3.5s) — Optimal for Screen Recording</option>
+                  <option value="6000">Slow & Natural (6.0s) — Ultra Organic</option>
+                </select>
+              </div>
+
+              <!-- Action Controls -->
+              <div style="display:flex; gap:6px; margin-top:2px;">
+                <button type="button" class="primary-btn mini-btn" id="startTgLiveRaidBtn" style="flex:1; margin-top:0; background:linear-gradient(135deg, #DC2626, #B91C1C);">🔴 START LIVE RAID RECORDING</button>
+                <button type="button" class="secondary-btn mini-btn" id="stopTgLiveRaidBtn" style="display:none; flex:1; margin-top:0; color:#EF4444; border-color:#EF4444;">⏹️ Stop Raid</button>
+              </div>
+
+              <!-- Live Counter Status -->
+              <div id="tgLiveStatusCard" style="display:none; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <div style="font-weight:700; font-size:12px; display:flex; align-items:center; gap:6px;">
+                    <span class="live-dot" style="background:#EF4444;"></span>
+                    <span id="tgLiveStatusText">Recording Live...</span>
+                  </div>
+                  <span class="badge-mini popular" id="tgLiveTabStatus">TAB OPEN</span>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; text-align:center;">
+                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
+                    <div style="font-size:10px; color:var(--text-muted);">Liked</div>
+                    <div style="font-weight:800; font-size:14px; color:#EF4444;" id="tgLiveCountLiked">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
+                    <div style="font-size:10px; color:var(--text-muted);">Reposted</div>
+                    <div style="font-weight:800; font-size:14px; color:#10B981;" id="tgLiveCountReposted">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
+                    <div style="font-size:10px; color:var(--text-muted);">Bookmarked</div>
+                    <div style="font-weight:800; font-size:14px; color:#3B82F6;" id="tgLiveCountBookmarked">0</div>
+                  </div>
+                </div>
               </div>
             </div>
 

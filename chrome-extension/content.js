@@ -467,6 +467,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  // Agent 11: Find Defaulter — Scan post comments and return all author handles
+  if (message.type === 'AUDIT_POST_DEFAULTERS') {
+    auditPostCommenters(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, commenters: [] }));
+    return true;
+  }
+
+  // Agent 12: Telegram Live Liker & Proof Recorder — Visual live actions with glow ring
+  if (message.type === 'EXECUTE_LIVE_RAID_ENGAGEMENT') {
+    executeLiveRaidEngagement(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 // Wait for element helper with timeout
@@ -1397,6 +1413,128 @@ async function executeReplyBackCycle(params = {}) {
     repliedCount: doneCount,
     results,
     aborted: isWorkflowAborted
+  };
+}
+
+// =========================================================================
+// AGENT 11: COMMENT POD AUDITOR — FIND DEFAULTERS
+// =========================================================================
+async function auditPostCommenters(params = {}) {
+  isWorkflowAborted = false;
+  const maxScrolls = params.maxScrolls || 14;
+  const commenters = new Set();
+  const mainArticle = getMainPostArticle();
+  const mainHandle = mainArticle ? (extractTweetData(mainArticle).authorHandle || '').toLowerCase().replace(/^@/, '').trim() : '';
+
+  for (let i = 0; i < maxScrolls; i++) {
+    if (isWorkflowAborted) break;
+
+    const articles = document.querySelectorAll('article[data-testid="tweet"]');
+    articles.forEach(art => {
+      if (mainArticle && art === mainArticle) return;
+
+      const userEl = art.querySelector('div[data-testid="User-Name"]');
+      if (userEl) {
+        const links = userEl.querySelectorAll('a[href^="/"]');
+        for (const link of links) {
+          const href = (link.getAttribute('href') || '').replace(/^\//, '').split('?')[0].split('/')[0].toLowerCase().trim();
+          if (href && !['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(href)) {
+            if (href !== mainHandle) {
+              commenters.add(href);
+            }
+            break;
+          }
+        }
+      }
+    });
+
+    window.scrollBy({ top: 850, behavior: 'smooth' });
+    await sleep(1100);
+  }
+
+  return {
+    success: true,
+    mainAuthor: mainHandle,
+    commenters: Array.from(commenters)
+  };
+}
+
+// =========================================================================
+// AGENT 12: TELEGRAM LIVE LIKER & PROOF RECORDER
+// =========================================================================
+async function executeLiveRaidEngagement(params = {}) {
+  isWorkflowAborted = false;
+  const { actions = { like: true, repost: true, bookmark: false, glow: true }, delay = 2500 } = params;
+
+  let tweetArticle = getMainPostArticle();
+  if (!tweetArticle) {
+    tweetArticle = document.querySelector('article[data-testid="tweet"]');
+  }
+  if (!tweetArticle) {
+    return { success: false, error: 'No tweet found on active tab' };
+  }
+
+  // Smooth scroll into center view so screen recorder captures the target
+  tweetArticle.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  await sleep(700);
+
+  // Visual Recording Glow
+  if (actions.glow) {
+    tweetArticle.style.transition = 'box-shadow 0.4s ease, outline 0.4s ease';
+    tweetArticle.style.outline = '3px solid #3B82F6';
+    tweetArticle.style.boxShadow = '0 0 24px rgba(59, 130, 246, 0.45)';
+  }
+
+  let liked = false, reposted = false, bookmarked = false;
+
+  // 1. Auto Like
+  if (actions.like && !isWorkflowAborted) {
+    const likeBtn = tweetArticle.querySelector('[data-testid="like"]');
+    if (likeBtn) {
+      likeBtn.click();
+      liked = true;
+      await sleep(800);
+    }
+  }
+
+  // 2. Auto Repost
+  if (actions.repost && !isWorkflowAborted) {
+    const repostBtn = tweetArticle.querySelector('[data-testid="retweet"]');
+    if (repostBtn) {
+      repostBtn.click();
+      await sleep(600);
+      const confirmItem = await waitForElement('[data-testid="retweetConfirm"]', 2500);
+      if (confirmItem) {
+        confirmItem.click();
+        reposted = true;
+      }
+      await sleep(800);
+    }
+  }
+
+  // 3. Auto Bookmark
+  if (actions.bookmark && !isWorkflowAborted) {
+    const bmBtn = tweetArticle.querySelector('[data-testid="bookmark"]');
+    if (bmBtn) {
+      bmBtn.click();
+      bookmarked = true;
+      await sleep(600);
+    }
+  }
+
+  // Clean outline gently after actions
+  setTimeout(() => {
+    if (tweetArticle) {
+      tweetArticle.style.outline = '';
+      tweetArticle.style.boxShadow = '';
+    }
+  }, 2200);
+
+  return {
+    success: true,
+    liked,
+    reposted,
+    bookmarked
   };
 }
 

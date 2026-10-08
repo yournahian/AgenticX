@@ -707,7 +707,9 @@ const AGENT_META = {
   unfollow: { title: 'Auto Unfollow', icon: '🧹', badge: 'SAFETY', desc: 'Filter non-followers or low Walchain scores with safety delay' },
   match: { title: 'Picture & Voice Match', icon: '🎨', badge: 'PERSONA', desc: 'Generate matched images + replicate authentic writing style' },
   creators: { title: 'Favorite Creators Radar', icon: '⭐', badge: 'RADAR', desc: 'Save favorite handles ➔ Instant top early comment spots' },
-  replystudio: { title: 'AI Reply Assistant', icon: '💬', badge: '1-CLICK', desc: 'Contextual 1-click reply engine calibrated to your tone' }
+  replystudio: { title: 'AI Reply Assistant', icon: '💬', badge: '1-CLICK', desc: 'Contextual 1-click reply engine calibrated to your tone' },
+  defaulter: { title: 'Find Defaulters', icon: '🔍', badge: 'AUDIT POD', desc: 'Scan post comments & detect members who skipped commenting' },
+  tgliveliker: { title: 'TG Live Liker (Proof Rec)', icon: '🔴', badge: 'PROOF REC', desc: 'Continuous raid liker — keeps tab open for screen record proof' }
 };
 
 function initAgentListeners() {
@@ -975,6 +977,54 @@ function initAgentListeners() {
     updateAgentConsole('Radar Active', `Monitoring ${state.creators.length} creators for early engagement.`);
     alert(`⚡ Creators Radar Active!\nMonitoring ${state.creators.length} VIP accounts.\nThe bot will scan for new posts and notify or comment immediately.`);
   });
+
+  // Agent 11: Find Defaulter Listeners
+  document.getElementById('defaulterUseCurrentTabBtn')?.addEventListener('click', async () => {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com'))) {
+        const inp = document.getElementById('defaulterPostUrl');
+        if (inp) inp.value = tabs[0].url.split('?')[0];
+        showExtToast('Current Tweet URL Linked', '⚡');
+      } else {
+        alert('Please open your target tweet on Twitter / X in your active browser tab first.');
+      }
+    } catch (e) { }
+  });
+
+  document.getElementById('defaulterCleanListBtn')?.addEventListener('click', () => {
+    const txt = document.getElementById('defaulterExpectedUsers');
+    if (!txt) return;
+    const handles = parseDefaulterHandles(txt.value);
+    txt.value = handles.map(h => '@' + h).join(', ');
+    const countBadge = document.getElementById('defaulterExpectedCountBadge');
+    if (countBadge) countBadge.textContent = `${handles.length} Members`;
+    showExtToast(`Cleaned & Extracted ${handles.length} @handles`, '🧹');
+  });
+
+  document.getElementById('defaulterExpectedUsers')?.addEventListener('input', (e) => {
+    const handles = parseDefaulterHandles(e.target.value);
+    const countBadge = document.getElementById('defaulterExpectedCountBadge');
+    if (countBadge) countBadge.textContent = `${handles.length} Members`;
+  });
+
+  document.getElementById('startDefaulterAuditBtn')?.addEventListener('click', startDefaulterAuditWorkflow);
+  document.getElementById('stopDefaulterAuditBtn')?.addEventListener('click', stopDefaulterAuditWorkflow);
+
+  // Agent 12: Telegram Live Liker Listeners
+  document.getElementById('tgLiveUseCurrentTabBtn')?.addEventListener('click', async () => {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com'))) {
+        const inp = document.getElementById('tgLiveRaidInput');
+        if (inp) inp.value = tabs[0].url.split('?')[0];
+        showExtToast('Current Tab Feed Linked', '⚡');
+      }
+    } catch (e) { }
+  });
+
+  document.getElementById('startTgLiveRaidBtn')?.addEventListener('click', startTgLiveRaidWorkflow);
+  document.getElementById('stopTgLiveRaidBtn')?.addEventListener('click', stopTgLiveRaidWorkflow);
 }
 
 function renderCreatorChips() {
@@ -998,6 +1048,299 @@ function renderCreatorChips() {
     };
     chips.appendChild(chip);
   });
+}
+
+// =========================================================================
+// AGENT 11: FIND DEFAULTERS AUDIT WORKFLOW
+// =========================================================================
+function parseDefaulterHandles(raw) {
+  if (!raw) return [];
+  const matches = raw.match(/@?[A-Za-z0-9_]{1,15}/g) || [];
+  const clean = new Set();
+  matches.forEach(m => {
+    const h = m.replace(/^@/, '').toLowerCase().trim();
+    if (h && h.length >= 2 && !['http', 'https', 'com', 'org', 'status'].includes(h)) {
+      clean.add(h);
+    }
+  });
+  return Array.from(clean);
+}
+
+let defaulterActiveTabId = null;
+
+async function startDefaulterAuditWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
+  if (state.credits < 5) {
+    alert(`⚠️ Insufficient credits!\nYou need 5 credits to audit post comments and find defaulters, but you have ${state.credits}.\nPlease top up credits in the Credits tab.`);
+    switchExtTab('credits');
+    return;
+  }
+
+  const postUrlInput = document.getElementById('defaulterPostUrl');
+  let postUrl = postUrlInput ? postUrlInput.value.trim() : '';
+
+  if (!postUrl || (!postUrl.includes('twitter.com') && !postUrl.includes('x.com'))) {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+    if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com')) && tabs[0].url.includes('/status/')) {
+      postUrl = tabs[0].url.split('?')[0];
+      if (postUrlInput) postUrlInput.value = postUrl;
+    } else {
+      alert('Please enter a valid tweet URL (e.g. https://x.com/username/status/123456...) or navigate to it in your active tab.');
+      return;
+    }
+  }
+
+  const rawUsers = document.getElementById('defaulterExpectedUsers')?.value || '';
+  const expectedHandles = parseDefaulterHandles(rawUsers);
+
+  if (expectedHandles.length === 0) {
+    alert('Please paste or list the expected Telegram group members or usernames to check against.');
+    return;
+  }
+
+  const startBtn = document.getElementById('startDefaulterAuditBtn');
+  const stopBtn = document.getElementById('stopDefaulterAuditBtn');
+  const resultsCard = document.getElementById('defaulterResultsCard');
+  const heading = document.getElementById('defaulterResultsHeading');
+  const statExp = document.getElementById('defaulterStatExpected');
+  const statCom = document.getElementById('defaulterStatCommented');
+  const statDef = document.getElementById('defaulterStatDefaulters');
+  const chipsContainer = document.getElementById('defaulterChipsContainer');
+  const copyBtn = document.getElementById('copyDefaultersBtn');
+
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'block';
+  if (resultsCard) resultsCard.style.display = 'block';
+  if (heading) heading.textContent = 'Scanning comments on tweet feed...';
+  if (statExp) statExp.textContent = String(expectedHandles.length);
+  if (statCom) statCom.textContent = '...';
+  if (statDef) statDef.textContent = '...';
+  if (chipsContainer) chipsContainer.innerHTML = '<span style="font-size:11px; color:var(--text-muted); padding:6px;">Auditing comment replies in background... Please wait ~15-20s.</span>';
+  if (copyBtn) copyBtn.style.display = 'none';
+
+  updateAgentConsole('Audit Running', `Scanning comments on: ${postUrl}`);
+  state.isAborted = false;
+
+  try {
+    const tab = await chrome.tabs.create({ url: postUrl, active: false });
+    defaulterActiveTabId = tab.id;
+    await waitForTabComplete(tab.id);
+    await sleep(3000);
+
+    if (state.isAborted) return;
+
+    const auditRes = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, (res) => resolve(res || { success: false, commenters: [] }));
+    });
+
+    try { await chrome.tabs.remove(tab.id); } catch (e) { }
+    defaulterActiveTabId = null;
+
+    if (state.isAborted) {
+      if (heading) heading.textContent = 'Audit Stopped by User';
+      return;
+    }
+
+    const commentersSet = new Set((auditRes.commenters || []).map(c => c.toLowerCase()));
+    const mainAuthor = (auditRes.mainAuthor || '').toLowerCase();
+
+    // Defaulters: in expected list, but did NOT comment (and not the post author)
+    const defaulters = expectedHandles.filter(h => !commentersSet.has(h) && h !== mainAuthor);
+    const compliant = expectedHandles.filter(h => commentersSet.has(h));
+
+    // Deduct 5 credits for successful audit
+    deductCredits(5);
+
+    if (heading) heading.textContent = `Audit Complete — Found ${defaulters.length} Defaulter${defaulters.length === 1 ? '' : 's'}`;
+    if (statExp) statExp.textContent = String(expectedHandles.length);
+    if (statCom) statCom.textContent = String(compliant.length);
+    if (statDef) statDef.textContent = String(defaulters.length);
+
+    if (chipsContainer) {
+      chipsContainer.innerHTML = '';
+      if (defaulters.length === 0) {
+        chipsContainer.innerHTML = '<span style="font-size:11px; color:#10B981; font-weight:700; padding:6px;">🎉 100% Compliant! All ' + expectedHandles.length + ' group members commented on your post!</span>';
+      } else {
+        defaulters.forEach(d => {
+          const badge = document.createElement('span');
+          badge.className = 'badge-mini';
+          badge.style.cssText = 'background:rgba(239, 68, 68, 0.15); color:#EF4444; border:1px solid rgba(239, 68, 68, 0.3); font-weight:700; cursor:pointer;';
+          badge.textContent = `@${d}`;
+          badge.title = 'Click to copy handle';
+          badge.onclick = () => {
+            navigator.clipboard?.writeText(`@${d}`);
+            showExtToast(`Copied @${d}`, '📋');
+          };
+          chipsContainer.appendChild(badge);
+        });
+      }
+    }
+
+    if (copyBtn && defaulters.length > 0) {
+      copyBtn.style.display = 'block';
+      copyBtn.onclick = () => {
+        const textToCopy = defaulters.map(d => `@${d}`).join(' ');
+        navigator.clipboard?.writeText(textToCopy);
+        showExtToast(`Copied ${defaulters.length} defaulters to clipboard`, '📋');
+      };
+    }
+
+    updateAgentConsole('Audit Finished', `Found ${defaulters.length} defaulters out of ${expectedHandles.length} members. 5 credits deducted.`);
+    showExtToast(`Audit Complete (${defaulters.length} Defaulters)`, '🔍');
+
+  } catch (err) {
+    console.error('Defaulter audit error:', err);
+    if (heading) heading.textContent = 'Audit Failed: ' + (err.message || 'Error');
+    if (defaulterActiveTabId) {
+      try { await chrome.tabs.remove(defaulterActiveTabId); } catch (e) { }
+      defaulterActiveTabId = null;
+    }
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+  }
+}
+
+function stopDefaulterAuditWorkflow() {
+  state.isAborted = true;
+  if (defaulterActiveTabId) {
+    try { chrome.tabs.remove(defaulterActiveTabId); } catch (e) { }
+    defaulterActiveTabId = null;
+  }
+  const startBtn = document.getElementById('startDefaulterAuditBtn');
+  const stopBtn = document.getElementById('stopDefaulterAuditBtn');
+  if (startBtn) startBtn.style.display = 'block';
+  if (stopBtn) stopBtn.style.display = 'none';
+  showExtToast('Audit stopped by user', '⏹');
+}
+
+// =========================================================================
+// AGENT 12: TELEGRAM LIVE LIKER (SCREEN-RECORD FRIENDLY RAID)
+// =========================================================================
+let tgLiveWorkingTabId = null;
+
+async function startTgLiveRaidWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
+  if (state.credits < 1) {
+    alert('⚠️ Insufficient credits! You need at least 1 credit to run live raid engagement.\nPlease top up credits in the Credits tab.');
+    switchExtTab('credits');
+    return;
+  }
+
+  const rawInput = document.getElementById('tgLiveRaidInput')?.value || '';
+  let tweetLinks = extractTweetLinks(rawInput);
+
+  if (tweetLinks.length === 0) {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+    if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com'))) {
+      tweetLinks = [tabs[0].url.split('?')[0]];
+    } else {
+      alert('Please paste raid tweet links or navigate to the target post in your active browser tab.');
+      return;
+    }
+  }
+
+  const actions = {
+    like: document.getElementById('tgLiveOptLike')?.checked ?? true,
+    repost: document.getElementById('tgLiveOptRepost')?.checked ?? true,
+    bookmark: document.getElementById('tgLiveOptBookmark')?.checked ?? false,
+    glow: document.getElementById('tgLiveOptGlow')?.checked ?? true
+  };
+
+  const pacingMs = parseInt(document.getElementById('tgLivePacingSelect')?.value, 10) || 3500;
+
+  const startBtn = document.getElementById('startTgLiveRaidBtn');
+  const stopBtn = document.getElementById('stopTgLiveRaidBtn');
+  const statusCard = document.getElementById('tgLiveStatusCard');
+  const statusText = document.getElementById('tgLiveStatusText');
+  const countLiked = document.getElementById('tgLiveCountLiked');
+  const countReposted = document.getElementById('tgLiveCountReposted');
+  const countBookmarked = document.getElementById('tgLiveCountBookmarked');
+
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'block';
+  if (statusCard) statusCard.style.display = 'block';
+  if (statusText) statusText.textContent = `Starting Live Raid (Target 1 of ${tweetLinks.length})...`;
+
+  let totalLiked = 0, totalReposted = 0, totalBookmarked = 0;
+  state.isAborted = false;
+
+  updateAgentConsole('Live Raid Active', 'Recording-friendly tab created. Tab will stay open for proof recording.');
+
+  try {
+    // 1. OPEN TAB WITH active: true SO SCREEN RECORDER CAN CAPTURE IT
+    const initialTab = await chrome.tabs.create({ url: tweetLinks[0], active: true });
+    tgLiveWorkingTabId = initialTab.id;
+
+    for (let i = 0; i < tweetLinks.length; i++) {
+      if (state.isAborted) break;
+
+      const currentUrl = tweetLinks[i];
+      if (statusText) statusText.textContent = `Recording Tweet ${i + 1} of ${tweetLinks.length}...`;
+
+      if (i > 0) {
+        await chrome.tabs.update(tgLiveWorkingTabId, { url: currentUrl, active: true });
+      }
+
+      await waitForTabComplete(tgLiveWorkingTabId);
+      await sleep(2500); // Wait for tweet rendering
+
+      if (state.isAborted) break;
+
+      const raidRes = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(tgLiveWorkingTabId, {
+          type: 'EXECUTE_LIVE_RAID_ENGAGEMENT',
+          actions,
+          delay: pacingMs
+        }, (res) => resolve(res || { success: false }));
+      });
+
+      if (raidRes.success) {
+        deductCredits(1);
+        if (raidRes.liked) totalLiked++;
+        if (raidRes.reposted) totalReposted++;
+        if (raidRes.bookmarked) totalBookmarked++;
+
+        if (countLiked) countLiked.textContent = String(totalLiked);
+        if (countReposted) countReposted.textContent = String(totalReposted);
+        if (countBookmarked) countBookmarked.textContent = String(totalBookmarked);
+
+        updateAgentConsole('Raid Executed', `Live action completed on tweet ${i + 1}. Liked: ${raidRes.liked}, Reposted: ${raidRes.reposted}`);
+      }
+
+      // Safe pacing delay so screen recording captures the full interaction
+      await sleep(pacingMs);
+    }
+
+    if (statusText) {
+      statusText.textContent = state.isAborted
+        ? `Stopped. Tab kept open for recording proof!`
+        : `✓ Raid Complete! Tab is left open for screen record proof.`;
+    }
+    showExtToast('Raid finished — tab left open for proof!', '🎥');
+
+    // NOTE: WE DELIBERATELY DO NOT CLOSE THE TAB! TAB STAYS OPEN AS REQUESTED!
+
+  } catch (err) {
+    console.error('Live raid error:', err);
+    if (statusText) statusText.textContent = 'Raid Error: ' + err.message;
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+  }
+}
+
+function stopTgLiveRaidWorkflow() {
+  state.isAborted = true;
+  const startBtn = document.getElementById('startTgLiveRaidBtn');
+  const stopBtn = document.getElementById('stopTgLiveRaidBtn');
+  if (startBtn) startBtn.style.display = 'block';
+  if (stopBtn) stopBtn.style.display = 'none';
+  const statusText = document.getElementById('tgLiveStatusText');
+  if (statusText) statusText.textContent = 'Raid stopped by user. Tab is left open.';
+  showExtToast('Live raid stopped (tab left open)', '⏹');
 }
 
 // =========================================================================
