@@ -6,26 +6,26 @@ const db = require('../config/db');
 exports.login = async (req, res) => {
   try {
     const { identifier, email, handle, xHandle, username, password } = req.body;
-    const loginKey = (identifier || email || handle || xHandle || username || 'evan@atomx.io').trim();
+    const loginKey = (identifier || email || handle || xHandle || username || '').trim();
+    if (!loginKey) {
+      return res.status(400).json({ error: 'Please enter your Twitter / X ID or email.' });
+    }
+
     const cleanHandle = loginKey.replace(/^@/, '').toLowerCase();
 
     let user = null;
     if (loginKey.includes('@') && loginKey.includes('.')) {
-      user = await db.getUserByEmail(loginKey);
+      user = await db.getUserByEmail(loginKey.toLowerCase());
     }
     if (!user && db.getUserByHandle) {
       user = await db.getUserByHandle(cleanHandle);
     }
     if (!user) {
-      user = await db.getUserByEmail(loginKey);
-    }
-    if (!user) {
-      // Default fallback to primary user if no match found
-      user = await db.getUserById(1);
+      user = await db.getUserByEmail(loginKey.toLowerCase());
     }
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found. Please submit an access request with your X ID.' });
+      return res.status(401).json({ error: 'Invalid credentials. Account not found. Please request access if not registered.' });
     }
 
     if (user.status === 'SUSPENDED') {
@@ -33,6 +33,24 @@ exports.login = async (req, res) => {
         error: 'Account Suspended',
         message: 'Your account is currently suspended. Please contact support@atomx.io to appeal.'
       });
+    }
+
+    // STRICT PASSWORD VERIFICATION
+    const providedPass = (password || '').trim();
+    if (!providedPass) {
+      return res.status(400).json({ error: 'Password is required to sign in.' });
+    }
+
+    const storedPass = (user.password_hash || '').trim();
+    if (!storedPass || storedPass === 'approved_hash') {
+      return res.status(403).json({
+        needsPasswordSetup: true,
+        error: 'Password not set yet. Please click "Set Password" to initialize your credentials.'
+      });
+    }
+
+    if (storedPass !== providedPass) {
+      return res.status(401).json({ error: 'Incorrect password. Please verify your password and try again.' });
     }
 
     const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : `@${cleanHandle || 'user'}`;

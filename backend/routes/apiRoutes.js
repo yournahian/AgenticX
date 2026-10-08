@@ -41,6 +41,7 @@ router.get('/auth/me', authController.getCurrentUser);
 
 // Server-Controlled Credits
 router.get('/credits/balance', creditController.getBalance);
+router.post('/credits/deduct', creditController.deductCredit);
 router.get('/credits/ledger', creditController.getLedger);
 
 // AI Generation & Multi-Provider Engine

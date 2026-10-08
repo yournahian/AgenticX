@@ -3367,10 +3367,46 @@ function updateAgentConsole(status, log) {
   if (out) out.textContent = log;
 }
 
-function deductCredits(amount = 1) {
-  state.credits = Math.max(0, state.credits - amount);
+async function deductCredits(amount = 1, action = 'AI Reply', reason = 'Autonomous action') {
+  const num = Math.max(1, parseInt(amount, 10) || 1);
+  state.credits = Math.max(0, state.credits - num);
+  if (state.user) state.user.credits = state.credits;
   updateCreditUI();
-  chrome.storage?.local.set({ credits: state.credits });
+  chrome.storage?.local.set({ credits: state.credits, user: state.user, currentUser: state.user });
+
+  // Atomic cloud persistence & ledger audit logging in Supabase
+  try {
+    const backendUrl = await getBackendUrl();
+    const cleanHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').trim();
+    const email = (state.user?.email || '').trim();
+    const userId = state.user?.id;
+
+    if (cleanHandle || email || userId) {
+      const res = await fetch(`${backendUrl}/api/credits/deduct`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          handle: cleanHandle,
+          email,
+          amount: num,
+          action,
+          reason
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data.balance === 'number') {
+          state.credits = data.balance;
+          if (state.user) state.user.credits = data.balance;
+          updateCreditUI();
+          chrome.storage?.local.set({ credits: state.credits, user: state.user, currentUser: state.user });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[ATOMX] Server credit deduction warning:', err);
+  }
 }
 
 // Fetch live models for selected provider
@@ -3557,9 +3593,10 @@ async function syncServerStateNetwork() {
       }
     }
 
-    // Parallel balance and engaged tweets sync
+    // Parallel balance and engaged tweets sync for this specific verified account
+    const balUrl = `${backendUrl}/api/credits/balance?handle=${encodeURIComponent(cleanHandle)}&email=${encodeURIComponent(email)}`;
     const [balRes, engRes] = await Promise.allSettled([
-      fetch(`${backendUrl}/api/credits/balance`, { credentials: 'omit' }),
+      fetch(balUrl, { credentials: 'omit' }),
       fetch(`${backendUrl}/api/tweets/engaged`, { credentials: 'omit' })
     ]);
 
