@@ -285,15 +285,16 @@ exports.getCurrentUser = async (req, res) => {
   }
 };
 
-// Admin Login using Master Access Key from .env
+// Admin Login using Password / Master Access Key from .env
 exports.adminLogin = (req, res) => {
-  const { accessKey } = req.body;
-  const configuredKey = process.env.ADMIN_ACCESS_KEY || 'atomx-admin-key-2026';
+  const { password, accessKey } = req.body;
+  const input = (password || accessKey || '').trim();
+  const configuredPassword = (process.env.ADMIN_PASSWORD || process.env.ADMIN_ACCESS_KEY || 'atomx2026').trim();
 
-  if (!accessKey || accessKey.trim() !== configuredKey.trim()) {
+  if (!input || input !== configuredPassword) {
     return res.status(401).json({
       success: false,
-      error: 'Invalid Admin Access Key. Please check the ADMIN_ACCESS_KEY in your .env file.'
+      error: 'Invalid Admin Password. Please check the ADMIN_PASSWORD in your backend .env file.'
     });
   }
 
@@ -302,8 +303,8 @@ exports.adminLogin = (req, res) => {
     token: `atomx_admin_token_${Date.now()}`,
     role: 'ADMIN',
     admin: {
-      name: 'Evan Jawad (Owner)',
-      email: 'evan@atomx.io',
+      name: 'Administrator',
+      email: 'admin@atomx.io',
       role: 'ADMIN',
       permissions: ['ALL_PERMISSIONS']
     },
@@ -311,10 +312,10 @@ exports.adminLogin = (req, res) => {
   });
 };
 
-// Verify if an Admin Access Key is valid
+// Verify if an Admin Password / Key is valid
 exports.verifyAdminKey = (req, res) => {
-  const key = req.headers['x-admin-key'] || req.query.key;
-  const configuredKey = process.env.ADMIN_ACCESS_KEY || 'atomx-admin-key-2026';
-  const isValid = Boolean(key && key.trim() === configuredKey.trim());
+  const key = req.headers['x-admin-password'] || req.headers['x-admin-key'] || req.query.password || req.query.key;
+  const configuredPassword = (process.env.ADMIN_PASSWORD || process.env.ADMIN_ACCESS_KEY || 'atomx2026').trim();
+  const isValid = Boolean(key && key.trim() === configuredPassword);
   res.json({ valid: isValid });
 };

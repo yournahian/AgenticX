@@ -484,3 +484,17 @@ exports.saveApiKey = (req, res) => {
     res.status(500).json({ error: 'Failed to save API key: ' + err.message });
   }
 };
+
+// Wipe All User Data Fresh (Clean Slate)
+exports.wipeAllUsers = async (req, res) => {
+  try {
+    const result = await db.wipeAllUserData();
+    res.json({
+      success: true,
+      message: '✓ All user data, access requests, credits ledgers, and engaged tweets have been completely wiped fresh!',
+      result
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to wipe user data: ' + err.message });
+  }
+};

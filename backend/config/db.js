@@ -399,5 +399,17 @@ module.exports = {
   async clearEngagedTweets(userId = '1') {
     if (!supabase) return;
     await supabase.from('engaged_tweets').delete().eq('user_id', String(userId));
+  },
+
+  async wipeAllUserData() {
+    if (!supabase) return { success: true, message: 'No database connected' };
+    await supabase.from('credits_ledger').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('engaged_tweets').delete().neq('tweet_id', '___nonexistent___');
+    try { await supabase.from('campaigns').delete().neq('id', '00000000-0000-0000-0000-000000000000'); } catch (e) {}
+    try { await supabase.from('reply_queue').delete().neq('id', '00000000-0000-0000-0000-000000000000'); } catch (e) {}
+    try { await supabase.from('transactions').delete().neq('id', '00000000-0000-0000-0000-000000000000'); } catch (e) {}
+    await supabase.from('access_requests').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('users').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    return { success: true, message: 'All user data wiped fresh successfully' };
   }
 };

@@ -72,6 +72,8 @@ router.post('/admin/set-user-password', adminController.setUserPassword);
 router.get('/admin/plans', adminController.getPlans);
 router.post('/admin/save-plans', adminController.savePlans);
 router.get('/admin/ledger', adminController.getGlobalLedger);
+router.post('/admin/clean-all-data', adminController.wipeAllUsers);
+router.post('/admin/wipe-all-users', adminController.wipeAllUsers);
 
 // Curated Lists & Sorsa Score Targets Management
 router.get('/curated-lists', adminController.getCuratedLists);
