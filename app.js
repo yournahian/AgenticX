@@ -2282,7 +2282,9 @@ function renderAdminDashboard(container) {
             </div>
             <div class="stat-card">
               <div class="stat-label">Pending Requests</div>
-              <div class="stat-value" id="adminPendingReqsVal" style="color:var(--status-warning);">${AtomXState.adminStats?.pendingRequests || AtomXState.accessRequests.length || 0}</div>
+              <div class="stat-value" id="adminPendingReqsVal" style="color:var(--status-warning);">
+                ${(AtomXState.accessRequests || []).filter(r => (r.status || '').toUpperCase() === 'PENDING').length}
+              </div>
               <div class="stat-trend" style="color:var(--status-warning);">Awaiting Review</div>
             </div>
             <div class="stat-card">
@@ -2513,8 +2515,28 @@ function selectAdminDashboardTone(toneId) {
 
 // -------------------------------------------------------------
 // SCREEN 13: ACCESS REQUESTS (ADMIN)
+// SCREEN 13: ACCESS REQUESTS (ADMIN)
 // -------------------------------------------------------------
+function setAccessRequestFilter(filter) {
+  AtomXState.accessReqFilter = filter;
+  renderAdminAccessRequests(document.getElementById('mainContentArea'));
+}
+
 function renderAdminAccessRequests(container) {
+  const activeFilter = AtomXState.accessReqFilter || 'All';
+  const totalCount = (AtomXState.accessRequests || []).length;
+  const pendingCount = (AtomXState.accessRequests || []).filter(r => (r.status || '').toUpperCase() === 'PENDING').length;
+  const approvedCount = (AtomXState.accessRequests || []).filter(r => (r.status || '').toUpperCase() === 'APPROVED').length;
+  const rejectedCount = (AtomXState.accessRequests || []).filter(r => (r.status || '').toUpperCase() === 'REJECTED').length;
+
+  let filteredRequests = (AtomXState.accessRequests || []).filter(r => {
+    const s = (r.status || '').toUpperCase();
+    if (activeFilter === 'Pending') return s === 'PENDING';
+    if (activeFilter === 'Approved') return s === 'APPROVED';
+    if (activeFilter === 'Rejected') return s === 'REJECTED';
+    return true;
+  });
+
   container.innerHTML = `
     <div class="app-layout">
       ${renderAdminSidebarHTML('13')}
@@ -2524,11 +2546,15 @@ function renderAdminAccessRequests(container) {
             <h1 class="page-title">Access Requests</h1>
             <p class="page-subtitle">Review, approve, or reject new user account registrations.</p>
           </div>
+          <button class="btn btn-secondary btn-sm" onclick="loadAdminServerData(); showToast('↻ Synced requests');">↻ Refresh</button>
         </div>
 
         <div class="workspace-body">
           <div style="display:flex; gap:10px; margin-bottom:16px;">
-            <button class="style-pill active">Pending (${AtomXState.accessRequests.length})</button>
+            <button class="style-pill ${activeFilter === 'All' ? 'active' : ''}" onclick="setAccessRequestFilter('All')">All (${totalCount})</button>
+            <button class="style-pill ${activeFilter === 'Pending' ? 'active' : ''}" onclick="setAccessRequestFilter('Pending')">Pending (${pendingCount})</button>
+            <button class="style-pill ${activeFilter === 'Approved' ? 'active' : ''}" onclick="setAccessRequestFilter('Approved')">Approved (${approvedCount})</button>
+            <button class="style-pill ${activeFilter === 'Rejected' ? 'active' : ''}" onclick="setAccessRequestFilter('Rejected')">Rejected (${rejectedCount})</button>
           </div>
 
           <div class="atomx-table-wrapper">
@@ -2544,27 +2570,42 @@ function renderAdminAccessRequests(container) {
                 </tr>
               </thead>
               <tbody>
-                ${AtomXState.accessRequests.length === 0 ? `
+                ${filteredRequests.length === 0 ? `
                   <tr>
                     <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
                       <div style="font-size:24px; margin-bottom:8px;">📭</div>
-                      <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:4px;">No Pending Access Requests</div>
-                      <div style="font-size:12px;">When new users request access through the registration portal, they will appear here.</div>
+                      <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:4px;">No ${activeFilter !== 'All' ? activeFilter : ''} Access Requests</div>
+                      <div style="font-size:12px;">When new users request access through the Chrome extension, they will appear here.</div>
                     </td>
                   </tr>
-                ` : AtomXState.accessRequests.map(req => `
+                ` : filteredRequests.map(req => {
+                  const s = (req.status || 'Pending').toUpperCase();
+                  const isApproved = s === 'APPROVED';
+                  const isRejected = s === 'REJECTED';
+                  return `
                   <tr>
                     <td style="font-weight:600;">${req.name}</td>
                     <td style="font-weight:700; color:var(--blue-primary);">${req.handle || '@user'}</td>
                     <td>${req.email}</td>
                     <td style="color:var(--text-muted);">${req.requestedDate}</td>
-                    <td><span class="badge badge-warning">${req.status || 'Pending'}</span></td>
+                    <td>
+                      <span class="badge ${isApproved ? 'badge-success' : isRejected ? 'badge-error' : 'badge-warning'}">
+                        ${req.status || 'Pending'}
+                      </span>
+                    </td>
                     <td style="text-align:right;">
-                      <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${req.name}', '${req.email}', '${req.handle || '@user'}', '${req.id}')">Approve</button>
-                      <button class="btn btn-danger btn-sm" onclick="rejectUserRequest(${req.id})">Reject</button>
+                      ${isApproved ? `
+                        <span class="badge badge-success" style="padding:4px 10px; font-weight:700;">✓ Approved</span>
+                      ` : isRejected ? `
+                        <span class="badge badge-error" style="padding:4px 10px; font-weight:700;">✕ Rejected</span>
+                      ` : `
+                        <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${req.name}', '${req.email}', '${req.handle || '@user'}', '${req.id}')">Approve</button>
+                        <button class="btn btn-danger btn-sm" onclick="rejectUserRequest('${req.id}')">Reject</button>
+                      `}
                     </td>
                   </tr>
-                `).join('')}
+                  `;
+                }).join('')}
               </tbody>
             </table>
           </div>
@@ -2595,9 +2636,9 @@ function openApprovalModal(name, email, handle = '@user', reqId = '') {
         <div class="form-group">
           <label class="form-label">Plan Tier</label>
           <select class="form-select" id="approvalPlanSelect">
-            <option selected value="Free">Free (100 Credits)</option>
-            <option value="Growth">Growth (10,000 Credits)</option>
-            <option value="Pro">Pro (25,000 Credits)</option>
+            <option selected value="Free Plan">Free Plan (100 Credits)</option>
+            <option value="Growth Plan">Growth Plan (10,000 Credits)</option>
+            <option value="Pro Plan">Pro Plan (25,000 Credits)</option>
           </select>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:24px;">
@@ -2618,44 +2659,93 @@ function closeModal() {
 async function confirmApproval(name, email, handle = '@user', reqId = '') {
   closeModal();
   const credits = Number(document.getElementById('initialCreditsInput')?.value) || 100;
-  const plan = document.getElementById('approvalPlanSelect')?.value || 'Free';
+  const plan = document.getElementById('approvalPlanSelect')?.value || 'Free Plan';
+
+  // Optimistic status update
+  const r = (AtomXState.accessRequests || []).find(x => String(x.id) === String(reqId) || x.email === email);
+  if (r) r.status = 'APPROVED';
+  renderAdminAccessRequests(document.getElementById('mainContentArea'));
+
   try {
     const res = await fetch(`${API_BASE}/api/admin/approve-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestId: reqId, email, handle, initialCredits: credits, planTier: plan })
     });
-    if (res.ok) {
-      await loadAdminServerData();
-      alert(`User ${name} (${handle}) approved on server! Allocated ${credits} credits.`);
-      navigateToScreen('14');
-      return;
+    const d = await res.json();
+    if (!res.ok) {
+      throw new Error(d.error || 'Server error approving request');
     }
-  } catch (e) {}
+    showToast(`✓ User ${name} (${handle}) approved! Allocated ${credits} credits.`);
+  } catch (err) {
+    console.warn('[Approval Notice]', err);
+    showToast(`Approval Note: ${err.message}`);
+  }
 
-  AtomXState.accessRequests = AtomXState.accessRequests.filter(r => r.email !== email);
-  AtomXState.adminUsers.unshift({
-    id: Date.now(),
-    name: name,
-    email: email,
-    plan: plan,
-    credits: credits,
-    status: 'Active',
-    lastActive: 'Just now'
-  });
-  alert(`User ${name} approved! Server allocated ${credits} credits.`);
-  navigateToScreen('14');
-}
-
-function rejectUserRequest(id) {
-  AtomXState.accessRequests = AtomXState.accessRequests.filter(r => r.id !== id);
+  await loadAdminServerData();
   renderAdminAccessRequests(document.getElementById('mainContentArea'));
 }
+
+async function rejectUserRequest(id) {
+  if (!confirm('Are you sure you want to decline/reject this user access request?')) return;
+
+  const r = (AtomXState.accessRequests || []).find(x => String(x.id) === String(id));
+  if (r) r.status = 'REJECTED';
+  renderAdminAccessRequests(document.getElementById('mainContentArea'));
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/reject-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: id })
+    });
+    if (res.ok) {
+      showToast('✓ Request marked as rejected.');
+    }
+  } catch (e) {
+    console.warn('[Reject Notice]', e);
+  }
+
+  await loadAdminServerData();
+  renderAdminAccessRequests(document.getElementById('mainContentArea'));
+}
+
 
 // -------------------------------------------------------------
 // SCREEN 14: USER MANAGEMENT (ADMIN)
 // -------------------------------------------------------------
+function setAdminUserFilter(filter) {
+  AtomXState.userFilter = filter;
+  renderAdminUsers(document.getElementById('mainContentArea'));
+}
+
+function setAdminUserSearch(query) {
+  AtomXState.userSearchQuery = query;
+  renderAdminUsers(document.getElementById('mainContentArea'));
+}
+
 function renderAdminUsers(container) {
+  const activeFilter = AtomXState.userFilter || 'All';
+  const searchQuery = (AtomXState.userSearchQuery || '').toLowerCase().trim();
+
+  const totalCount = (AtomXState.adminUsers || []).length;
+  const activeCount = (AtomXState.adminUsers || []).filter(u => (u.status || '').toLowerCase() === 'active').length;
+  const pendingCount = (AtomXState.adminUsers || []).filter(u => (u.status || '').toLowerCase() === 'pending').length;
+  const suspendedCount = (AtomXState.adminUsers || []).filter(u => (u.status || '').toLowerCase() === 'suspended').length;
+
+  let displayedUsers = (AtomXState.adminUsers || []).filter(u => {
+    if (activeFilter !== 'All') {
+      if ((u.status || '').toLowerCase() !== activeFilter.toLowerCase()) return false;
+    }
+    if (searchQuery) {
+      const match = (u.name || '').toLowerCase().includes(searchQuery) ||
+                    (u.email || '').toLowerCase().includes(searchQuery) ||
+                    (u.handle || '').toLowerCase().includes(searchQuery);
+      if (!match) return false;
+    }
+    return true;
+  });
+
   container.innerHTML = `
     <div class="app-layout">
       ${renderAdminSidebarHTML('14')}
@@ -2665,19 +2755,22 @@ function renderAdminUsers(container) {
             <h1 class="page-title">Users</h1>
             <p class="page-subtitle">View and manage all platform accounts.</p>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="navigateToScreen('13')">+ Add / Review Users</button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="loadAdminServerData(); showToast('↻ Synced users');">↻ Refresh</button>
+            <button class="btn btn-primary btn-sm" onclick="navigateToScreen('13')">+ Add / Review Users</button>
+          </div>
         </div>
 
         <div class="workspace-body">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
             <div class="style-pills">
-              <span class="style-pill active">All</span>
-              <span class="style-pill">Active</span>
-              <span class="style-pill">Pending</span>
-              <span class="style-pill">Suspended</span>
+              <span class="style-pill ${activeFilter === 'All' ? 'active' : ''}" onclick="setAdminUserFilter('All')">All (${totalCount})</span>
+              <span class="style-pill ${activeFilter === 'Active' ? 'active' : ''}" onclick="setAdminUserFilter('Active')">Active (${activeCount})</span>
+              <span class="style-pill ${activeFilter === 'Pending' ? 'active' : ''}" onclick="setAdminUserFilter('Pending')">Pending (${pendingCount})</span>
+              <span class="style-pill ${activeFilter === 'Suspended' ? 'active' : ''}" onclick="setAdminUserFilter('Suspended')">Suspended (${suspendedCount})</span>
             </div>
             <div style="width:240px;">
-              <input type="text" class="form-input" placeholder="Search users...">
+              <input type="text" class="form-input" placeholder="Search users..." value="${AtomXState.userSearchQuery || ''}" oninput="setAdminUserSearch(this.value)">
             </div>
           </div>
 
@@ -2695,32 +2788,38 @@ function renderAdminUsers(container) {
                 </tr>
               </thead>
               <tbody>
-                ${AtomXState.adminUsers.length === 0 ? `
+                ${displayedUsers.length === 0 ? `
                   <tr>
                     <td colspan="7" style="text-align:center; padding:36px; color:var(--text-muted);">
                       <div style="font-size:22px; margin-bottom:6px;">👥</div>
-                      <div style="font-weight:600; font-size:13px; color:var(--text-primary); margin-bottom:2px;">No Users Registered</div>
-                      <div style="font-size:11px;">Active platform users will appear here once authenticated.</div>
+                      <div style="font-weight:600; font-size:13px; color:var(--text-primary); margin-bottom:2px;">No Users Match Filter</div>
+                      <div style="font-size:11px;">Try selecting another filter pill or clear the search.</div>
                     </td>
                   </tr>
-                ` : AtomXState.adminUsers.map(u => `
+                ` : displayedUsers.map(u => {
+                  const isSuspended = (u.status || '').toLowerCase() === 'suspended';
+                  const isPending = (u.status || '').toLowerCase() === 'pending';
+                  return `
                   <tr>
                     <td style="font-weight:600;">${u.name}</td>
                     <td>${u.email}</td>
                     <td><span class="badge badge-neutral">${u.plan}</span></td>
                     <td style="font-weight:600;">${(u.credits || 0).toLocaleString()}</td>
                     <td>
-                      <span class="badge ${u.status === 'Active' ? 'badge-success' : u.status === 'Pending' ? 'badge-warning' : 'badge-error'}">
+                      <span class="badge ${isSuspended ? 'badge-error' : isPending ? 'badge-warning' : 'badge-success'}">
                         ${u.status}
                       </span>
                     </td>
-                    <td style="color:var(--text-muted);">${u.lastActive}</td>
+                    <td style="color:var(--text-muted); font-size:11px;">${u.lastActive}</td>
                     <td style="text-align:right;">
-                      <button class="btn btn-secondary btn-sm" onclick="navigateToScreen('15')">Manage Credits</button>
-                      <button class="btn btn-danger btn-sm" onclick="toggleSuspendUser(${u.id})">${u.status === 'Suspended' ? 'Unsuspend' : 'Suspend'}</button>
+                      <button class="btn btn-secondary btn-sm" onclick="AtomXState.currentUser = ${JSON.stringify(u).replace(/"/g, '&quot;')}; navigateToScreen('15')">Manage Credits</button>
+                      <button class="btn ${isSuspended ? 'btn-primary' : 'btn-danger'} btn-sm" onclick="toggleSuspendUser('${u.id}')">
+                        ${isSuspended ? 'Unsuspend' : 'Suspend'}
+                      </button>
                     </td>
                   </tr>
-                `).join('')}
+                  `;
+                }).join('')}
               </tbody>
             </table>
           </div>
@@ -2730,12 +2829,34 @@ function renderAdminUsers(container) {
   `;
 }
 
-function toggleSuspendUser(id) {
-  const user = AtomXState.adminUsers.find(u => u.id === id);
+async function toggleSuspendUser(id) {
+  const user = (AtomXState.adminUsers || []).find(u => String(u.id) === String(id));
   if (!user) return;
-  user.status = user.status === 'Suspended' ? 'Active' : 'Suspended';
+  const isSuspended = (user.status || '').toLowerCase() === 'suspended';
+  const newStatus = isSuspended ? 'ACTIVE' : 'SUSPENDED';
+
+  // Optimistic update
+  user.status = isSuspended ? 'Active' : 'Suspended';
+  renderAdminUsers(document.getElementById('mainContentArea'));
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/toggle-user-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: id, status: newStatus })
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'Server error');
+    showToast(`✓ Account ${user.name} is now ${newStatus}`);
+  } catch (err) {
+    console.warn('[Suspend Error]', err);
+    showToast(`Note: ${err.message}`);
+  }
+
+  await loadAdminServerData();
   renderAdminUsers(document.getElementById('mainContentArea'));
 }
+
 
 // -------------------------------------------------------------
 // SCREEN 15: CREDIT MANAGEMENT (ADMIN)
@@ -4262,6 +4383,7 @@ function renderSidebarHTML(activeId) {
 }
 
 function renderAdminSidebarHTML(activeId) {
+  const pendingCount = (AtomXState.accessRequests || []).filter(r => (r.status || '').toUpperCase() === 'PENDING').length;
   return `
     <aside class="app-sidebar">
       <div class="sidebar-header">
@@ -4284,7 +4406,7 @@ function renderAdminSidebarHTML(activeId) {
         <div class="nav-item ${activeId === '13' ? 'active' : ''}" onclick="navigateToScreen('13')">
           <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
           <span>Access Requests</span>
-          <span class="badge badge-error" style="margin-left:auto; font-size:10px; padding:1px 5px;">36</span>
+          ${pendingCount > 0 ? `<span class="badge badge-warning" style="margin-left:auto; font-size:10px; padding:1px 6px;">${pendingCount}</span>` : ''}
         </div>
         <div class="nav-item ${activeId === '15' ? 'active' : ''}" onclick="navigateToScreen('15')">
           <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><line x1="12" y1="6" x2="12" y2="18"/></svg>
@@ -4465,8 +4587,9 @@ async function loadAdminServerData() {
         id: r.id,
         name: r.full_name || r.name,
         email: r.email,
-        requestedDate: r.created_at || 'Today',
-        status: r.status || 'Pending'
+        handle: r.handle || (r.use_case && r.use_case.match(/X_ID:(@?[\w_]+)/i) ? r.use_case.match(/X_ID:(@?[\w_]+)/i)[1] : '@user'),
+        requestedDate: r.requested_at ? new Date(r.requested_at).toLocaleDateString() : (r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Today'),
+        status: (r.status || 'Pending').toUpperCase()
       }));
     }
     if (ledgerRes && ledgerRes.ok) {
@@ -4495,6 +4618,13 @@ function initAtomXApp() {
     navigateToScreen('12'); // Strictly defaults to Admin Dashboard Overview
     fetchLiveModelsForProvider('groq');
     loadAdminServerData();
+
+    // Fast background sync every 10 seconds
+    setInterval(() => {
+      if (['12', '13', '14'].includes(AtomXState.currentScreen)) {
+        loadAdminServerData();
+      }
+    }, 10000);
   } catch (err) {
     console.error('[AtomX Init Error]', err);
   }
@@ -4505,4 +4635,5 @@ if (document.readyState === 'loading') {
 } else {
   initAtomXApp();
 }
+
 

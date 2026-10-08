@@ -150,6 +150,7 @@ exports.setPassword = async (req, res) => {
     const { identifier, handle, email, password } = req.body;
     const loginKey = (identifier || handle || email || '').trim();
     const cleanHandle = loginKey.replace(/^@/, '').toLowerCase();
+    const inputEmail = (email || (loginKey.includes('@') ? loginKey : '')).trim().toLowerCase();
 
     if (!loginKey || !password) {
       return res.status(400).json({ error: 'Handle/Email and new password are required' });
@@ -157,40 +158,51 @@ exports.setPassword = async (req, res) => {
 
     // Find user in users table
     let user = null;
-    if (loginKey.includes('@') && loginKey.includes('.')) {
-      user = await db.getUserByEmail(loginKey);
+    if (inputEmail) {
+      user = await db.getUserByEmail(inputEmail);
     }
-    if (!user && db.getUserByHandle) {
+    if (!user && cleanHandle && db.getUserByHandle) {
       user = await db.getUserByHandle(cleanHandle);
     }
-    if (!user) {
+    if (!user && loginKey) {
       user = await db.getUserByEmail(loginKey);
     }
 
     if (!user) {
-      // If user not in users table yet, check if request is APPROVED in access_requests
+      // Check if request is in access_requests
       const requests = await db.getAccessRequests();
       const match = (requests || []).find(r => {
         const rHandle = (r.handle || '').replace(/^@/, '').toLowerCase();
         const rEmail = (r.email || '').toLowerCase();
-        return rHandle === cleanHandle || rEmail === loginKey.toLowerCase();
+        return (cleanHandle && rHandle === cleanHandle) || 
+               (inputEmail && rEmail === inputEmail) || 
+               (loginKey && rEmail === loginKey.toLowerCase());
       });
 
-      if (match && match.status === 'APPROVED') {
-        user = await db.approveAccessRequest(match.id);
+      if (match) {
+        if (match.status === 'APPROVED' || match.status === 'PENDING') {
+          const approvedRes = await db.approveAccessRequest(match.id);
+          user = await db.getUserById(approvedRes.userId);
+        }
       }
     }
 
     if (!user) {
-      return res.status(404).json({ error: 'Approved user not found. Please ensure admin has approved your request.' });
+      return res.status(404).json({ error: 'Approved account not found. Please ensure your request has been submitted.' });
     }
 
-    // Update password in database
+    // Update password in database and set ACTIVE
     if (db.updateUserPassword) {
       await db.updateUserPassword(user.id, password);
     }
+    if (db.updateUserStatus) {
+      await db.updateUserStatus(user.id, 'ACTIVE');
+    }
 
-    const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : `@${cleanHandle}`;
+    // Reload fresh user
+    user = await db.getUserById(user.id) || user;
+
+    const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : (cleanHandle ? `@${cleanHandle}` : '@user');
 
     res.json({
       success: true,
@@ -203,16 +215,49 @@ exports.setPassword = async (req, res) => {
         handle: userHandle,
         role: user.role,
         status: 'ACTIVE',
-        plan: user.plan_tier,
-        credits: user.credits || 100,
-        maxCredits: user.credits || 100,
-        avatar: user.avatar_initials
+        plan: user.plan_tier || 'Free Plan',
+        credits: user.credits !== undefined ? user.credits : 100,
+        maxCredits: user.credits !== undefined ? user.credits : 100,
+        avatar: user.avatar_initials || 'UX'
       }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.requestReview = async (req, res) => {
+  try {
+    const { handle, email, reason } = req.body;
+    const identifier = handle || email || 'user';
+    await db.requestSuspensionReview(identifier, reason || 'Account suspension review requested from extension');
+    res.json({
+      success: true,
+      message: 'Review request submitted to Administrator. Please await manual review.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { identifier, email, handle, newPassword } = req.body;
+    const loginKey = (identifier || email || handle || '').trim();
+    if (!loginKey || !newPassword) {
+      return res.status(400).json({ error: 'Account handle/email and new password are required' });
+    }
+    const updatedUser = await db.resetUserPassword(loginKey, newPassword);
+    res.json({
+      success: true,
+      message: '✓ Password reset successfully! You can now log in with your new password.',
+      handle: updatedUser.handle
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 
 exports.getCurrentUser = async (req, res) => {
   try {

@@ -39,22 +39,44 @@ exports.getAccessRequests = async (req, res) => {
 };
 
 exports.approveRequest = async (req, res) => {
+  const { requestId, initialCredits, planTier } = req.body;
+  if (!requestId) {
+    return res.status(400).json({ error: 'requestId is required' });
+  }
+
+  try {
+    const credits = Number(initialCredits) || 100;
+    const plan = planTier || 'Free Plan';
+    const result = await db.approveAccessRequest(requestId, credits, plan);
+    res.json({
+      success: true,
+      message: `Access request approved! User created/activated and ${result.credits} credits allocated.`,
+      userId: result.userId,
+      creditsGranted: result.credits,
+      handle: result.handle
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.rejectRequest = async (req, res) => {
   const { requestId } = req.body;
   if (!requestId) {
     return res.status(400).json({ error: 'requestId is required' });
   }
 
   try {
-    const result = await db.approveAccessRequest(requestId);
+    await db.rejectAccessRequest(requestId);
     res.json({
-      message: 'Access request approved! User created and 100 free credits automatically allocated.',
-      userId: result.userId,
-      creditsGranted: result.credits
+      success: true,
+      message: 'Access request successfully rejected.'
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 };
+
 
 exports.adjustCredits = async (req, res) => {
   const { userId, amount, action = 'Admin Adjustment', reason = 'Manual credit update' } = req.body;

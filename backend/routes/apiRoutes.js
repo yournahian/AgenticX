@@ -35,6 +35,8 @@ router.get('/auth/verify-admin-key', authController.verifyAdminKey);
 router.post('/auth/request-access', authController.requestAccess);
 router.get('/auth/check-status', authController.checkAccessStatus);
 router.post('/auth/set-password', authController.setPassword);
+router.post('/auth/reset-password', authController.resetPassword);
+router.post('/auth/request-review', authController.requestReview);
 router.get('/auth/me', authController.getCurrentUser);
 
 // Server-Controlled Credits
@@ -64,6 +66,7 @@ router.get('/admin/users', adminController.getUsers);
 router.post('/admin/toggle-user-status', adminController.toggleUserStatus);
 router.get('/admin/access-requests', adminController.getAccessRequests);
 router.post('/admin/approve-request', adminController.approveRequest);
+router.post('/admin/reject-request', adminController.rejectRequest);
 router.post('/admin/adjust-credits', adminController.adjustCredits);
 router.get('/admin/plans', adminController.getPlans);
 router.post('/admin/save-plans', adminController.savePlans);

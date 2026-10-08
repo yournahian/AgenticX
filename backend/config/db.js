@@ -164,7 +164,7 @@ module.exports = {
     return data?.[0];
   },
 
-  async approveAccessRequest(requestId) {
+  async approveAccessRequest(requestId, initialCredits = 100, planTier = 'Free Plan') {
     if (!supabase) throw new Error('Database not connected');
     const { data: req } = await supabase.from('access_requests').select('*').eq('id', requestId).maybeSingle();
     if (!req) throw new Error('Access request not found');
@@ -173,39 +173,120 @@ module.exports = {
     const handleMatch = (req.use_case || '').match(/X_ID:(@?[\w_]+)/i);
     const assignedHandle = handleMatch ? (handleMatch[1].startsWith('@') ? handleMatch[1] : '@' + handleMatch[1]) : ('@' + req.email.split('@')[0]);
 
-    // Create user with 100 initial free credits
-    const initials = req.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'US';
-    const { data: newUser, error: userErr } = await supabase.from('users').insert({
-      email: req.email,
-      password_hash: 'approved_hash',
-      full_name: req.full_name,
-      handle: assignedHandle,
-      role: 'USER',
-      status: 'ACTIVE',
-      plan_tier: 'Free Plan',
-      credits: 100,
-      avatar_initials: initials
-    }).select().single();
+    // Check if user already exists in users table
+    const { data: existingUser } = await supabase.from('users').select('*').eq('email', req.email).maybeSingle();
+    let userRecord = null;
 
-    if (userErr) throw new Error(userErr.message);
+    if (existingUser) {
+      const grantCredits = existingUser.credits > 0 ? existingUser.credits : initialCredits;
+      const { data: updated, error: updErr } = await supabase.from('users').update({
+        status: 'ACTIVE',
+        handle: existingUser.handle || assignedHandle,
+        plan_tier: planTier || existingUser.plan_tier || 'Free Plan',
+        credits: grantCredits
+      }).eq('id', existingUser.id).select().single();
+      if (updErr) throw new Error(updErr.message);
+      userRecord = updated;
+    } else {
+      const initials = req.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'US';
+      const { data: newUser, error: userErr } = await supabase.from('users').insert({
+        email: req.email,
+        password_hash: 'approved_hash',
+        full_name: req.full_name,
+        handle: assignedHandle,
+        role: 'USER',
+        status: 'ACTIVE',
+        plan_tier: planTier || 'Free Plan',
+        credits: initialCredits,
+        avatar_initials: initials
+      }).select().single();
 
-    // Record initial grant in ledger
-    await supabase.from('credits_ledger').insert({
-      user_id: newUser.id,
-      amount: 100,
-      balance_after: 100,
-      action: 'Initial Grant',
-      admin_source: 'Admin Approval',
-      reason: 'Approved free onboarding: 100 free credits'
-    });
+      if (userErr) throw new Error(userErr.message);
+      userRecord = newUser;
 
-    // Update request status
+      // Record initial grant in ledger
+      await supabase.from('credits_ledger').insert({
+        user_id: userRecord.id,
+        amount: initialCredits,
+        balance_after: initialCredits,
+        action: 'Initial Grant',
+        admin_source: 'Admin Approval',
+        reason: `Approved free onboarding: ${initialCredits} credits`
+      });
+    }
+
+    // Update request status to APPROVED
     await supabase.from('access_requests').update({
       status: 'APPROVED',
       reviewed_at: new Date().toISOString()
     }).eq('id', requestId);
 
-    return { userId: newUser.id, credits: 100, handle: assignedHandle };
+    return { userId: userRecord.id, credits: userRecord.credits, handle: assignedHandle };
+  },
+
+  async rejectAccessRequest(requestId) {
+    if (!supabase) throw new Error('Database not connected');
+    const { data, error } = await supabase.from('access_requests').update({
+      status: 'REJECTED',
+      reviewed_at: new Date().toISOString()
+    }).eq('id', requestId).select();
+    if (error) throw new Error(error.message);
+    return data?.[0];
+  },
+
+  async requestSuspensionReview(identifier, reason = 'User requested review of suspension') {
+    if (!supabase) return { success: true };
+    const clean = (identifier || '').replace(/^@/, '').toLowerCase().trim();
+    let user = null;
+    if (identifier.includes('@') && identifier.includes('.')) {
+      user = await this.getUserByEmail(identifier);
+    }
+    if (!user) {
+      user = await this.getUserByHandle(clean);
+    }
+    if (user) {
+      await supabase.from('credits_ledger').insert({
+        user_id: user.id,
+        amount: 0,
+        balance_after: user.credits || 0,
+        action: 'Appeal Review',
+        admin_source: 'Extension Appeal',
+        reason: `Appeal: ${reason}`
+      });
+      return { success: true, user };
+    }
+    return { success: true };
+  },
+
+  async resetUserPassword(identifier, newPassword) {
+    if (!supabase) throw new Error('Database not connected');
+    const clean = (identifier || '').replace(/^@/, '').toLowerCase().trim();
+    let user = null;
+    if (identifier.includes('@') && identifier.includes('.')) {
+      user = await this.getUserByEmail(identifier);
+    }
+    if (!user) {
+      user = await this.getUserByHandle(clean);
+    }
+    if (!user) {
+      const reqs = await this.getAccessRequests();
+      const m = (reqs || []).find(r => {
+        const rHandle = (r.handle || '').replace(/^@/, '').toLowerCase();
+        return rHandle === clean || (r.email || '').toLowerCase() === identifier.toLowerCase();
+      });
+      if (m) {
+        user = await this.getUserByEmail(m.email);
+      }
+    }
+    if (!user) {
+      throw new Error('User not found. Please ensure your email or handle is registered.');
+    }
+    const { data, error } = await supabase.from('users').update({
+      password_hash: newPassword,
+      status: 'ACTIVE'
+    }).eq('id', user.id).select().single();
+    if (error) throw new Error(error.message);
+    return data;
   },
 
   // Campaigns & Queue

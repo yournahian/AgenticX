@@ -40,7 +40,7 @@
     </header>
 
     <!-- 1-to-1 Verified Twitter / X Identity Lock Bar -->
-    <div id="verifiedAccountBar" style="padding: 6px 14px; background: rgba(59,130,246,0.06); border-bottom: 1px solid var(--border-subtle); font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+    <div id="verifiedAccountBar" style="display:none; padding: 6px 14px; background: rgba(59,130,246,0.06); border-bottom: 1px solid var(--border-subtle); font-size: 11px; justify-content: space-between; align-items: center;">
       <div style="display:flex; align-items:center; gap:6px;">
         <span id="barLockDot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#10B981;"></span>
         <span style="color:var(--text-secondary);">Verified X ID:</span>
@@ -60,8 +60,8 @@
       </div>
     </div>
 
-    <!-- Modern Segmented Navigation Tabs (Spacious, Single Line, No Clutter) -->
-    <nav class="ext-tabs">
+    <!-- Modern Segmented Navigation Tabs (Hidden until authenticated & active) -->
+    <nav class="ext-tabs" id="extTabsNav" style="display:none;">
       <button class="tab-btn active" data-tab="agents">
         <span class="tab-icon">⚡</span>
         <span class="tab-text">Agents</span>
@@ -88,12 +88,9 @@
     <main class="ext-main">
 
       <!-- ============================================== -->
-      <!-- TAB 1: 10 AUTONOMOUS AGENTS (ACCORDION STYLE)  -->
-      <!-- ============================================== -->
-      <!-- ============================================== -->
       <!-- TAB 1: 10 AUTONOMOUS AGENTS (BENTO GRID + DETAIL VIEW) -->
       <!-- ============================================== -->
-      <section id="panel-agents" class="tab-panel active">
+      <section id="panel-agents" class="tab-panel">
 
         <!-- VIEW A: BENTO GRID DASHBOARD -->
         <div id="agentsBentoView" class="agents-bento-container">
@@ -1091,7 +1088,7 @@
       <!-- ============================================== -->
       <!-- TAB 5: ACCESS & ACCOUNT (1-TO-1 X IDENTITY LOCK) -->
       <!-- ============================================== -->
-      <section id="panel-access" class="tab-panel">
+      <section id="panel-access" class="tab-panel active">
 
         <!-- VIEW 1: Logged In Account Details View -->
         <div id="extLoggedInCard" class="card" style="display:none; padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
@@ -1217,12 +1214,18 @@
 
           <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Create New Password</label>
-            <input type="password" id="extNewPasswordInput" class="ext-input" placeholder="Enter password (min 6 characters)" value="">
+            <div style="position:relative; display:flex; align-items:center;">
+              <input type="password" id="extNewPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="Enter password (min 6 characters)" value="">
+              <button type="button" class="pwd-eye-toggle-btn" data-target="extNewPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
+            </div>
           </div>
 
           <div style="margin-bottom:12px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Confirm New Password</label>
-            <input type="password" id="extConfirmPasswordInput" class="ext-input" placeholder="Confirm password" value="">
+            <div style="position:relative; display:flex; align-items:center;">
+              <input type="password" id="extConfirmPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="Confirm password" value="">
+              <button type="button" class="pwd-eye-toggle-btn" data-target="extConfirmPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
+            </div>
           </div>
 
           <button type="button" class="primary-btn mini-btn" id="extSaveNewPasswordSubmitBtn" style="width:100%; margin-top:0;">
@@ -1245,9 +1248,18 @@
             <input type="text" id="extLoginHandleInput" class="ext-input" placeholder="e.g. @yourhandle or your@email.com" value="">
           </div>
 
-          <div style="margin-bottom:12px;">
+          <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Account Password</label>
-            <input type="password" id="extLoginPasswordInput" class="ext-input" placeholder="••••••••" value="">
+            <div style="position:relative; display:flex; align-items:center;">
+              <input type="password" id="extLoginPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="••••••••" value="">
+              <button type="button" class="pwd-eye-toggle-btn" data-target="extLoginPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
+            </div>
+          </div>
+
+          <div style="text-align:right; margin-bottom:12px;">
+            <button type="button" id="extGoToResetPwdLink" style="background:none; border:none; color:var(--blue-primary); font-size:10.5px; cursor:pointer; text-decoration:underline;">
+              Forgot / Reset Password?
+            </button>
           </div>
 
           <button type="button" class="primary-btn mini-btn" id="extLoginSubmitBtn" style="width:100%; margin-top:0;">
@@ -1259,6 +1271,74 @@
               Don't have access? Request Access with your X ID
             </button>
           </div>
+        </div>
+
+        <!-- VIEW 6: Reset Password View -->
+        <div id="extResetPasswordView" class="card" style="display:none; padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="text-align:center; margin-bottom:12px;">
+            <div style="font-size:24px; margin-bottom:4px;">🔑</div>
+            <div style="font-weight:700; font-size:14px; color:var(--text-primary);">Reset Account Password</div>
+            <p style="font-size:11px; color:var(--text-secondary); margin-top:4px; line-height:1.4;">
+              Enter your verified Twitter / X handle or email and choose a new password.
+            </p>
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Twitter / X ID or Registered Email</label>
+            <input type="text" id="extResetIdentifierInput" class="ext-input" placeholder="e.g. @mythopair or user@email.com">
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">New Password</label>
+            <div style="position:relative; display:flex; align-items:center;">
+              <input type="password" id="extResetNewPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="New password (min 6 characters)">
+              <button type="button" class="pwd-eye-toggle-btn" data-target="extResetNewPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
+            </div>
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Confirm New Password</label>
+            <div style="position:relative; display:flex; align-items:center;">
+              <input type="password" id="extResetConfirmPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="Confirm new password">
+              <button type="button" class="pwd-eye-toggle-btn" data-target="extResetConfirmPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
+            </div>
+          </div>
+
+          <button type="button" class="primary-btn mini-btn" id="extResetPasswordSubmitBtn" style="width:100%; margin-top:0;">
+            Save New Password & Sign In
+          </button>
+
+          <div style="margin-top:12px; text-align:center;">
+            <button type="button" id="extBackToLoginFromResetBtn" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
+              Back to Sign In
+            </button>
+          </div>
+        </div>
+
+        <!-- VIEW 7: Account Suspended View -->
+        <div id="extSuspendedView" class="card" style="display:none; padding:20px 16px; background:var(--bg-card); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius-md); text-align:center;">
+          <div style="font-size:32px; margin-bottom:6px;">⛔</div>
+          <div style="font-weight:800; font-size:15px; color:#EF4444; margin-bottom:2px;">Account Suspended</div>
+          <span class="badge-mini popular" style="background:rgba(239,68,68,0.15); color:#EF4444; margin-bottom:12px; display:inline-block;">ACCESS RESTRICTED BY ADMIN</span>
+
+          <p style="font-size:11.5px; color:var(--text-secondary); line-height:1.5; margin-bottom:16px;">
+            Your account (<strong id="extSuspendedHandleDisplay" style="color:var(--text-primary); font-family:monospace;">@user</strong>) has been temporarily suspended by an administrator. All automated agent actions and AI replies are locked.
+          </p>
+
+          <div style="background:var(--bg-canvas); padding:10px; border-radius:6px; border:1px solid var(--border-subtle); font-size:11px; text-align:left; margin-bottom:14px;">
+            <div style="color:var(--text-secondary); margin-bottom:4px;">Notice:</div>
+            <div style="color:var(--text-primary); font-size:11px; line-height:1.4;">
+              If you believe this suspension was made in error or would like your account restored, click the button below to submit a review request directly to the admin dashboard.
+            </div>
+          </div>
+
+          <button type="button" class="primary-btn mini-btn" id="extRequestReviewBtn" style="width:100%; margin-top:0; background:#DC2626; border-color:#DC2626; margin-bottom:10px;">
+            📨 Request Account Review / Appeal
+          </button>
+
+          <button type="button" id="extSuspendedLogoutBtn" style="background:none; border:none; color:var(--text-muted); font-size:11px; cursor:pointer; text-decoration:underline;">
+            Log out and switch account
+          </button>
         </div>
 
       </section>

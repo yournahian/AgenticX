@@ -624,12 +624,34 @@ function initListeners() {
   document.getElementById('extEditRequestBtn')?.addEventListener('click', () => showAccessSubView('request'));
   document.getElementById('extGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extGoToRequestLink')?.addEventListener('click', () => showAccessSubView('request'));
+  document.getElementById('extGoToResetPwdLink')?.addEventListener('click', () => showAccessSubView('reset'));
+  document.getElementById('extBackToLoginFromResetBtn')?.addEventListener('click', () => showAccessSubView('login'));
+  document.getElementById('extResetPasswordSubmitBtn')?.addEventListener('click', handleExtResetPassword);
+  document.getElementById('extRequestReviewBtn')?.addEventListener('click', handleExtRequestReview);
+  document.getElementById('extSuspendedLogoutBtn')?.addEventListener('click', handleExtLogout);
   document.getElementById('extSaveNewPasswordSubmitBtn')?.addEventListener('click', handleExtSetPassword);
   document.getElementById('extLoginSubmitBtn')?.addEventListener('click', handleExtLogin);
   document.getElementById('extLogoutBtn')?.addEventListener('click', handleExtLogout);
   document.getElementById('extSyncAccountBtn')?.addEventListener('click', async () => {
     await loadServerState();
     alert('✓ Account details & credit balance synchronized with server.');
+  });
+
+  // Password visibility eye toggles
+  document.querySelectorAll('.pwd-eye-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetId = btn.dataset.target;
+      const input = document.getElementById(targetId);
+      if (!input) return;
+      if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈';
+      } else {
+        input.type = 'password';
+        btn.textContent = '👁️';
+      }
+    });
   });
 }
 
@@ -2306,6 +2328,24 @@ async function loadServerState() {
       }
     }
 
+    // Live account status check (detects if admin suspended or modified account)
+    if (state.user && (state.user.handle || state.user.email)) {
+      const qHandle = encodeURIComponent(state.user.handle || '');
+      const qEmail = encodeURIComponent(state.user.email || '');
+      const stRes = await fetch(`${backendUrl}/api/auth/check-status?handle=${qHandle}&email=${qEmail}`, { credentials: 'omit' }).catch(() => null);
+      if (stRes && stRes.ok) {
+        const stData = await stRes.json();
+        if (stData.status) {
+          state.user.status = stData.status;
+          if (typeof stData.credits === 'number') state.credits = stData.credits;
+          if (stData.plan) state.userPlan = stData.plan;
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            chrome.storage.local.set({ user: state.user, credits: state.credits, userPlan: state.userPlan });
+          }
+        }
+      }
+    }
+
     // Sync engaged tweet IDs from backend SQLite
     const engRes = await fetch(`${backendUrl}/api/tweets/engaged`, { credentials: 'omit' }).catch(() => null);
     if (engRes && engRes.ok) {
@@ -2331,7 +2371,7 @@ async function loadServerState() {
 }
 
 /**
- * Switch between the 5 Access sub-views inside Tab 5
+ * Switch between the 7 Access sub-views inside Tab 5
  */
 function showAccessSubView(viewName) {
   const views = {
@@ -2339,7 +2379,9 @@ function showAccessSubView(viewName) {
     'request': document.getElementById('extRequestAccessView'),
     'pending': document.getElementById('extPendingApprovalView'),
     'setPassword': document.getElementById('extSetPasswordView'),
-    'login': document.getElementById('extLoggedOutCard')
+    'login': document.getElementById('extLoggedOutCard'),
+    'reset': document.getElementById('extResetPasswordView'),
+    'suspended': document.getElementById('extSuspendedView')
   };
 
   Object.entries(views).forEach(([k, el]) => {
@@ -2358,20 +2400,37 @@ async function checkAccountVerificationLock() {
   const mismatchBanner = document.getElementById('accountMismatchBanner');
   const mismatchExpected = document.getElementById('mismatchExpectedHandle');
   const mismatchActual = document.getElementById('mismatchActualHandle');
+  const tabsNav = document.getElementById('extTabsNav');
+  const verifiedBar = document.getElementById('verifiedAccountBar');
+
+  // Check if account status is SUSPENDED
+  const isSuspended = state.user && (state.user.status || '').toUpperCase() === 'SUSPENDED';
+
+  if (isSuspended) {
+    if (tabsNav) tabsNav.style.display = 'none';
+    if (verifiedBar) verifiedBar.style.display = 'none';
+    if (mismatchBanner) mismatchBanner.style.display = 'none';
+
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-access')?.classList.add('active');
+
+    const suspHandle = document.getElementById('extSuspendedHandleDisplay');
+    if (suspHandle) suspHandle.textContent = verifiedHandle ? `@${verifiedHandle}` : (state.user?.handle || '@user');
+
+    showAccessSubView('suspended');
+    return { isAllowed: false, reason: 'ACCOUNT_SUSPENDED' };
+  }
 
   // Case 1: User is NOT authenticated
   if (!state.user && !verifiedHandle) {
-    if (barText) barText.textContent = state.pendingRequest ? state.pendingRequest.handle : 'Not Authenticated';
-    if (barBadge) {
-      barBadge.textContent = state.pendingRequest ? 'REQUEST PENDING' : 'ACCESS REQUIRED';
-      barBadge.style.color = '#F59E0B';
-      barBadge.style.background = 'rgba(245, 158, 11, 0.15)';
-    }
-    if (barDot) barDot.style.background = '#F59E0B';
+    if (tabsNav) tabsNav.style.display = 'none';
+    if (verifiedBar) verifiedBar.style.display = 'none';
     if (mismatchBanner) mismatchBanner.style.display = 'none';
 
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel-access')?.classList.add('active');
+
     if (state.pendingRequest) {
-      // Show Pending view
       const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
       const pHandleText = document.getElementById('extPendingHandleText');
       const pEmailText = document.getElementById('extPendingEmailText');
@@ -2379,17 +2438,18 @@ async function checkAccountVerificationLock() {
       if (pHandleText) pHandleText.textContent = state.pendingRequest.handle;
       if (pEmailText) pEmailText.textContent = state.pendingRequest.email || '--';
       showAccessSubView('pending');
-      // Silently check if admin approved in background
       handleExtCheckStatus(false);
     } else {
-      // First-time visitor -> Show Request Access form
       showAccessSubView('request');
     }
 
     return { isAllowed: false, reason: 'NOT_AUTHENTICATED' };
   }
 
-  // Case 2: User is authenticated
+  // Case 2: User is authenticated & Active
+  if (tabsNav) tabsNav.style.display = 'flex';
+  if (verifiedBar) verifiedBar.style.display = 'flex';
+
   showAccessSubView('loggedIn');
 
   const displayHandle = verifiedHandle ? `@${verifiedHandle}` : '@user';
@@ -2402,6 +2462,7 @@ async function checkAccountVerificationLock() {
   if (extPlan) extPlan.textContent = state.user?.plan || state.userPlan || 'Growth Plan';
   const extCredits = document.getElementById('extLoggedInCredits');
   if (extCredits) extCredits.textContent = `${(state.credits || 0).toLocaleString()} Credits`;
+
 
   // Real-time tab check with active Twitter/X tab
   try {
@@ -2640,7 +2701,12 @@ async function handleExtSetPassword() {
     const res = await fetch(`${backendUrl}/api/auth/set-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: targetHandle || targetEmail, password: p1 })
+      body: JSON.stringify({
+        identifier: targetHandle || targetEmail,
+        email: targetEmail,
+        handle: targetHandle,
+        password: p1
+      })
     });
 
     const data = await res.json();
@@ -2678,6 +2744,83 @@ async function handleExtSetPassword() {
     }
   }
 }
+
+async function handleExtResetPassword() {
+  const ident = document.getElementById('extResetIdentifierInput')?.value.trim();
+  const p1 = document.getElementById('extResetNewPasswordInput')?.value.trim();
+  const p2 = document.getElementById('extResetConfirmPasswordInput')?.value.trim();
+  const btn = document.getElementById('extResetPasswordSubmitBtn');
+
+  if (!ident) {
+    alert('Please enter your X ID or registered email.');
+    return;
+  }
+  if (!p1 || p1.length < 6) {
+    alert('Please enter a password with at least 6 characters.');
+    return;
+  }
+  if (p1 !== p2) {
+    alert('Passwords do not match. Please re-enter.');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Resetting Password...';
+  }
+
+  try {
+    const backendUrl = await getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: ident, newPassword: p1 })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not reset password');
+    }
+    alert('✓ Password updated successfully!\nPlease sign in with your new password.');
+    showAccessSubView('login');
+    const loginInput = document.getElementById('extLoginHandleInput');
+    if (loginInput) loginInput.value = data.handle || ident;
+  } catch (e) {
+    alert(`❌ Reset Error: ${e.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save New Password & Sign In';
+    }
+  }
+}
+
+async function handleExtRequestReview() {
+  const btn = document.getElementById('extRequestReviewBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Submitting Appeal...';
+  }
+  try {
+    const backendUrl = await getBackendUrl();
+    const handle = state.verifiedXHandle || state.user?.handle || '';
+    const email = state.user?.email || '';
+    const res = await fetch(`${backendUrl}/api/auth/request-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle, email, reason: 'Suspended user requesting review from extension' })
+    });
+    const d = await res.json();
+    alert('✓ Review Request Submitted!\n\nYour appeal has been delivered to the administrator.\nPlease await review.');
+    if (btn) btn.textContent = '✓ Appeal Submitted to Admin';
+  } catch (err) {
+    alert(`Notice: ${err.message}`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '📨 Request Account Review / Appeal';
+    }
+  }
+}
+
 
 async function handleExtLogin() {
   const identifierInput = document.getElementById('extLoginHandleInput');
