@@ -2763,11 +2763,6 @@ function renderAdminCreditManagement(container) {
 
               <div class="form-group">
                 <label class="form-label">Credit Amount</label>
-                <input type="number" id="adminCreditInput" class="form-input" value="1000">
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Credit Amount</label>
                 <input type="number" id="adminCreditInput" class="form-input" value="1000" min="1">
               </div>
 
@@ -3069,12 +3064,6 @@ async function persistAdminPlans() {
   } catch (e) {
     console.warn('Could not post plans to backend', e);
   }
-}
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
 }
 
 // -------------------------------------------------------------
@@ -4500,10 +4489,20 @@ async function loadAdminServerData() {
   }
 }
 
-// Window load init
-window.addEventListener('DOMContentLoaded', () => {
-  initTheme();
-  navigateToScreen('12'); // Strictly defaults to Admin Dashboard Overview
-  fetchLiveModelsForProvider('groq');
-  loadAdminServerData();
-});
+function initAtomXApp() {
+  try {
+    initTheme();
+    navigateToScreen('12'); // Strictly defaults to Admin Dashboard Overview
+    fetchLiveModelsForProvider('groq');
+    loadAdminServerData();
+  } catch (err) {
+    console.error('[AtomX Init Error]', err);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAtomXApp);
+} else {
+  initAtomXApp();
+}
+

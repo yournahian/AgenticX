@@ -9,7 +9,19 @@
 </head>
 <body>
   <!-- Dynamic Application Root (Full Screen SaaS Workspace) -->
-  <main id="mainContentArea" class="app-root"></main>
+  <main id="mainContentArea" class="app-root">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; font-family:'Inter',sans-serif; background:#0A0C10; color:#fff;">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+        <span style="display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; background:linear-gradient(135deg, #3B66FF, #6366F1); border-radius:10px; font-weight:800; font-size:18px; color:#fff;">X</span>
+        <span style="font-size:22px; font-weight:800; letter-spacing:-0.5px;">ATOMX ENGAGE</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; font-size:13px; color:#9DA3AF;">
+        <div style="width:16px; height:16px; border:2px solid #3B66FF; border-top-color:transparent; border-radius:50%; animation:atomxSpin 0.8s linear infinite;"></div>
+        <span>Initializing Workspace...</span>
+      </div>
+      <style>@keyframes atomxSpin { to { transform: rotate(360deg); } }</style>
+    </div>
+  </main>
 
   <script src="app.js"></script>
 </body>

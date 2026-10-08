@@ -4489,10 +4489,20 @@ async function loadAdminServerData() {
   }
 }
 
-// Window load init
-window.addEventListener('DOMContentLoaded', () => {
-  initTheme();
-  navigateToScreen('12'); // Strictly defaults to Admin Dashboard Overview
-  fetchLiveModelsForProvider('groq');
-  loadAdminServerData();
-});
+function initAtomXApp() {
+  try {
+    initTheme();
+    navigateToScreen('12'); // Strictly defaults to Admin Dashboard Overview
+    fetchLiveModelsForProvider('groq');
+    loadAdminServerData();
+  } catch (err) {
+    console.error('[AtomX Init Error]', err);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAtomXApp);
+} else {
+  initAtomXApp();
+}
+
