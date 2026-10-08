@@ -618,20 +618,18 @@ function initListeners() {
     alert('✓ Invite Code EVAN-X924 copied to clipboard! Share with friends to earn bonus credits.');
   });
 
-  // 1-to-1 Verified Account Login & Logout Handlers
+  // 1-to-1 Verified Account & In-Extension Request Access Flow
+  document.getElementById('extSubmitRequestBtn')?.addEventListener('click', handleExtSubmitRequest);
+  document.getElementById('extCheckStatusBtn')?.addEventListener('click', () => handleExtCheckStatus(true));
+  document.getElementById('extEditRequestBtn')?.addEventListener('click', () => showAccessSubView('request'));
+  document.getElementById('extGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
+  document.getElementById('extGoToRequestLink')?.addEventListener('click', () => showAccessSubView('request'));
+  document.getElementById('extSaveNewPasswordSubmitBtn')?.addEventListener('click', handleExtSetPassword);
   document.getElementById('extLoginSubmitBtn')?.addEventListener('click', handleExtLogin);
   document.getElementById('extLogoutBtn')?.addEventListener('click', handleExtLogout);
   document.getElementById('extSyncAccountBtn')?.addEventListener('click', async () => {
     await loadServerState();
     alert('✓ Account details & credit balance synchronized with server.');
-  });
-  document.getElementById('extOpenRequestAccessBtn')?.addEventListener('click', async () => {
-    const backendUrl = await getBackendUrl();
-    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
-      chrome.tabs.create({ url: backendUrl });
-    } else {
-      window.open(backendUrl, '_blank');
-    }
   });
 }
 
@@ -2281,12 +2279,13 @@ async function loadServerState() {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       const stored = await chrome.storage.local.get([
         'credits', 'accessKey', 'creators', 'engagedTweetIds', 'userPlan',
-        'currentUser', 'authToken', 'verifiedXHandle'
+        'currentUser', 'authToken', 'verifiedXHandle', 'pendingRequest'
       ]);
       if (stored?.credits !== undefined) state.credits = stored.credits;
       if (stored?.accessKey) state.accessKey = stored.accessKey;
       if (stored?.userPlan) state.userPlan = stored.userPlan;
       if (stored?.currentUser) state.user = stored.currentUser;
+      if (stored?.pendingRequest) state.pendingRequest = stored.pendingRequest;
       if (stored?.verifiedXHandle) {
         state.verifiedXHandle = stored.verifiedXHandle;
       } else if (state.user?.handle) {
@@ -2324,6 +2323,28 @@ async function loadServerState() {
   updateCreditUI();
   renderCreatorChips();
   await checkAccountVerificationLock();
+
+  // If user is not authenticated and has not requested yet, automatically open Access tab
+  if (!state.user && !state.pendingRequest) {
+    switchExtTab('access');
+  }
+}
+
+/**
+ * Switch between the 5 Access sub-views inside Tab 5
+ */
+function showAccessSubView(viewName) {
+  const views = {
+    'loggedIn': document.getElementById('extLoggedInCard'),
+    'request': document.getElementById('extRequestAccessView'),
+    'pending': document.getElementById('extPendingApprovalView'),
+    'setPassword': document.getElementById('extSetPasswordView'),
+    'login': document.getElementById('extLoggedOutCard')
+  };
+
+  Object.entries(views).forEach(([k, el]) => {
+    if (el) el.style.display = (k === viewName) ? 'block' : 'none';
+  });
 }
 
 /**
@@ -2338,27 +2359,38 @@ async function checkAccountVerificationLock() {
   const mismatchExpected = document.getElementById('mismatchExpectedHandle');
   const mismatchActual = document.getElementById('mismatchActualHandle');
 
-  const loggedInCard = document.getElementById('extLoggedInCard');
-  const loggedOutCard = document.getElementById('extLoggedOutCard');
-
+  // Case 1: User is NOT authenticated
   if (!state.user && !verifiedHandle) {
-    if (barText) barText.textContent = 'Not Authenticated';
+    if (barText) barText.textContent = state.pendingRequest ? state.pendingRequest.handle : 'Not Authenticated';
     if (barBadge) {
-      barBadge.textContent = 'LOG IN REQUIRED';
+      barBadge.textContent = state.pendingRequest ? 'REQUEST PENDING' : 'ACCESS REQUIRED';
       barBadge.style.color = '#F59E0B';
       barBadge.style.background = 'rgba(245, 158, 11, 0.15)';
     }
     if (barDot) barDot.style.background = '#F59E0B';
     if (mismatchBanner) mismatchBanner.style.display = 'none';
 
-    if (loggedInCard) loggedInCard.style.display = 'none';
-    if (loggedOutCard) loggedOutCard.style.display = 'block';
+    if (state.pendingRequest) {
+      // Show Pending view
+      const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
+      const pHandleText = document.getElementById('extPendingHandleText');
+      const pEmailText = document.getElementById('extPendingEmailText');
+      if (pHandleDisplay) pHandleDisplay.textContent = state.pendingRequest.handle;
+      if (pHandleText) pHandleText.textContent = state.pendingRequest.handle;
+      if (pEmailText) pEmailText.textContent = state.pendingRequest.email || '--';
+      showAccessSubView('pending');
+      // Silently check if admin approved in background
+      handleExtCheckStatus(false);
+    } else {
+      // First-time visitor -> Show Request Access form
+      showAccessSubView('request');
+    }
+
     return { isAllowed: false, reason: 'NOT_AUTHENTICATED' };
   }
 
-  // User is authenticated
-  if (loggedInCard) loggedInCard.style.display = 'block';
-  if (loggedOutCard) loggedOutCard.style.display = 'none';
+  // Case 2: User is authenticated
+  showAccessSubView('loggedIn');
 
   const displayHandle = verifiedHandle ? `@${verifiedHandle}` : '@user';
   if (barText) barText.textContent = displayHandle;
@@ -2429,7 +2461,7 @@ async function ensureVerifiedAccountOrBlock() {
   const check = await checkAccountVerificationLock();
   if (!check.isAllowed) {
     if (check.reason === 'NOT_AUTHENTICATED') {
-      alert('⚠️ Access Required:\nPlease sign in with your verified Twitter / X ID and password in the "Access" tab to unlock this extension.');
+      alert('⚠️ Access Required:\nPlease submit an access request or sign in with your approved X ID in the "Access" tab to unlock this extension.');
       switchExtTab('access');
     } else if (check.reason === 'ID_MISMATCH') {
       alert(`⚠️ Account Lock Mismatch!\n\nThis extension is strictly bound to your verified Twitter account: @${(state.verifiedXHandle || '').replace(/^@/, '')}.\nYour browser is currently logged into @${check.current} on Twitter.\n\nPlease log into @${(state.verifiedXHandle || '').replace(/^@/, '')} on x.com to use this extension.`);
@@ -2439,6 +2471,212 @@ async function ensureVerifiedAccountOrBlock() {
     return false;
   }
   return true;
+}
+
+/**
+ * Handle in-extension Access Request Submission
+ */
+async function handleExtSubmitRequest() {
+  const nameInput = document.getElementById('extReqFullNameInput');
+  const emailInput = document.getElementById('extReqEmailInput');
+  const handleInput = document.getElementById('extReqHandleInput');
+  const btn = document.getElementById('extSubmitRequestBtn');
+
+  const fullName = nameInput?.value.trim();
+  const email = emailInput?.value.trim();
+  let handle = handleInput?.value.trim();
+
+  if (!fullName) {
+    alert('Please enter your full name.');
+    return;
+  }
+  if (!email || !email.includes('@')) {
+    alert('Please enter a valid email address.');
+    return;
+  }
+  if (!handle) {
+    alert('Please enter your real Twitter / X ID (e.g. @mythopair).');
+    return;
+  }
+
+  if (!handle.startsWith('@')) handle = '@' + handle;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Submitting Request...';
+  }
+
+  try {
+    const backendUrl = await getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/auth/request-access`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName, email, handle, xHandle: handle, useCase: 'Chrome Extension Access Request' })
+    });
+
+    const data = await res.json();
+    if (!res.ok && res.status !== 201) {
+      throw new Error(data.error || 'Failed to submit request');
+    }
+
+    const pendingData = {
+      fullName,
+      email,
+      handle,
+      status: 'PENDING',
+      requestedAt: Date.now()
+    };
+    state.pendingRequest = pendingData;
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({ pendingRequest: pendingData });
+    }
+
+    // Update pending view text
+    const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
+    const pHandleText = document.getElementById('extPendingHandleText');
+    const pEmailText = document.getElementById('extPendingEmailText');
+    if (pHandleDisplay) pHandleDisplay.textContent = handle;
+    if (pHandleText) pHandleText.textContent = handle;
+    if (pEmailText) pEmailText.textContent = email;
+
+    showAccessSubView('pending');
+    alert(`🚀 Request Submitted Successfully!\n\nYour request for ${handle} has been forwarded to the administrator.\nAs soon as approved, you can set your new password right here to start using the extension.`);
+  } catch (err) {
+    alert(`❌ Request Error: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Submit Request for Approval';
+    }
+  }
+}
+
+/**
+ * Check Admin Approval Status (Manual or Background)
+ */
+async function handleExtCheckStatus(isManual = false) {
+  if (!state.pendingRequest && !state.user) return;
+  const targetHandle = state.pendingRequest?.handle || state.user?.handle || '';
+  const targetEmail = state.pendingRequest?.email || state.user?.email || '';
+
+  if (!targetHandle && !targetEmail) return;
+
+  const btn = document.getElementById('extCheckStatusBtn');
+  if (isManual && btn) {
+    btn.disabled = true;
+    btn.textContent = 'Checking Approval...';
+  }
+
+  try {
+    const backendUrl = await getBackendUrl();
+    const query = new URLSearchParams({ handle: targetHandle, email: targetEmail });
+    const res = await fetch(`${backendUrl}/api/auth/check-status?${query.toString()}`);
+    const data = await res.json();
+
+    if (data.status === 'APPROVED') {
+      const approvedHandle = data.handle || targetHandle;
+      if (data.needsPasswordSetup) {
+        const approvedDisp = document.getElementById('extApprovedHandleDisplay');
+        if (approvedDisp) approvedDisp.textContent = approvedHandle;
+        showAccessSubView('setPassword');
+        if (isManual) {
+          alert(`🎉 Congratulations!\n\nYour request for ${approvedHandle} has been approved by the administrator!\nPlease set your new password below to activate your account.`);
+        }
+      } else {
+        const loginInput = document.getElementById('extLoginHandleInput');
+        if (loginInput) loginInput.value = approvedHandle;
+        showAccessSubView('login');
+        if (isManual) {
+          alert(`🎉 Your account (${approvedHandle}) is active and approved!\nPlease enter your password to sign in.`);
+        }
+      }
+    } else if (data.status === 'REJECTED') {
+      alert(`⚠️ Request Notice:\n${data.reason || 'Your access request was declined by the administrator.'}`);
+    } else {
+      if (isManual) {
+        alert(`⏳ Still Pending:\n\nYour request for ${targetHandle} is currently awaiting admin approval in the dashboard.\nPlease check back shortly.`);
+      }
+    }
+  } catch (err) {
+    if (isManual) {
+      alert(`⚠️ Notice: Could not reach verification server (${err.message}).`);
+    }
+  } finally {
+    if (isManual && btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Check Approval Status Now';
+    }
+  }
+}
+
+/**
+ * Handle Setting New Password after Approval
+ */
+async function handleExtSetPassword() {
+  const p1 = document.getElementById('extNewPasswordInput')?.value.trim();
+  const p2 = document.getElementById('extConfirmPasswordInput')?.value.trim();
+  const btn = document.getElementById('extSaveNewPasswordSubmitBtn');
+
+  if (!p1 || p1.length < 6) {
+    alert('Please enter a password with at least 6 characters.');
+    return;
+  }
+  if (p1 !== p2) {
+    alert('Passwords do not match. Please re-enter.');
+    return;
+  }
+
+  const targetHandle = state.pendingRequest?.handle || state.user?.handle || '';
+  const targetEmail = state.pendingRequest?.email || state.user?.email || '';
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Activating Account...';
+  }
+
+  try {
+    const backendUrl = await getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/auth/set-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: targetHandle || targetEmail, password: p1 })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not set password');
+    }
+
+    state.user = data.user;
+    state.verifiedXHandle = data.user.handle ? (data.user.handle.startsWith('@') ? data.user.handle : `@${data.user.handle}`) : targetHandle;
+    if (typeof data.user.credits === 'number') state.credits = data.user.credits;
+    if (data.user.plan) state.userPlan = data.user.plan;
+    state.pendingRequest = null;
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.remove(['pendingRequest']);
+      await chrome.storage.local.set({
+        currentUser: data.user,
+        authToken: data.token,
+        verifiedXHandle: state.verifiedXHandle,
+        credits: state.credits,
+        userPlan: state.userPlan
+      });
+    }
+
+    updateCreditUI();
+    showAccessSubView('loggedIn');
+    await checkAccountVerificationLock();
+    alert(`🎉 Account Activated!\n\nWelcome ${data.user.fullName}! Your extension is now 1-to-1 locked to your verified X account (${state.verifiedXHandle}).`);
+  } catch (err) {
+    alert(`❌ Activation Error: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔑 Set Password & Unlock Extension';
+    }
+  }
 }
 
 async function handleExtLogin() {

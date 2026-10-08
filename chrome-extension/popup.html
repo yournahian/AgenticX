@@ -1092,8 +1092,9 @@
       <!-- TAB 5: ACCESS & ACCOUNT (1-TO-1 X IDENTITY LOCK) -->
       <!-- ============================================== -->
       <section id="panel-access" class="tab-panel">
-        <!-- State 1: Logged In Account Details View -->
-        <div id="extLoggedInCard" class="card" style="padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+
+        <!-- VIEW 1: Logged In Account Details View -->
+        <div id="extLoggedInCard" class="card" style="display:none; padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <div style="font-weight:700; font-size:13px; color:var(--text-primary); display:flex; align-items:center; gap:5px;">
               <span>🔒</span>
@@ -1131,13 +1132,111 @@
           </div>
         </div>
 
-        <!-- State 2: Logged Out Login Form -->
+        <!-- VIEW 2: In-Extension Request Access Form (First-Time User Default) -->
+        <div id="extRequestAccessView" class="card" style="display:none; padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="text-align:center; margin-bottom:12px;">
+            <div style="font-size:26px; margin-bottom:4px;">🚀</div>
+            <div style="font-weight:700; font-size:14px; color:var(--text-primary);">Request ATOMX Access</div>
+            <p style="font-size:11px; color:var(--text-secondary); margin-top:4px; line-height:1.4;">
+              Submit your real Twitter / X ID for admin verification. Once approved, you will set a password to log in.
+            </p>
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Your Full Name</label>
+            <input type="text" id="extReqFullNameInput" class="ext-input" placeholder="e.g. Evan Jawad" value="">
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Email Address</label>
+            <input type="email" id="extReqEmailInput" class="ext-input" placeholder="e.g. evan@atomx.io" value="">
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Your Real Twitter / X ID (Handle)</label>
+            <input type="text" id="extReqHandleInput" class="ext-input" placeholder="e.g. @mythopair" value="">
+          </div>
+
+          <button type="button" class="primary-btn mini-btn" id="extSubmitRequestBtn" style="width:100%; margin-top:0;">
+            🚀 Submit Request for Approval
+          </button>
+
+          <div style="margin-top:12px; text-align:center;">
+            <button type="button" id="extGoToLoginLink" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
+              Already approved? Sign in with X ID & Password
+            </button>
+          </div>
+        </div>
+
+        <!-- VIEW 3: Request Pending Approval Status Card -->
+        <div id="extPendingApprovalView" class="card" style="display:none; padding:18px 14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); text-align:center;">
+          <div style="font-size:30px; margin-bottom:6px;">⏳</div>
+          <div style="font-weight:800; font-size:14px; color:var(--text-primary); margin-bottom:2px;">Access Request Pending</div>
+          <span class="badge-mini popular" style="background:rgba(245,158,11,0.15); color:#F59E0B; margin-bottom:10px; display:inline-block;">AWAITING ADMIN REVIEW</span>
+
+          <p style="font-size:11.5px; color:var(--text-secondary); line-height:1.5; margin-bottom:14px;">
+            Your request for <strong id="extPendingHandleDisplay" style="color:var(--blue-primary); font-family:monospace;">@user</strong> has been submitted to the admin dashboard.
+            <br>
+            When approved, you will be notified here to set your password and access the extension.
+          </p>
+
+          <div style="background:var(--bg-canvas); padding:10px; border-radius:6px; border:1px solid var(--border-subtle); font-size:11px; text-align:left; margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="color:var(--text-secondary);">Requested X ID:</span>
+              <strong id="extPendingHandleText" style="color:var(--text-primary); font-family:monospace;">@user</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="color:var(--text-secondary);">Email:</span>
+              <strong id="extPendingEmailText" style="color:var(--text-primary);">--</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span style="color:var(--text-secondary);">Status:</span>
+              <span style="color:#F59E0B; font-weight:700;">Pending Approval</span>
+            </div>
+          </div>
+
+          <button type="button" class="primary-btn mini-btn" id="extCheckStatusBtn" style="width:100%; margin-top:0; margin-bottom:8px;">
+            ⚡ Check Approval Status Now
+          </button>
+
+          <button type="button" id="extEditRequestBtn" style="background:none; border:none; color:var(--text-muted); font-size:11px; cursor:pointer; text-decoration:underline;">
+            Submit a different ID or Edit Request
+          </button>
+        </div>
+
+        <!-- VIEW 4: Approved! Set Password View -->
+        <div id="extSetPasswordView" class="card" style="display:none; padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
+          <div style="text-align:center; margin-bottom:12px;">
+            <div style="font-size:26px; margin-bottom:4px;">🎉</div>
+            <div style="font-weight:700; font-size:14px; color:var(--text-primary);">Request Approved!</div>
+            <span class="badge-mini popular" style="background:var(--status-success-bg); color:var(--status-success); margin-bottom:6px; display:inline-block;">VERIFIED & APPROVED</span>
+            <p style="font-size:11px; color:var(--text-secondary); margin-top:4px; line-height:1.4;">
+              Your X ID <strong id="extApprovedHandleDisplay" style="color:var(--blue-primary); font-family:monospace;">@user</strong> is approved. Set a new password below to activate and unlock your extension.
+            </p>
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Create New Password</label>
+            <input type="password" id="extNewPasswordInput" class="ext-input" placeholder="Enter password (min 6 characters)" value="">
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Confirm New Password</label>
+            <input type="password" id="extConfirmPasswordInput" class="ext-input" placeholder="Confirm password" value="">
+          </div>
+
+          <button type="button" class="primary-btn mini-btn" id="extSaveNewPasswordSubmitBtn" style="width:100%; margin-top:0;">
+            🔑 Set Password & Unlock Extension
+          </button>
+        </div>
+
+        <!-- VIEW 5: Logged Out Login Form -->
         <div id="extLoggedOutCard" class="card" style="display:none; padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
           <div style="text-align:center; margin-bottom:12px;">
             <div style="font-size:24px; margin-bottom:4px;">🔐</div>
             <div style="font-weight:700; font-size:14px; color:var(--text-primary);">Sign In with Approved X ID</div>
             <p style="font-size:11px; color:var(--text-secondary); margin-top:4px; line-height:1.4;">
-              Enter your verified Twitter / X handle and password approved by the admin.
+              Enter your verified Twitter / X handle and password.
             </p>
           </div>
 
@@ -1156,11 +1255,12 @@
           </button>
 
           <div style="margin-top:12px; text-align:center;">
-            <button type="button" id="extOpenRequestAccessBtn" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
-              Don't have access? Request Access on Web Dashboard
+            <button type="button" id="extGoToRequestLink" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
+              Don't have access? Request Access with your X ID
             </button>
           </div>
         </div>
+
       </section>
 
     </main>

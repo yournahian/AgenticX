@@ -44,9 +44,13 @@ app.use('/api', apiRoutes);
 
 // Serve static frontend (checks local public/ first, then parent directory)
 const fs = require('fs');
-const frontendPath = fs.existsSync(path.join(__dirname, 'public', 'index.html'))
-  ? path.join(__dirname, 'public')
-  : path.join(__dirname, '..');
+const frontendCandidates = [
+  path.join(__dirname, 'public'),
+  path.join(process.cwd(), 'backend', 'public'),
+  path.join(process.cwd(), 'public'),
+  path.join(__dirname, '..')
+];
+const frontendPath = frontendCandidates.find(p => fs.existsSync(path.join(p, 'index.html'))) || path.join(__dirname, 'public');
 app.use(express.static(frontendPath));
 
 // Fallback to index.html for presentation SPA
@@ -54,7 +58,11 @@ app.get('*', (req, res, next) => {
   if (req.url.startsWith('/api') || req.url.startsWith('/health')) {
     return next();
   }
-  res.sendFile(path.join(frontendPath, 'index.html'));
+  const indexPath = path.join(frontendPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  res.send('<!DOCTYPE html><html><head><title>ATOMX ENGAGE</title></head><body style="background:#0b0f19;color:#fff;font-family:sans-serif;padding:40px;"><h2>ATOMX ENGAGE</h2><p>API & Backend Active.</p></body></html>');
 });
 
 // Global Error Handler

@@ -89,6 +89,131 @@ exports.requestAccess = async (req, res) => {
   }
 };
 
+exports.checkAccessStatus = async (req, res) => {
+  try {
+    const rawHandle = (req.query.handle || req.query.xHandle || '').trim().replace(/^@/, '').toLowerCase();
+    const email = (req.query.email || '').trim().toLowerCase();
+
+    if (!rawHandle && !email) {
+      return res.status(400).json({ error: 'Please provide handle or email to check status' });
+    }
+
+    // 1. Check if user already exists and is active in users table
+    let user = null;
+    if (rawHandle && db.getUserByHandle) {
+      user = await db.getUserByHandle(rawHandle);
+    }
+    if (!user && email && db.getUserByEmail) {
+      user = await db.getUserByEmail(email);
+    }
+
+    if (user) {
+      const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : `@${rawHandle}`;
+      const needsPasswordSetup = !user.password_hash || user.password_hash === 'approved_hash';
+      return res.json({
+        status: user.status === 'ACTIVE' ? 'APPROVED' : user.status,
+        handle: userHandle,
+        email: user.email,
+        fullName: user.full_name,
+        needsPasswordSetup,
+        credits: user.credits,
+        plan: user.plan_tier
+      });
+    }
+
+    // 2. Check access_requests table
+    const requests = await db.getAccessRequests();
+    const match = (requests || []).find(r => {
+      const rHandle = (r.handle || '').replace(/^@/, '').toLowerCase();
+      const rEmail = (r.email || '').toLowerCase();
+      return (rawHandle && rHandle === rawHandle) || (email && rEmail === email);
+    });
+
+    if (match) {
+      return res.json({
+        status: match.status, // 'PENDING', 'APPROVED', or 'REJECTED'
+        handle: match.handle,
+        email: match.email,
+        fullName: match.full_name,
+        needsPasswordSetup: match.status === 'APPROVED'
+      });
+    }
+
+    res.json({ status: 'NOT_FOUND' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.setPassword = async (req, res) => {
+  try {
+    const { identifier, handle, email, password } = req.body;
+    const loginKey = (identifier || handle || email || '').trim();
+    const cleanHandle = loginKey.replace(/^@/, '').toLowerCase();
+
+    if (!loginKey || !password) {
+      return res.status(400).json({ error: 'Handle/Email and new password are required' });
+    }
+
+    // Find user in users table
+    let user = null;
+    if (loginKey.includes('@') && loginKey.includes('.')) {
+      user = await db.getUserByEmail(loginKey);
+    }
+    if (!user && db.getUserByHandle) {
+      user = await db.getUserByHandle(cleanHandle);
+    }
+    if (!user) {
+      user = await db.getUserByEmail(loginKey);
+    }
+
+    if (!user) {
+      // If user not in users table yet, check if request is APPROVED in access_requests
+      const requests = await db.getAccessRequests();
+      const match = (requests || []).find(r => {
+        const rHandle = (r.handle || '').replace(/^@/, '').toLowerCase();
+        const rEmail = (r.email || '').toLowerCase();
+        return rHandle === cleanHandle || rEmail === loginKey.toLowerCase();
+      });
+
+      if (match && match.status === 'APPROVED') {
+        user = await db.approveAccessRequest(match.id);
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({ error: 'Approved user not found. Please ensure admin has approved your request.' });
+    }
+
+    // Update password in database
+    if (db.updateUserPassword) {
+      await db.updateUserPassword(user.id, password);
+    }
+
+    const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : `@${cleanHandle}`;
+
+    res.json({
+      success: true,
+      message: '✓ Password set successfully! You are now logged in.',
+      token: `atomx_session_${user.id}_${Date.now()}`,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        handle: userHandle,
+        role: user.role,
+        status: 'ACTIVE',
+        plan: user.plan_tier,
+        credits: user.credits || 100,
+        maxCredits: user.credits || 100,
+        avatar: user.avatar_initials
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 exports.getCurrentUser = async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 1;

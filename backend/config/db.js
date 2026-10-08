@@ -54,6 +54,13 @@ module.exports = {
     return data?.[0];
   },
 
+  async updateUserPassword(userId, password) {
+    if (!supabase) return true;
+    const { data, error } = await supabase.from('users').update({ password_hash: password }).eq('id', userId).select();
+    if (error) throw new Error(error.message);
+    return data?.[0];
+  },
+
   // Atomic Server-Side Credit Math (Rule: 1 Credit = 1 AI reply)
   async deductCredit(userId, amount = 1, action = 'AI Reply', reason = 'Generated reply') {
     const user = await resolveUser(userId);
