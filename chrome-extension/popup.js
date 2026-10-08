@@ -3257,9 +3257,6 @@ async function loadServerState() {
         'credits', 'accessKey', 'creators', 'engagedTweetIds', 'userPlan',
         'currentUser', 'user', 'authToken', 'verifiedXHandle', 'pendingRequest'
       ]).catch(() => ({}));
-      if (stored?.credits !== undefined) state.credits = stored.credits;
-      if (stored?.accessKey) state.accessKey = stored.accessKey;
-      if (stored?.userPlan) state.userPlan = stored.userPlan;
       if (stored?.currentUser || stored?.user) state.user = stored.currentUser || stored.user;
       if (stored?.pendingRequest) state.pendingRequest = stored.pendingRequest;
       if (stored?.verifiedXHandle) {
@@ -3267,6 +3264,13 @@ async function loadServerState() {
       } else if (state.user?.handle) {
         state.verifiedXHandle = state.user.handle;
       }
+      if (stored?.credits !== undefined && state.user) {
+        state.credits = stored.credits;
+      } else if (!state.user) {
+        state.credits = 0;
+      }
+      if (stored?.accessKey) state.accessKey = stored.accessKey;
+      if (stored?.userPlan) state.userPlan = stored.userPlan;
       if (Array.isArray(stored?.creators)) state.creators = stored.creators;
       if (Array.isArray(stored?.engagedTweetIds)) state.engagedTweetIds = stored.engagedTweetIds;
     }
@@ -3466,9 +3470,11 @@ async function checkAccountVerificationLock() {
       const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
       const pHandleText = document.getElementById('extPendingHandleText');
       const pEmailText = document.getElementById('extPendingEmailText');
+      const pTelegramText = document.getElementById('extPendingTelegramText');
       if (pHandleDisplay) pHandleDisplay.textContent = state.pendingRequest.handle;
       if (pHandleText) pHandleText.textContent = state.pendingRequest.handle;
       if (pEmailText) pEmailText.textContent = state.pendingRequest.email || '--';
+      if (pTelegramText) pTelegramText.textContent = state.pendingRequest.telegram || '--';
       showAccessSubView('pending');
       handleExtCheckStatus(false);
     } else {
@@ -3572,11 +3578,13 @@ async function ensureVerifiedAccountOrBlock() {
 async function handleExtSubmitRequest() {
   const nameInput = document.getElementById('extReqFullNameInput');
   const emailInput = document.getElementById('extReqEmailInput');
+  const telegramInput = document.getElementById('extReqTelegramInput');
   const handleInput = document.getElementById('extReqHandleInput');
   const btn = document.getElementById('extSubmitRequestBtn');
 
   const fullName = nameInput?.value.trim();
   const email = emailInput?.value.trim();
+  let telegram = telegramInput?.value.trim() || '';
   let handle = handleInput?.value.trim();
 
   if (!fullName) {
@@ -3593,6 +3601,7 @@ async function handleExtSubmitRequest() {
   }
 
   if (!handle.startsWith('@')) handle = '@' + handle;
+  if (telegram && !telegram.startsWith('@')) telegram = '@' + telegram;
 
   if (btn) {
     btn.disabled = true;
@@ -3604,7 +3613,7 @@ async function handleExtSubmitRequest() {
     const res = await fetch(`${backendUrl}/api/auth/request-access`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fullName, email, handle, xHandle: handle, useCase: 'Chrome Extension Access Request' })
+      body: JSON.stringify({ fullName, email, telegram, handle, xHandle: handle, useCase: 'Chrome Extension Access Request' })
     });
 
     const data = await res.json();
@@ -3615,6 +3624,7 @@ async function handleExtSubmitRequest() {
     const pendingData = {
       fullName,
       email,
+      telegram,
       handle,
       status: 'PENDING',
       requestedAt: Date.now()
@@ -3629,9 +3639,11 @@ async function handleExtSubmitRequest() {
     const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
     const pHandleText = document.getElementById('extPendingHandleText');
     const pEmailText = document.getElementById('extPendingEmailText');
+    const pTelegramText = document.getElementById('extPendingTelegramText');
     if (pHandleDisplay) pHandleDisplay.textContent = handle;
     if (pHandleText) pHandleText.textContent = handle;
     if (pEmailText) pEmailText.textContent = email;
+    if (pTelegramText) pTelegramText.textContent = telegram || '--';
 
     showAccessSubView('pending');
     alert(`🚀 Request Submitted Successfully!\n\nYour request for ${handle} has been forwarded to the administrator.\nAs soon as approved, you can set your new password right here to start using the extension.`);
@@ -3962,10 +3974,13 @@ function handleCleanTgInput() {
 }
 
 function updateCreditUI() {
+  const isAuthed = !!(state.user && (state.verifiedXHandle || state.user?.handle));
+  const displayCredits = isAuthed ? Number(state.credits || 0) : 0;
+
   const p = document.getElementById('creditBalanceText');
-  if (p) p.textContent = Number(state.credits).toLocaleString();
+  if (p) p.textContent = displayCredits.toLocaleString();
   const b = document.getElementById('extCreditsBig');
-  if (b) b.textContent = `${Number(state.credits).toLocaleString()} C`;
+  if (b) b.textContent = `${displayCredits.toLocaleString()} C`;
 }
 
 // Auto detect tweet on Twitter/X active tab

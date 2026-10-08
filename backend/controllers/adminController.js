@@ -50,10 +50,11 @@ exports.approveRequest = async (req, res) => {
     const result = await db.approveAccessRequest(requestId, credits, plan);
     res.json({
       success: true,
-      message: `Access request approved! User created/activated and ${result.credits} credits allocated.`,
+      message: `Access request approved! User created/activated with ${plan} and ${result.credits} credits allocated.`,
       userId: result.userId,
       creditsGranted: result.credits,
-      handle: result.handle
+      handle: result.handle,
+      plan: result.plan
     });
   } catch (err) {
     res.status(400).json({ error: err.message });

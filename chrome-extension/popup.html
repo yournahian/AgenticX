@@ -27,7 +27,7 @@
       <div class="header-right">
         <div class="credit-pill" id="creditPill" title="Your Verified Credits (1 Credit = 1 Action)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span id="creditBalanceText">--</span> C
+          <span id="creditBalanceText">0</span> C
         </div>
         <button class="icon-btn" id="extThemeToggleBtn" title="Toggle Dark / Light Theme" style="font-size:12px;">🌙</button>
         <button class="icon-btn" id="dockSidePanelBtn" title="Open in Chrome Side Panel (Side-by-side with X)">
@@ -1537,6 +1537,11 @@
             <input type="email" id="extReqEmailInput" class="ext-input" placeholder="e.g. evan@atomx.io" value="">
           </div>
 
+          <div style="margin-bottom:8px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Telegram ID / Username</label>
+            <input type="text" id="extReqTelegramInput" class="ext-input" placeholder="e.g. @evanjawad" value="">
+          </div>
+
           <div style="margin-bottom:12px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Your Real Twitter / X ID (Handle)</label>
             <input type="text" id="extReqHandleInput" class="ext-input" placeholder="e.g. @mythopair" value="">
@@ -1573,6 +1578,10 @@
             <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
               <span style="color:var(--text-secondary);">Email:</span>
               <strong id="extPendingEmailText" style="color:var(--text-primary);">--</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;" id="extPendingTelegramRow">
+              <span style="color:var(--text-secondary);">Telegram:</span>
+              <strong id="extPendingTelegramText" style="color:#229ED9; font-family:monospace;">--</strong>
             </div>
             <div style="display:flex; justify-content:space-between;">
               <span style="color:var(--text-secondary);">Status:</span>

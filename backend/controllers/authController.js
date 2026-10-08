@@ -58,7 +58,7 @@ exports.login = async (req, res) => {
 };
 
 exports.requestAccess = async (req, res) => {
-  const { fullName, email, handle, xHandle, password, useCase } = req.body;
+  const { fullName, email, handle, xHandle, password, useCase, telegram } = req.body;
   if (!fullName || !email) {
     return res.status(400).json({ error: 'Full name and email are required' });
   }
@@ -69,6 +69,8 @@ exports.requestAccess = async (req, res) => {
   }
 
   const formattedHandle = '@' + rawHandle;
+  const rawTelegram = (telegram || '').trim();
+  const formattedTelegram = rawTelegram ? (rawTelegram.startsWith('@') ? rawTelegram : '@' + rawTelegram) : '';
 
   try {
     const existing = await db.getUserByEmail(email);
@@ -76,13 +78,14 @@ exports.requestAccess = async (req, res) => {
       return res.status(400).json({ error: 'An account with this email already exists' });
     }
 
-    const note = `X_ID:${formattedHandle} | Note: ${useCase || 'User access request'}`;
+    const note = `X_ID:${formattedHandle}${formattedTelegram ? ` | TG:${formattedTelegram}` : ''} | Note: ${useCase || 'User access request'}`;
     await db.createAccessRequest(fullName, email, note, formattedHandle, password);
 
     res.status(201).json({
       message: `Access request submitted for ${formattedHandle}! Waiting for admin approval.`,
       status: 'PENDING',
-      handle: formattedHandle
+      handle: formattedHandle,
+      telegram: formattedTelegram
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

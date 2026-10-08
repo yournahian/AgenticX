@@ -168,22 +168,36 @@ module.exports = {
     const { data } = await supabase.from('access_requests').select('*').order('requested_at', { ascending: false });
     return (data || []).map(r => {
       const match = (r.use_case || '').match(/X_ID:(@?[\w_]+)/i);
+      const tgMatch = (r.use_case || '').match(/TG:(@?[\w_]+)/i);
       return {
         ...r,
-        handle: match ? (match[1].startsWith('@') ? match[1] : '@' + match[1]) : '@' + r.email.split('@')[0]
+        handle: match ? (match[1].startsWith('@') ? match[1] : '@' + match[1]) : '@' + r.email.split('@')[0],
+        telegram: tgMatch ? (tgMatch[1].startsWith('@') ? tgMatch[1] : '@' + tgMatch[1]) : (r.telegram || '')
       };
     });
   },
 
   async createAccessRequest(fullName, email, useCase) {
     if (!supabase) throw new Error('Database not connected');
-    const { data, error } = await supabase.from('access_requests').insert({
+    const tgMatch = (useCase || '').match(/TG:(@?[\w_]+)/i);
+    const telegramVal = tgMatch ? (tgMatch[1].startsWith('@') ? tgMatch[1] : '@' + tgMatch[1]) : null;
+
+    const payload = {
       full_name: fullName,
       email,
       use_case: useCase,
       status: 'PENDING',
       initial_credits_granted: 100
-    }).select();
+    };
+    if (telegramVal) payload.telegram = telegramVal;
+
+    let { data, error } = await supabase.from('access_requests').insert(payload).select();
+    if (error && error.message && error.message.includes('telegram')) {
+      delete payload.telegram;
+      const res = await supabase.from('access_requests').insert(payload).select();
+      data = res.data;
+      error = res.error;
+    }
     if (error) throw new Error(error.message);
     return data?.[0];
   },
@@ -192,6 +206,9 @@ module.exports = {
     if (!supabase) throw new Error('Database not connected');
     const { data: req } = await supabase.from('access_requests').select('*').eq('id', requestId).maybeSingle();
     if (!req) throw new Error('Access request not found');
+
+    const totalCredits = Number(initialCredits) || 100;
+    const finalPlan = planTier || 'Free Plan';
 
     // Extract real X Handle / ID from use_case note
     const handleMatch = (req.use_case || '').match(/X_ID:(@?[\w_]+)/i);
@@ -202,12 +219,11 @@ module.exports = {
     let userRecord = null;
 
     if (existingUser) {
-      const grantCredits = existingUser.credits > 0 ? existingUser.credits : initialCredits;
       const { data: updated, error: updErr } = await supabase.from('users').update({
         status: 'ACTIVE',
         handle: existingUser.handle || assignedHandle,
-        plan_tier: planTier || existingUser.plan_tier || 'Free Plan',
-        credits: grantCredits
+        plan_tier: finalPlan,
+        credits: totalCredits
       }).eq('id', existingUser.id).select().single();
       if (updErr) throw new Error(updErr.message);
       userRecord = updated;
@@ -220,8 +236,8 @@ module.exports = {
         handle: assignedHandle,
         role: 'USER',
         status: 'ACTIVE',
-        plan_tier: planTier || 'Free Plan',
-        credits: initialCredits,
+        plan_tier: finalPlan,
+        credits: totalCredits,
         avatar_initials: initials
       }).select().single();
 
@@ -231,11 +247,11 @@ module.exports = {
       // Record initial grant in ledger
       await supabase.from('credits_ledger').insert({
         user_id: userRecord.id,
-        amount: initialCredits,
-        balance_after: initialCredits,
+        amount: totalCredits,
+        balance_after: totalCredits,
         action: 'Initial Grant',
         admin_source: 'Admin Approval',
-        reason: `Approved free onboarding: ${initialCredits} credits`
+        reason: `Approved onboarding plan: ${finalPlan} (${totalCredits} credits)`
       });
     }
 
@@ -245,7 +261,7 @@ module.exports = {
       reviewed_at: new Date().toISOString()
     }).eq('id', requestId);
 
-    return { userId: userRecord.id, credits: userRecord.credits, handle: assignedHandle };
+    return { userId: userRecord.id, credits: userRecord.credits, handle: assignedHandle, plan: userRecord.plan_tier };
   },
 
   async rejectAccessRequest(requestId) {

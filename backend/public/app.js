@@ -2638,6 +2638,7 @@ function renderAdminUsers(container) {
     id: r.id,
     name: r.name,
     email: r.email,
+    telegram: r.telegram || '',
     handle: r.handle || '@user',
     plan: 'Pending Tier',
     credits: 0,
@@ -2760,7 +2761,10 @@ function renderAdminUsers(container) {
                       </div>
                     </td>
                     <td>${handleLink}</td>
-                    <td style="color:var(--text-secondary);">${u.email}</td>
+                    <td style="color:var(--text-secondary);">
+                      <div>${u.email}</div>
+                      ${u.telegram ? `<div style="font-size:11px; color:#229ED9; font-weight:600; margin-top:2px;">✈️ ${u.telegram}</div>` : ''}
+                    </td>
                     <td>
                       ${isPending ? `<span style="color:var(--text-muted); font-size:12px;">--</span>` : `
                         <div>
@@ -2778,10 +2782,10 @@ function renderAdminUsers(container) {
                     <td style="text-align:right;">
                       <div style="display:inline-flex; gap:6px; justify-content:flex-end; flex-wrap:wrap;">
                         ${isPending ? `
-                          <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}')">Approve</button>
+                          <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')">Approve</button>
                           <button class="btn btn-danger btn-sm" onclick="rejectUserRequest('${u.id}')">Reject</button>
                         ` : isRejected ? `
-                          <button class="btn btn-secondary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}')">Re-Approve</button>
+                          <button class="btn btn-secondary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')">Re-Approve</button>
                         ` : `
                           <button class="btn btn-secondary btn-sm" onclick="onAdminManageUserCredits('${u.id}')" title="Adjust credits for this user">Credits</button>
                           <button class="btn btn-secondary btn-sm" onclick="openAdminPasswordModal('${u.id}', '${u.name}', '${u.handle}')" title="Set or reset user password">🔑 Password</button>
@@ -2812,7 +2816,11 @@ function onAdminManageUserCredits(userId) {
   navigateToScreen('15');
 }
 
-function openApprovalModal(name, email, handle = '@user', reqId = '') {
+function openApprovalModal(name, email, handle = '@user', reqId = '', telegram = '') {
+  const defaultBonus = 100;
+  const defaultPlanCredits = 10000;
+  const defaultTotal = defaultPlanCredits + defaultBonus;
+
   const modalHTML = `
     <div class="modal-backdrop" id="approvalModal">
       <div class="modal-box">
@@ -2824,19 +2832,23 @@ function openApprovalModal(name, email, handle = '@user', reqId = '') {
           <div style="font-weight:700; font-size:15px; color:var(--text-primary);">${name}</div>
           <div style="font-size:13px; font-weight:700; color:var(--blue-primary); margin-top:2px;">🔒 Locked to X ID: ${handle}</div>
           <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">Email: ${email}</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Initial Credits</label>
-          <input type="number" class="form-input" id="initialCreditsInput" value="100">
-          <div class="form-hint">Server assigns 100 free credits upon onboarding.</div>
+          ${telegram ? `<div style="font-size:12px; color:#229ED9; font-weight:600; margin-top:3px;">✈️ Telegram: ${telegram}</div>` : ''}
         </div>
         <div class="form-group">
           <label class="form-label">Plan Tier</label>
-          <select class="form-select" id="approvalPlanSelect">
-            <option selected value="Free Plan">Free Plan (100 Credits)</option>
-            <option value="Growth Plan">Growth Plan (10,000 Credits)</option>
+          <select class="form-select" id="approvalPlanSelect" onchange="onApprovalPlanChange(this.value)">
+            <option value="Free Plan">Free Plan (100 Credits)</option>
+            <option value="Growth Plan" selected>Growth Plan (10,000 Credits)</option>
             <option value="Pro Plan">Pro Plan (25,000 Credits)</option>
+            <option value="Enterprise Plan">Enterprise Plan (100,000 Credits)</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Initial Credits (Plan Credits + 100 Onboarding Bonus)</label>
+          <input type="number" class="form-input" id="initialCreditsInput" value="${defaultTotal}">
+          <div class="form-hint" id="approvalCreditsHint" style="color:var(--text-secondary); font-size:11.5px; margin-top:4px;">
+            Auto-calculated: <strong>10,000</strong> plan credits + <strong>100</strong> onboarding bonus = <strong>${defaultTotal.toLocaleString()}</strong> credits.
+          </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:24px;">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -2848,19 +2860,44 @@ function openApprovalModal(name, email, handle = '@user', reqId = '') {
   document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
+window.onApprovalPlanChange = function(planValue) {
+  const bonus = 100;
+  let planCredits = 10000;
+  if (planValue === 'Free Plan') planCredits = 100;
+  else if (planValue === 'Growth Plan') planCredits = 10000;
+  else if (planValue === 'Pro Plan') planCredits = 25000;
+  else if (planValue === 'Enterprise Plan') planCredits = 100000;
+
+  const total = planCredits + bonus;
+  const input = document.getElementById('initialCreditsInput');
+  const hint = document.getElementById('approvalCreditsHint');
+  if (input) input.value = total;
+  if (hint) {
+    hint.innerHTML = `Auto-calculated: <strong>${planCredits.toLocaleString()}</strong> plan credits + <strong>${bonus}</strong> onboarding bonus = <strong>${total.toLocaleString()}</strong> credits.`;
+  }
+};
+
 function closeModal() {
   const modal = document.querySelector('.modal-backdrop');
   if (modal) modal.remove();
 }
 
 async function confirmApproval(name, email, handle = '@user', reqId = '') {
+  // CRITICAL: Read input values BEFORE destroying the modal!
+  const creditsInput = document.getElementById('initialCreditsInput');
+  const planSelect = document.getElementById('approvalPlanSelect');
+  const credits = Number(creditsInput?.value) || 10100;
+  const plan = planSelect?.value || 'Growth Plan';
+
   closeModal();
-  const credits = Number(document.getElementById('initialCreditsInput')?.value) || 100;
-  const plan = document.getElementById('approvalPlanSelect')?.value || 'Free Plan';
 
   // Optimistic update
   const r = (AtomXState.accessRequests || []).find(x => String(x.id) === String(reqId) || x.email === email);
-  if (r) r.status = 'APPROVED';
+  if (r) {
+    r.status = 'APPROVED';
+    r.plan = plan;
+    r.credits = credits;
+  }
   renderAdminUsers(document.getElementById('mainContentArea'));
 
   try {
@@ -2871,7 +2908,7 @@ async function confirmApproval(name, email, handle = '@user', reqId = '') {
     });
     const d = await res.json();
     if (!res.ok) throw new Error(d.error || 'Server error approving request');
-    showToast(`✓ User ${name} (${handle}) approved! Allocated ${credits} credits.`, 'success');
+    showToast(`✓ User ${name} (${handle}) approved with ${plan} (${credits.toLocaleString()} credits)!`, 'success');
   } catch (err) {
     console.warn('[Approval Notice]', err);
     showToast(`Approval Note: ${err.message}`, 'error');
@@ -4961,6 +4998,7 @@ async function loadAdminServerData() {
         id: r.id,
         name: r.full_name || r.name,
         email: r.email,
+        telegram: r.telegram || (r.use_case && r.use_case.match(/TG:(@?[\w_]+)/i) ? r.use_case.match(/TG:(@?[\w_]+)/i)[1] : ''),
         handle: r.handle || (r.use_case && r.use_case.match(/X_ID:(@?[\w_]+)/i) ? r.use_case.match(/X_ID:(@?[\w_]+)/i)[1] : '@user'),
         requestedDate: r.requested_at ? new Date(r.requested_at).toLocaleDateString() : (r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Today'),
         status: (r.status || 'Pending').toUpperCase()
