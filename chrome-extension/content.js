@@ -421,8 +421,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   if (!textarea && replyBtn) {
     replyBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await sleep(400);
-    replyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await sleep(300);
     replyBtn.click();
     await sleep(800);
   }
@@ -504,31 +503,23 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   submitBtn.setAttribute('aria-disabled', 'false');
   await sleep(150);
 
-  // 5. Click Submit with full pointer and mouse event sequence
+  // 5. Click Submit EXACTLY ONCE (No duplicate click dispatch, no retry clicks!)
   submitBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
   await sleep(200);
 
-  const eventOpts = { bubbles: true, cancelable: true, view: window };
-  submitBtn.dispatchEvent(new PointerEvent('pointerdown', eventOpts));
-  submitBtn.dispatchEvent(new MouseEvent('mousedown', eventOpts));
-  submitBtn.dispatchEvent(new PointerEvent('pointerup', eventOpts));
-  submitBtn.dispatchEvent(new MouseEvent('mouseup', eventOpts));
-  submitBtn.dispatchEvent(new MouseEvent('click', eventOpts));
+  submitBtn.focus();
   submitBtn.click();
 
-  console.log('[ATOMX COMMENT ENGINE] Clicked Submit button successfully!');
-  await sleep(1400);
+  console.log('[ATOMX COMMENT ENGINE] Clicked Submit button once successfully!');
+  await sleep(2500);
 
-  // Verify dialog or textarea was submitted; retry click once if modal remains
+  // Dismiss dialog if still hanging open after successful API send
   const remainingDialog = document.querySelector('div[role="dialog"]');
   if (remainingDialog) {
-    const retryBtn = remainingDialog.querySelector('button[data-testid="tweetButton"]');
-    if (retryBtn) {
-      retryBtn.removeAttribute('disabled');
-      retryBtn.setAttribute('aria-disabled', 'false');
-      retryBtn.dispatchEvent(new MouseEvent('click', eventOpts));
-      retryBtn.click();
-      await sleep(1000);
+    const closeBtn = remainingDialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"]');
+    if (closeBtn) {
+      closeBtn.click();
+      await sleep(300);
     }
   }
 
