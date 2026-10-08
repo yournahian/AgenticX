@@ -801,7 +801,15 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   await simulateHumanSubmitClick(submitBtn);
 
   console.log('[ATOMX COMMENT ENGINE] Clicked Submit button once successfully!');
-  await sleep(2500);
+  await sleep(1500);
+
+  // Check immediately if Twitter responded with a rate limit error toast
+  if (checkTwitterRateLimit()) {
+    triggerRateLimitAbort('Rate limited while submitting reply');
+    return { success: false, aborted: true, rateLimited: true, error: 'Twitter Rate Limit detected after posting' };
+  }
+
+  await sleep(1000);
 
   // Dismiss dialog if still hanging open after successful API send
   const remainingDialog = document.querySelector('div[role="dialog"]');
@@ -814,6 +822,261 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   }
 
   return { success: true };
+}
+
+// =========================================================================
+// TWITTER / X RATE LIMIT AUTO-ABORT MONITOR
+// =========================================================================
+function checkTwitterRateLimit() {
+  const elements = Array.from(document.querySelectorAll(
+    'div[data-testid="toast"], div[role="alert"], div[role="alertdialog"], div[data-testid="error-detail"], [data-testid="toast"] span, [role="alert"] span, div[data-testid="empty_state"]'
+  ));
+  for (const el of elements) {
+    const txt = (el.innerText || '').toLowerCase();
+    if (
+      txt.includes('rate limit') ||
+      txt.includes('rate-limit') ||
+      txt.includes('rate limited') ||
+      txt.includes('rate-limited') ||
+      txt.includes('sorry, you are rate limited') ||
+      txt.includes('sorry you are rate limit') ||
+      txt.includes('you are rate limited') ||
+      txt.includes('cannot retrieve tweets at this time') ||
+      txt.includes('cannot retrieve posts at this time') ||
+      txt.includes('over capacity')
+    ) {
+      return true;
+    }
+  }
+
+  // Also check top-level alerts / error toasts anywhere on document body
+  const toasts = document.querySelectorAll('div[data-testid="toast"]');
+  for (const t of toasts) {
+    const txt = (t.textContent || '').toLowerCase();
+    if (txt.includes('rate') || txt.includes('limit') || txt.includes('try again later')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function triggerRateLimitAbort(reason = 'Sorry, you are rate limited.') {
+  console.warn('[ATOMX ALERT] Twitter Rate Limit Detected! Stopping all automation immediately.');
+  isWorkflowAborted = true;
+  updateFloatingHud({
+    stateBadge: 'RATE_LIMITED',
+    statusText: '🚨 Rate limit detected! All automation stopped immediately to protect account.',
+    isStopped: true
+  });
+  chrome.runtime.sendMessage({
+    type: 'RATE_LIMIT_DETECTED',
+    error: 'Twitter Rate Limit: "Sorry, you are rate limited." All automation has been stopped immediately to protect your account.'
+  }).catch(() => null);
+}
+
+// =========================================================================
+// ATOMX FLOATING MINI HUD (ON-PAGE OVERLAY WIDGET)
+// =========================================================================
+let floatingHudEl = null;
+
+function ensureFloatingHud() {
+  if (floatingHudEl && document.body.contains(floatingHudEl)) return floatingHudEl;
+
+  const existing = document.getElementById('atomx-floating-hud');
+  if (existing) {
+    floatingHudEl = existing;
+    return floatingHudEl;
+  }
+
+  const hud = document.createElement('div');
+  hud.id = 'atomx-floating-hud';
+  hud.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 320px;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 14px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #F8FAFC;
+    z-index: 2147483647;
+    padding: 14px;
+    box-sizing: border-box;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    user-select: none;
+  `;
+
+  hud.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span id="hud-badge" style="background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px;">RUNNING</span>
+        <strong id="hud-title" style="font-size: 13px; font-weight: 700; color: #FFFFFF;">AtomX Agent</strong>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span id="hud-indicator" style="font-size: 11px; font-weight: 600; color: #60A5FA;">Active</span>
+        <button id="hud-minimize-btn" title="Minimize" style="background: transparent; border: none; color: #94A3B8; font-size: 14px; cursor: pointer; padding: 0 4px; line-height: 1;">−</button>
+      </div>
+    </div>
+
+    <!-- 3 Metric Cards Grid -->
+    <div id="hud-body" style="display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 6px 4px; text-align: center;">
+          <div style="font-size: 9.5px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">DONE</div>
+          <div id="hud-done-count" style="font-size: 17px; font-weight: 800; color: #10B981; margin-top: 2px;">0</div>
+        </div>
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 6px 4px; text-align: center;">
+          <div style="font-size: 9.5px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">COLLECTED</div>
+          <div id="hud-col-count" style="font-size: 17px; font-weight: 800; color: #60A5FA; margin-top: 2px;">0</div>
+        </div>
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 6px 4px; text-align: center;">
+          <div style="font-size: 9.5px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">SKIPPED</div>
+          <div id="hud-skip-count" style="font-size: 17px; font-weight: 800; color: #F59E0B; margin-top: 2px;">0</div>
+        </div>
+      </div>
+
+      <!-- Progress Track -->
+      <div style="width: 100%; height: 5px; background: rgba(255, 255, 255, 0.08); border-radius: 99px; overflow: hidden;">
+        <div id="hud-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #3B82F6, #10B981); transition: width 0.3s ease;"></div>
+      </div>
+
+      <!-- Live Status Text -->
+      <div id="hud-status-text" style="font-size: 11.5px; color: #CBD5E1; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        Initializing agent automation...
+      </div>
+
+      <!-- Action Button -->
+      <button id="hud-stop-btn" style="width: 100%; padding: 7px 0; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; color: #F87171; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;">
+        ⏹️ STOP WORKFLOW
+      </button>
+    </div>
+  `;
+
+  // Attach stop listener
+  hud.querySelector('#hud-stop-btn')?.addEventListener('click', () => {
+    isWorkflowAborted = true;
+    updateFloatingHud({
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      isStopped: true
+    });
+    chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
+  });
+
+  // Minimize / Expand toggle
+  let isMinimized = false;
+  hud.querySelector('#hud-minimize-btn')?.addEventListener('click', () => {
+    isMinimized = !isMinimized;
+    const body = hud.querySelector('#hud-body');
+    const minBtn = hud.querySelector('#hud-minimize-btn');
+    if (body) body.style.display = isMinimized ? 'none' : 'flex';
+    if (minBtn) minBtn.textContent = isMinimized ? '+' : '−';
+  });
+
+  // Make draggable
+  let isDragging = false;
+  let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
+  hud.addEventListener('mousedown', (e) => {
+    if (e.target.tagName === 'BUTTON') return;
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = hud.getBoundingClientRect();
+    initialLeft = rect.left;
+    initialTop = rect.top;
+    hud.style.bottom = 'auto';
+    hud.style.right = 'auto';
+    hud.style.left = `${initialLeft}px`;
+    hud.style.top = `${initialTop}px`;
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    hud.style.left = `${Math.max(10, Math.min(window.innerWidth - 330, initialLeft + dx))}px`;
+    hud.style.top = `${Math.max(10, Math.min(window.innerHeight - 150, initialTop + dy))}px`;
+  });
+
+  window.addEventListener('mouseup', () => { isDragging = false; });
+
+  document.body.appendChild(hud);
+  floatingHudEl = hud;
+  return floatingHudEl;
+}
+
+function updateFloatingHud(data = {}) {
+  const hud = ensureFloatingHud();
+  if (!hud) return;
+
+  hud.style.display = 'block';
+
+  if (data.title) {
+    const el = hud.querySelector('#hud-title');
+    if (el) el.textContent = data.title;
+  }
+  if (data.indicator) {
+    const el = hud.querySelector('#hud-indicator');
+    if (el) el.textContent = data.indicator;
+  }
+  if (data.stateBadge) {
+    const el = hud.querySelector('#hud-badge');
+    if (el) {
+      el.textContent = data.stateBadge;
+      if (data.stateBadge === 'RATE_LIMITED') {
+        el.style.background = 'rgba(239, 68, 68, 0.25)';
+        el.style.color = '#EF4444';
+        el.style.border = '1px solid rgba(239, 68, 68, 0.5)';
+      } else if (data.stateBadge === 'STOPPED') {
+        el.style.background = 'rgba(100, 116, 139, 0.2)';
+        el.style.color = '#94A3B8';
+        el.style.border = '1px solid rgba(100, 116, 139, 0.4)';
+      } else {
+        el.style.background = 'rgba(16, 185, 129, 0.15)';
+        el.style.color = '#10B981';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+      }
+    }
+  }
+  if (data.done !== undefined) {
+    const el = hud.querySelector('#hud-done-count');
+    if (el) el.textContent = data.done;
+  }
+  if (data.collected !== undefined) {
+    const el = hud.querySelector('#hud-col-count');
+    if (el) el.textContent = data.collected;
+  }
+  if (data.skipped !== undefined) {
+    const el = hud.querySelector('#hud-skip-count');
+    if (el) el.textContent = data.skipped;
+  }
+  if (data.progressPercent !== undefined) {
+    const el = hud.querySelector('#hud-progress-bar');
+    if (el) el.style.width = `${Math.min(100, Math.max(0, data.progressPercent))}%`;
+  }
+  if (data.statusText) {
+    const el = hud.querySelector('#hud-status-text');
+    if (el) {
+      el.textContent = data.statusText;
+      el.title = data.statusText;
+    }
+  }
+  if (data.isStopped) {
+    const btn = hud.querySelector('#hud-stop-btn');
+    if (btn) {
+      btn.style.display = 'none';
+    }
+  }
+}
+
+function hideFloatingHud() {
+  if (floatingHudEl) {
+    floatingHudEl.style.display = 'none';
+  }
 }
 
 async function insertIntoTwitterInput(text) {
@@ -840,7 +1103,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ABORT_WORKFLOW') {
     isWorkflowAborted = true;
     console.log('[ATOMX] Abort signal received. Stopping all automation.');
+    hideFloatingHud();
     sendResponse({ success: true, aborted: true });
+    return true;
+  }
+
+  if (message.type === 'UPDATE_FLOATING_HUD') {
+    updateFloatingHud(message.data);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'HIDE_FLOATING_HUD') {
+    hideFloatingHud();
+    sendResponse({ success: true });
     return true;
   }
 
@@ -1328,6 +1604,12 @@ async function huntAudienceUsers(options = {}) {
   for (let cycle = 0; cycle < maxScanCycles; cycle++) {
     if (isWorkflowAborted) break;
 
+    // Check Twitter Rate Limit during timeline scanning
+    if (checkTwitterRateLimit()) {
+      triggerRateLimitAbort('Rate limited during timeline scanning');
+      break;
+    }
+
     const visibleArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
 
     if (visibleArticles.length === 0) {
@@ -1597,6 +1879,11 @@ async function engageAndFollowProfile(options = {}) {
   let likesDone = 0;
   let replyDone = 0;
 
+  if (checkTwitterRateLimit()) {
+    triggerRateLimitAbort();
+    return { success: false, aborted: true, rateLimited: true, error: 'Twitter Rate Limit detected' };
+  }
+
   try {
     // Step 1: Follow Check & Action right at the top of the profile where avatar and Follow button are visible
     const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
@@ -1847,8 +2134,26 @@ async function executeReplyBackCycle(params = {}) {
   for (let i = 0; i < snapshotQueue.length; i++) {
     if (isWorkflowAborted) break;
 
+    // Check Twitter Rate Limit before action
+    if (checkTwitterRateLimit()) {
+      triggerRateLimitAbort();
+      break;
+    }
+
     const item = snapshotQueue[i];
     const { article: commentArt, data: commentData, commentKey } = item;
+
+    // Update Floating HUD
+    updateFloatingHud({
+      title: 'Reply Back Loop',
+      stateBadge: 'REPLYING',
+      indicator: `Comment ${i + 1}/${snapshotQueue.length}`,
+      done: doneCount,
+      collected: snapshotQueue.length,
+      skipped: skippedSelf,
+      progressPercent: Math.round(((i + 1) / snapshotQueue.length) * 100),
+      statusText: `Replying to @${commentData.authorHandle}...`
+    });
 
     // Scroll comment into view
     commentArt.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1856,13 +2161,8 @@ async function executeReplyBackCycle(params = {}) {
 
     // 1. Auto-Like the comment (❤️)
     if (autoLike) {
-      try {
-        const likeBtn = commentArt.querySelector('button[data-testid="like"]');
-        if (likeBtn) {
-          likeBtn.click();
-          await sleep(400);
-        }
-      } catch (e) {}
+      await simulateHumanLikeClick(commentArt);
+      await sleep(400);
     }
 
     // 2. Generate Contextual AI reply for this comment via background worker
@@ -1885,19 +2185,38 @@ async function executeReplyBackCycle(params = {}) {
       replyText = 'Appreciate you sharing this perspective!';
     }
 
+    // Enforce strict anti-bot sanitization
+    replyText = sanitizeClientComment(replyText, 10);
+
     // 3. Post reply using universal robust posting engine
     const commentRes = await postCommentOnTargetArticle(commentArt, replyText);
     if (commentRes && commentRes.success) {
       doneCount++;
       results.push({ commenter: commentData.authorHandle, reply: replyText, commentKey });
+      updateFloatingHud({
+        done: doneCount,
+        statusText: `✓ Replied to @${commentData.authorHandle}!`
+      });
       await sleep(800);
     } else {
       console.warn('[ATOMX REPLY LOOP] Could not post reply to comment:', commentRes?.error);
     }
 
+    // Check Twitter Rate Limit after action
+    if (checkTwitterRateLimit()) {
+      triggerRateLimitAbort();
+      break;
+    }
+
     // 6. Safe delay before next comment
     if (i < snapshotQueue.length - 1 && !isWorkflowAborted) {
-      await sleep(delaySec * 1000);
+      for (let s = delaySec; s > 0; s--) {
+        if (isWorkflowAborted) break;
+        updateFloatingHud({
+          statusText: `Next reply in ${s}s...`
+        });
+        await sleep(1000);
+      }
     }
   }
 

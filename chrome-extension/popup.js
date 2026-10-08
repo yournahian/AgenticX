@@ -75,6 +75,86 @@ let replyBackWorkingTabId = null;
 let autoUnfollowWorkingTabId = null;
 let reciprocatorWorkingTabId = null;
 
+// Real-time synchronization helper for on-page Floating Mini HUD
+function syncFloatingHud(tabId, data = {}) {
+  if (!tabId || typeof chrome === 'undefined' || !chrome.tabs?.sendMessage) return;
+  try {
+    chrome.tabs.sendMessage(tabId, {
+      type: 'UPDATE_FLOATING_HUD',
+      data
+    }).catch(() => null);
+  } catch (e) {}
+}
+
+// Global runtime listener for instant Twitter Rate Limit auto-abort & worker notifications
+if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'RATE_LIMIT_DETECTED') {
+      console.warn('[ATOMX ALERT] Twitter Rate Limit Detected! Stopping all workflows immediately.');
+      state.isAborted = true;
+
+      const activeTabs = [
+        audienceWorkingTabId,
+        sorsaWorkingTabId,
+        followerWorkingTabId,
+        replyBackWorkingTabId,
+        autoUnfollowWorkingTabId,
+        reciprocatorWorkingTabId
+      ].filter(Boolean);
+
+      activeTabs.forEach(tId => {
+        chrome.tabs?.sendMessage(tId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      });
+
+      activeTabs.forEach(tId => {
+        syncFloatingHud(tId, {
+          stateBadge: 'RATE_LIMITED',
+          statusText: '🚨 Rate limited! Stopped immediately to protect account.',
+          isStopped: true
+        });
+      });
+
+      const badges = document.querySelectorAll(
+        '#audienceStateBadge, #sorsaStateBadge, #followerStateBadge, #replyBackStateBadge, #reciprocatorStateBadge'
+      );
+      badges.forEach(b => {
+        b.textContent = 'RATE_LIMITED';
+        b.style.background = 'rgba(239, 68, 68, 0.25)';
+        b.style.color = '#EF4444';
+      });
+
+      const statusEls = document.querySelectorAll(
+        '#audienceLiveStatusText, #sorsaLiveStatusText, #followerLiveStatusText, #replyBackLiveStatusText, #reciprocatorLiveStatusText'
+      );
+      statusEls.forEach(el => {
+        el.textContent = '🚨 Twitter Rate Limit: "Sorry, you are rate limited". All workflows halted immediately!';
+      });
+
+      const startBtns = document.querySelectorAll(
+        '#runAudienceBuilderBtn, #runSorsaBoosterBtn, #runFollowerIncreaseBtn, #startReplyBackBtn, #runReciprocatorBtn'
+      );
+      startBtns.forEach(b => { b.style.display = 'block'; });
+
+      const stopBtns = document.querySelectorAll(
+        '#stopAudienceBuilderBtn, #stopSorsaBoosterBtn, #stopFollowerIncreaseBtn, #stopReplyBackBtn, #stopReciprocatorBtn'
+      );
+      stopBtns.forEach(b => { b.style.display = 'none'; });
+
+      showExtToast?.('Twitter Rate Limit: Aborted all workflows', '🚨');
+      alert('🚨 Twitter Rate Limit Detected!\n\nTwitter/X reported: "Sorry, you are rate limited".\n\nAtomX has immediately aborted all running workflows to protect your account from restrictions.');
+      sendResponse({ success: true, acknowledged: true });
+      return true;
+    }
+
+    if (message.type === 'ABORT_WORKFLOW') {
+      state.isAborted = true;
+      console.log('[ATOMX] Workflow aborted via message signal.');
+      sendResponse({ success: true });
+      return true;
+    }
+  });
+}
+
 // =============================================================
 // ROBUST X / TWITTER LINK EXTRACTOR & DEDUPLICATION ENGINE
 // Handles: standard URLs, intent/like, Telegram chats, timestamps, labels
@@ -693,6 +773,24 @@ function initListeners() {
     } catch (err) {
       console.warn('Could not open side panel programmatically:', err);
       alert('To dock in Side Panel: Click Chrome\'s Side Panel button (top-right of your browser) and select ATOMX ENGAGE.');
+    }
+  });
+
+  // Open in Floating Mini Window (Detached Popout Window)
+  document.getElementById('popoutWindowBtn')?.addEventListener('click', async () => {
+    try {
+      if (chrome.windows && typeof chrome.windows.create === 'function') {
+        await chrome.windows.create({
+          url: chrome.runtime.getURL('popup.html'),
+          type: 'popup',
+          width: 420,
+          height: 650,
+          focused: true
+        });
+        window.close();
+      }
+    } catch (err) {
+      console.warn('Could not open detached mini window:', err);
     }
   });
 
@@ -2316,6 +2414,17 @@ async function startAudienceBuilderWorkflow() {
       if (stateBadge) stateBadge.textContent = 'CHECK_FOLLOWED';
       if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
 
+      syncFloatingHud(audienceWorkingTabId, {
+        title: 'Audience Builder',
+        stateBadge: 'VISITING',
+        indicator: `Profile ${i + 1}/${collectedCount}`,
+        done: doneCount,
+        collected: collectedCount,
+        skipped: skippedCount,
+        progressPercent: progPercent,
+        statusText: `Visiting @${profile.cleanHandle}...`
+      });
+
       try {
         if (!audienceWorkingTabId) {
           const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
@@ -2333,6 +2442,16 @@ async function startAudienceBuilderWorkflow() {
         if (likePosts || replyPosts) {
           if (stateBadge) stateBadge.textContent = 'ENGAGING';
           if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Engaging @${profile.cleanHandle}'s recent posts...`;
+          syncFloatingHud(audienceWorkingTabId, {
+            title: 'Audience Builder',
+            stateBadge: 'ENGAGING',
+            indicator: `Profile ${i + 1}/${collectedCount}`,
+            done: doneCount,
+            collected: collectedCount,
+            skipped: skippedCount,
+            progressPercent: progPercent,
+            statusText: `Engaging @${profile.cleanHandle}...`
+          });
         }
 
         const backendUrl = await getBackendUrl();
@@ -2349,12 +2468,27 @@ async function startAudienceBuilderWorkflow() {
           }, (res) => resolve(res || { success: false }));
         });
 
+        if (actionRes?.rateLimited) {
+          state.isAborted = true;
+          break;
+        }
+
         if (actionRes?.alreadyFollowing) {
           skippedCount++;
           if (skipEl) skipEl.textContent = skippedCount;
           if (stateBadge) stateBadge.textContent = 'SKIPPED';
           if (statusText) statusText.textContent = `Already following @${profile.cleanHandle} (Skipped).`;
           followedSet.add(profile.cleanHandle.toLowerCase());
+          syncFloatingHud(audienceWorkingTabId, {
+            title: 'Audience Builder',
+            stateBadge: 'SKIPPED',
+            indicator: `Profile ${i + 1}/${collectedCount}`,
+            done: doneCount,
+            collected: collectedCount,
+            skipped: skippedCount,
+            progressPercent: progPercent,
+            statusText: `Already following @${profile.cleanHandle} (Skipped)`
+          });
         } else if (actionRes?.followed) {
           doneCount++;
           if (doneEl) doneEl.textContent = doneCount;
@@ -2362,6 +2496,16 @@ async function startAudienceBuilderWorkflow() {
           followedSet.add(profile.cleanHandle.toLowerCase());
           deductCredits(1);
           if (statusText) statusText.textContent = `✓ Followed @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
+          syncFloatingHud(audienceWorkingTabId, {
+            title: 'Audience Builder',
+            stateBadge: 'FOLLOWED',
+            indicator: `Profile ${i + 1}/${collectedCount}`,
+            done: doneCount,
+            collected: collectedCount,
+            skipped: skippedCount,
+            progressPercent: progPercent,
+            statusText: `✓ Followed @${profile.cleanHandle}!`
+          });
         } else {
           if (statusText) statusText.textContent = `Could not follow @${profile.cleanHandle}: ${actionRes?.error || 'Button not available'}`;
         }
@@ -2388,6 +2532,9 @@ async function startAudienceBuilderWorkflow() {
           if (state.isAborted) break;
           const pad = s < 10 ? '0' + s : s;
           if (countdownEl) countdownEl.textContent = `Next profile in 0:${pad}`;
+          syncFloatingHud(audienceWorkingTabId, {
+            statusText: `Next profile in 0:${pad}...`
+          });
           await sleep(1000);
         }
         if (countdownEl) countdownEl.style.display = 'none';
@@ -2400,6 +2547,17 @@ async function startAudienceBuilderWorkflow() {
       if (barEl) barEl.style.width = '100%';
       if (countdownEl) countdownEl.style.display = 'none';
       if (statusText) statusText.textContent = `✓ Audience Builder Completed! Followed: ${doneCount}, Skipped: ${skippedCount}, Collected: ${collectedCount}.`;
+      syncFloatingHud(audienceWorkingTabId, {
+        title: 'Audience Builder',
+        stateBadge: 'DONE',
+        indicator: `Profile ${collectedCount}/${collectedCount}`,
+        done: doneCount,
+        collected: collectedCount,
+        skipped: skippedCount,
+        progressPercent: 100,
+        statusText: `✓ Audience Builder Completed!`,
+        isStopped: true
+      });
       alert(`👥 Audience Builder Cycle Complete!\n\n• Profiles Collected: ${collectedCount}\n• New Accounts Followed: ${doneCount}\n• Accounts Skipped (Already Following): ${skippedCount}`);
     }
   } catch (err) {
@@ -2594,6 +2752,17 @@ async function startSorsaScoreBoosterWorkflow() {
       if (stateBadge) stateBadge.textContent = 'ENGAGING';
       if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
 
+      syncFloatingHud(sorsaWorkingTabId, {
+        title: 'Sorsa Booster',
+        stateBadge: 'ENGAGING',
+        indicator: `Account ${i + 1}/${collectedCount}`,
+        done: doneCount,
+        collected: collectedCount,
+        skipped: skippedCount,
+        progressPercent: progPercent,
+        statusText: `Visiting @${profile.cleanHandle}...`
+      });
+
       try {
         if (!sorsaWorkingTabId) {
           const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
@@ -2621,16 +2790,41 @@ async function startSorsaScoreBoosterWorkflow() {
           }, (res) => resolve(res || { success: false }));
         });
 
+        if (actionRes?.rateLimited) {
+          state.isAborted = true;
+          break;
+        }
+
         if (actionRes?.alreadyFollowing && !replyPosts && !likePosts) {
           skippedCount++;
           if (skipEl) skipEl.textContent = skippedCount;
           if (stateBadge) stateBadge.textContent = 'SKIPPED';
+          syncFloatingHud(sorsaWorkingTabId, {
+            title: 'Sorsa Booster',
+            stateBadge: 'SKIPPED',
+            indicator: `Account ${i + 1}/${collectedCount}`,
+            done: doneCount,
+            collected: collectedCount,
+            skipped: skippedCount,
+            progressPercent: progPercent,
+            statusText: `Already following @${profile.cleanHandle}`
+          });
         } else {
           doneCount++;
           if (doneEl) doneEl.textContent = doneCount;
           if (stateBadge) stateBadge.textContent = 'BOOSTED';
           deductCredits(1);
           if (statusText) statusText.textContent = `⚡ Boosted @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
+          syncFloatingHud(sorsaWorkingTabId, {
+            title: 'Sorsa Booster',
+            stateBadge: 'BOOSTED',
+            indicator: `Account ${i + 1}/${collectedCount}`,
+            done: doneCount,
+            collected: collectedCount,
+            skipped: skippedCount,
+            progressPercent: progPercent,
+            statusText: `⚡ Boosted @${profile.cleanHandle}!`
+          });
         }
       } catch (pErr) {
         console.warn('Error on Sorsa profile action:', pErr);
@@ -2642,6 +2836,9 @@ async function startSorsaScoreBoosterWorkflow() {
         for (let s = 15; s > 0; s--) {
           if (state.isAborted) break;
           if (countdownEl) countdownEl.textContent = `Next KOL in 0:${s < 10 ? '0' : ''}${s}`;
+          syncFloatingHud(sorsaWorkingTabId, {
+            statusText: `Next KOL in 0:${s < 10 ? '0' : ''}${s}...`
+          });
           await sleep(1000);
         }
         if (countdownEl) countdownEl.style.display = 'none';
@@ -2652,6 +2849,17 @@ async function startSorsaScoreBoosterWorkflow() {
       if (stateBadge) stateBadge.textContent = 'DONE';
       if (barEl) barEl.style.width = '100%';
       if (statusText) statusText.textContent = `✓ Sorsa Score Booster Completed! Engaged ${doneCount} ecosystem accounts.`;
+      syncFloatingHud(sorsaWorkingTabId, {
+        title: 'Sorsa Booster',
+        stateBadge: 'DONE',
+        indicator: `Account ${collectedCount}/${collectedCount}`,
+        done: doneCount,
+        collected: collectedCount,
+        skipped: skippedCount,
+        progressPercent: 100,
+        statusText: `✓ Sorsa Score Booster Completed!`,
+        isStopped: true
+      });
       alert(`⚡ Sorsa Score Booster Cycle Complete!\n\n• High-Weight Accounts Engaged: ${doneCount}\n• Sorsa Multiplier Accelerated!`);
     }
   } catch (err) {
@@ -2861,6 +3069,17 @@ async function startFollowersIncreaseWorkflow() {
       if (stateBadge) stateBadge.textContent = 'ENGAGING';
       if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
 
+      syncFloatingHud(followerWorkingTabId, {
+        title: 'Followers Growth',
+        stateBadge: 'ENGAGING',
+        indicator: `Profile ${i + 1}/${collectedCount}`,
+        done: doneCount,
+        collected: collectedCount,
+        skipped: skippedCount,
+        progressPercent: progPercent,
+        statusText: `Visiting @${profile.cleanHandle}...`
+      });
+
       try {
         if (!followerWorkingTabId) {
           const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
@@ -2888,16 +3107,41 @@ async function startFollowersIncreaseWorkflow() {
           }, (res) => resolve(res || { success: false }));
         });
 
+        if (actionRes?.rateLimited) {
+          state.isAborted = true;
+          break;
+        }
+
         if (actionRes?.alreadyFollowing) {
           skippedCount++;
           if (skipEl) skipEl.textContent = skippedCount;
           if (stateBadge) stateBadge.textContent = 'SKIPPED';
+          syncFloatingHud(followerWorkingTabId, {
+            title: 'Followers Growth',
+            stateBadge: 'SKIPPED',
+            indicator: `Profile ${i + 1}/${collectedCount}`,
+            done: doneCount,
+            collected: collectedCount,
+            skipped: skippedCount,
+            progressPercent: progPercent,
+            statusText: `Already following @${profile.cleanHandle}`
+          });
         } else if (actionRes?.followed) {
           doneCount++;
           if (doneEl) doneEl.textContent = doneCount;
           if (stateBadge) stateBadge.textContent = 'FOLLOWED';
           deductCredits(1);
           if (statusText) statusText.textContent = `✓ Followed @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
+          syncFloatingHud(followerWorkingTabId, {
+            title: 'Followers Growth',
+            stateBadge: 'FOLLOWED',
+            indicator: `Profile ${i + 1}/${collectedCount}`,
+            done: doneCount,
+            collected: collectedCount,
+            skipped: skippedCount,
+            progressPercent: progPercent,
+            statusText: `✓ Followed @${profile.cleanHandle}!`
+          });
         }
       } catch (pErr) {
         console.warn('Error on follower profile action:', pErr);
@@ -2909,6 +3153,9 @@ async function startFollowersIncreaseWorkflow() {
         for (let s = delaySec; s > 0; s--) {
           if (state.isAborted) break;
           if (countdownEl) countdownEl.textContent = `Next profile in 0:${s < 10 ? '0' : ''}${s}`;
+          syncFloatingHud(followerWorkingTabId, {
+            statusText: `Next profile in 0:${s < 10 ? '0' : ''}${s}...`
+          });
           await sleep(1000);
         }
         if (countdownEl) countdownEl.style.display = 'none';
@@ -2919,6 +3166,17 @@ async function startFollowersIncreaseWorkflow() {
       if (stateBadge) stateBadge.textContent = 'DONE';
       if (barEl) barEl.style.width = '100%';
       if (statusText) statusText.textContent = `✓ Follower Growth Completed! Followed: ${doneCount}, Skipped: ${skippedCount}.`;
+      syncFloatingHud(followerWorkingTabId, {
+        title: 'Followers Growth',
+        stateBadge: 'DONE',
+        indicator: `Profile ${collectedCount}/${collectedCount}`,
+        done: doneCount,
+        collected: collectedCount,
+        skipped: skippedCount,
+        progressPercent: 100,
+        statusText: `✓ Follower Growth Completed!`,
+        isStopped: true
+      });
       alert(`📈 Follower Growth Cycle Complete!\n\n• Profiles Engaged: ${doneCount}\n• Accounts Skipped: ${skippedCount}`);
     }
   } catch (err) {
@@ -3011,17 +3269,28 @@ async function startReplyBackLoopWorkflow() {
       updateAgentConsole('Reply Loop Running', `Accessing ${postNumberStr}: ${currentPostUrl}`);
 
       if (!replyBackWorkingTabId) {
-        const tab = await chrome.tabs.create({ url: currentPostUrl, active: false });
+        const tab = await chrome.tabs.create({ url: currentPostUrl, active: true });
         replyBackWorkingTabId = tab.id;
         shouldCloseWorkingTab = true;
       } else {
-        await chrome.tabs.update(replyBackWorkingTabId, { url: currentPostUrl });
+        await chrome.tabs.update(replyBackWorkingTabId, { url: currentPostUrl, active: true });
       }
 
       await waitForTabComplete(replyBackWorkingTabId);
       await sleep(3000);
 
       if (state.isAborted) break;
+
+      syncFloatingHud(replyBackWorkingTabId, {
+        title: 'Reply Back Loop',
+        stateBadge: 'SCANNING',
+        indicator: postNumberStr,
+        done: totalReplied,
+        collected: postUrls.length,
+        skipped: totalSkipped,
+        progressPercent: Math.round((pIdx / postUrls.length) * 100),
+        statusText: `Scanning comments on ${postNumberStr}...`
+      });
 
       if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
       if (statusText) statusText.textContent = `Scanning & hydrating comments snapshot (ignoring newly arriving comments)...`;
@@ -3038,6 +3307,11 @@ async function startReplyBackLoopWorkflow() {
           verifiedXHandle: state.verifiedXHandle
         }, (res) => resolve(res || { success: false, repliedCount: 0 }));
       });
+
+      if (cycleResult?.rateLimited) {
+        state.isAborted = true;
+        break;
+      }
 
       if (state.isAborted) break;
 
@@ -3070,6 +3344,17 @@ async function startReplyBackLoopWorkflow() {
       const postProg = Math.round(((pIdx + 1) / postUrls.length) * 100);
       if (barEl) barEl.style.width = `${postProg}%`;
 
+      syncFloatingHud(replyBackWorkingTabId, {
+        title: 'Reply Back Loop',
+        stateBadge: 'PROCESSED',
+        indicator: postNumberStr,
+        done: totalReplied,
+        collected: postUrls.length,
+        skipped: totalSkipped,
+        progressPercent: postProg,
+        statusText: `Completed ${postNumberStr} (Replied: ${repliedInThisPost})`
+      });
+
       if (pIdx < postUrls.length - 1 && !state.isAborted) {
         if (stateBadge) stateBadge.textContent = 'BREAK';
         if (countdownEl) countdownEl.style.display = 'block';
@@ -3077,6 +3362,9 @@ async function startReplyBackLoopWorkflow() {
           if (state.isAborted) break;
           if (statusText) statusText.textContent = `Completed ${postNumberStr}. Taking break before post ${pIdx + 2}...`;
           if (countdownEl) countdownEl.textContent = `⏱️ Next post in ${s}s...`;
+          syncFloatingHud(replyBackWorkingTabId, {
+            statusText: `Break before post ${pIdx + 2}: ${s}s...`
+          });
           await sleep(1000);
         }
         if (countdownEl) countdownEl.style.display = 'none';
@@ -3088,11 +3376,28 @@ async function startReplyBackLoopWorkflow() {
       if (barEl) barEl.style.width = '100%';
       if (countdownEl) countdownEl.style.display = 'none';
       if (statusText) statusText.textContent = `✓ Done! Replied to ${totalReplied} comment(s) across ${postUrls.length} post(s).`;
+      syncFloatingHud(replyBackWorkingTabId, {
+        title: 'Reply Back Loop',
+        stateBadge: 'DONE',
+        indicator: `Posts ${postUrls.length}/${postUrls.length}`,
+        done: totalReplied,
+        collected: postUrls.length,
+        skipped: totalSkipped,
+        progressPercent: 100,
+        statusText: `✓ Done! Replied to ${totalReplied} comment(s).`,
+        isStopped: true
+      });
       updateAgentConsole('Reply Loop Complete', `Finished replying to community comments with human typing.`);
       alert(`🔄 Reply Back Cycle Finished!\n\n• Posts Processed: ${postUrls.length}\n• Total Comments Replied: ${totalReplied}\n• Self & Duplicate Comments Skipped: ${totalSkipped}\n• Cost Deducted: ${totalReplied} Credit(s)\n• Action: Liked (❤️) + Contextual Human Letter-by-Letter Typing.`);
     } else {
       if (stateBadge) stateBadge.textContent = 'STOPPED';
       if (statusText) statusText.textContent = 'Reply loop stopped by user.';
+      syncFloatingHud(replyBackWorkingTabId, {
+        title: 'Reply Back Loop',
+        stateBadge: 'STOPPED',
+        statusText: 'Workflow stopped.',
+        isStopped: true
+      });
     }
   } catch (err) {
     console.error('Reply Back Loop error:', err);
