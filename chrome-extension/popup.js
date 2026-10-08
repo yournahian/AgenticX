@@ -962,7 +962,21 @@ function initAgentListeners() {
   });
   document.getElementById('stopSorsaBoosterBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    showExtToast('Stopping Sorsa Booster...', '⏹');
+    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
+      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+    });
+    updateAgentConsole('⏹️ Stopped', 'Sorsa Booster stopped by user.');
+    const startBtn = document.getElementById('runSorsaBoosterBtn');
+    const stopBtn = document.getElementById('stopSorsaBoosterBtn');
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    const statusText = document.getElementById('sorsaLiveStatusText');
+    if (statusText) statusText.textContent = 'Workflow stopped by user.';
+    const countdownEl = document.getElementById('sorsaCountdownText');
+    if (countdownEl) countdownEl.style.display = 'none';
+    const badge = document.getElementById('sorsaStateBadge');
+    if (badge) badge.textContent = 'STOPPED';
+    showExtToast('Sorsa Booster Stopped', '⏹');
   });
 
   // Agent 4: Followers Increase
@@ -971,7 +985,21 @@ function initAgentListeners() {
   });
   document.getElementById('stopFollowerIncreaseBtn')?.addEventListener('click', () => {
     state.isAborted = true;
-    showExtToast('Stopping Follower Growth...', '⏹');
+    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
+      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+    });
+    updateAgentConsole('⏹️ Stopped', 'Follower Growth stopped by user.');
+    const startBtn = document.getElementById('runFollowerIncreaseBtn');
+    const stopBtn = document.getElementById('stopFollowerIncreaseBtn');
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    const statusText = document.getElementById('followerLiveStatusText');
+    if (statusText) statusText.textContent = 'Workflow stopped by user.';
+    const countdownEl = document.getElementById('followerCountdownText');
+    if (countdownEl) countdownEl.style.display = 'none';
+    const badge = document.getElementById('followerStateBadge');
+    if (badge) badge.textContent = 'STOPPED';
+    showExtToast('Follower Growth Stopped', '⏹');
   });
 
   // Agent 5: Post Generator
@@ -1935,6 +1963,7 @@ function initSorsaScoreSystem() {
   const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
   const keys = Object.keys(lists);
   let hasPublished = false;
+  let firstAccessibleKey = null;
 
   select.innerHTML = '';
   keys.forEach((k) => {
@@ -1944,6 +1973,9 @@ function initSorsaScoreSystem() {
       hasPublished = true;
       const isPaid = (item.accessTier || 'free') === 'paid';
       const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+      if (userCanAccess && !firstAccessibleKey) {
+        firstAccessibleKey = k;
+      }
       const opt = document.createElement('option');
       opt.value = k;
       const targetCount = (item.targets || []).length;
@@ -1954,9 +1986,14 @@ function initSorsaScoreSystem() {
 
   if (!hasPublished) {
     select.innerHTML = `
-      <option value="sorsaTier1">🔒 [PRO ONLY] Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x · Pro)</option>
       <option value="sorsaTier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
+      <option value="sorsaTier1">🔒 [PRO ONLY] Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x · Pro)</option>
     `;
+    firstAccessibleKey = 'sorsaTier2';
+  }
+
+  if (firstAccessibleKey && !isUserPaidPlan(state.userPlan)) {
+    select.value = firstAccessibleKey;
   }
 }
 
@@ -2138,7 +2175,7 @@ async function startAudienceBuilderWorkflow() {
     if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
     if (statusText) statusText.textContent = `Opening target feed: ${targetUrl}...`;
 
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: false });
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
     workingTabId = listTab.id;
     shouldCloseWorkingTab = true;
     await waitForTabComplete(workingTabId);
@@ -2346,6 +2383,17 @@ async function startSorsaScoreBoosterWorkflow() {
     return;
   }
 
+  const selectedListKey = document.getElementById('sorsaTierSelect')?.value || 'sorsaTier2';
+  const tierKey = (selectedListKey === 'tier1' ? 'sorsaTier1' : (selectedListKey === 'tier2' ? 'sorsaTier2' : selectedListKey));
+  const tierData = state.curatedLists?.[tierKey] || FALLBACK_CURATED_LISTS?.[tierKey];
+
+  // Check Paid plan access BEFORE toggling UI
+  if (tierData?.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
+    alert(`🔒 Pro Plan Required!\n\n"${tierData.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab or select a free tier.`);
+    switchExtTab('credits');
+    return;
+  }
+
   const startBtn = document.getElementById('runSorsaBoosterBtn');
   const stopBtn = document.getElementById('stopSorsaBoosterBtn');
   const progressCard = document.getElementById('sorsaProgressCard');
@@ -2374,17 +2422,6 @@ async function startSorsaScoreBoosterWorkflow() {
   if (barEl) barEl.style.width = '0%';
   if (countdownEl) countdownEl.style.display = 'none';
 
-  const selectedListKey = document.getElementById('sorsaTierSelect')?.value || 'sorsaTier1';
-  const tierKey = (selectedListKey === 'tier1' ? 'sorsaTier1' : (selectedListKey === 'tier2' ? 'sorsaTier2' : selectedListKey));
-  const tierData = state.curatedLists?.[tierKey] || FALLBACK_CURATED_LISTS?.[tierKey];
-
-  // Check Paid plan access
-  if (tierData?.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
-    alert(`🔒 Pro Plan Required!\n\n"${tierData.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
-    switchExtTab('credits');
-    return;
-  }
-
   const customTargets = (tierData?.targets && tierData.targets.length > 0) ? tierData.targets : [];
 
   let targetUrl = '';
@@ -2401,10 +2438,8 @@ async function startSorsaScoreBoosterWorkflow() {
       targetUrl = tierData.listUrl;
     }
   } else if (tierKey === 'sorsaTier2' || tier === 'tier2') {
-    // Fallback: High-Volume Ecosystem Projects (exclude retweets & replies, English only, live)
     targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(from:ethereum OR from:solana OR from:base OR from:arbitrum OR from:optimism OR from:binance OR from:polygon) lang:en -filter:retweets -filter:replies') + '&f=live';
   } else {
-    // Fallback: Top 100 Crypto KOLs high-weight feed (exclude retweets & replies, English only, live)
     targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(from:cz_binance OR from:brian_armstrong OR from:vitalikbuterin OR from:aeyakovenko OR from:mertmumtaz OR from:balajis OR from:sreeramkannan OR from:shawmakesmagic) lang:en -filter:retweets -filter:replies') + '&f=live';
   }
 
@@ -2412,60 +2447,74 @@ async function startSorsaScoreBoosterWorkflow() {
   let shouldCloseWorkingTab = false;
 
   try {
-    if (stateBadge) stateBadge.textContent = 'FINDING_KOLS';
-    if (statusText) statusText.textContent = `Opening ${tier === 'tier1' ? 'Tier 1 KOLs' : 'Tier 2 Ecosystem Projects'} feed...`;
-    if (barEl) barEl.style.width = '15%';
-
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: false });
-    workingTabId = listTab.id;
-    shouldCloseWorkingTab = true;
-    await waitForTabComplete(workingTabId);
-    await sleep(2500);
-
-    if (state.isAborted) return;
-
-    if (stateBadge) stateBadge.textContent = 'COLLECTING_AUTHORS';
-    if (statusText) statusText.textContent = `Scanning timeline for top ecosystem post-authors (Target: ${targetCount} accounts)...`;
-    if (barEl) barEl.style.width = '25%';
-
-    const scanResult = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(workingTabId, {
-        type: 'AUDIENCE_BUILDER_HUNT_USERS',
-        dateRange: 'all',
-        sortBy: 'replies',
-        targetCount
-      }, (res) => resolve(res || { success: false, profiles: [] }));
-    });
-
-    if (state.isAborted) return;
-
-    // RULE: Post-Authors Only (Directly target the high-weight accounts who posted)
     let collectedProfiles = [];
     const collectedHandles = new Set();
 
-    if (scanResult?.profiles && scanResult.profiles.length > 0) {
-      for (const p of scanResult.profiles) {
+    // 1. Instantly populate high-weight targets from curated list
+    if (customTargets.length > 0) {
+      const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
+      for (const h of clean) {
         if (collectedProfiles.length >= targetCount) break;
-        const handleKey = (p.cleanHandle || '').toLowerCase();
-        if (handleKey && !collectedHandles.has(handleKey)) {
-          collectedHandles.add(handleKey);
-          collectedProfiles.push(p);
-          if (colEl) colEl.textContent = collectedProfiles.length;
+        const lower = h.toLowerCase();
+        if (!collectedHandles.has(lower)) {
+          collectedHandles.add(lower);
+          collectedProfiles.push({
+            cleanHandle: h,
+            handle: `@${h}`,
+            name: h
+          });
         }
       }
     }
+
+    // 2. If more targets needed to satisfy targetCount, hunt dynamically from live feed
+    if (collectedProfiles.length < targetCount && !state.isAborted) {
+      if (stateBadge) stateBadge.textContent = 'FINDING_KOLS';
+      if (statusText) statusText.textContent = `Scanning ${tier === 'tier1' ? 'Tier 1 KOLs' : 'Tier 2 Ecosystem Projects'} feed for more accounts...`;
+      if (barEl) barEl.style.width = '15%';
+
+      const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+      workingTabId = listTab.id;
+      shouldCloseWorkingTab = true;
+      await waitForTabComplete(workingTabId);
+      await sleep(2500);
+
+      if (!state.isAborted) {
+        const scanResult = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(workingTabId, {
+            type: 'AUDIENCE_BUILDER_HUNT_USERS',
+            dateRange: 'all',
+            sortBy: 'replies',
+            targetCount: targetCount - collectedProfiles.length
+          }, (res) => resolve(res || { success: false, profiles: [] }));
+        });
+
+        if (scanResult?.profiles && scanResult.profiles.length > 0) {
+          for (const p of scanResult.profiles) {
+            if (collectedProfiles.length >= targetCount) break;
+            const handleKey = (p.cleanHandle || '').toLowerCase();
+            if (handleKey && !collectedHandles.has(handleKey)) {
+              collectedHandles.add(handleKey);
+              collectedProfiles.push(p);
+            }
+          }
+        }
+      }
+    }
+
+    if (state.isAborted) return;
 
     collectedCount = collectedProfiles.length;
     if (colEl) colEl.textContent = collectedCount;
 
     if (collectedCount === 0) {
-      alert('⚠️ Could not find active posts from tier accounts at this moment. Please try again.');
+      alert('⚠️ Could not find active accounts for Sorsa Booster. Please try another tier.');
       return;
     }
 
     if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
     if (barEl) barEl.style.width = '40%';
-    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount} high-weight ecosystem accounts. Starting Sorsa boost loop...`;
+    if (statusText) statusText.textContent = `Queue ready! Collected ${collectedCount}/${targetCount} high-weight ecosystem accounts. Starting Sorsa boost loop...`;
     if (queueIndicator) queueIndicator.textContent = `Account 1/${collectedCount}`;
 
     await sleep(1500);
@@ -2493,7 +2542,13 @@ async function startSorsaScoreBoosterWorkflow() {
       if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
 
       try {
-        await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}` });
+        if (!workingTabId) {
+          const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
+          workingTabId = newTab.id;
+          shouldCloseWorkingTab = true;
+        } else {
+          await chrome.tabs.update(workingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
+        }
         await waitForTabComplete(workingTabId);
         await sleep(2000);
 
@@ -2508,7 +2563,8 @@ async function startSorsaScoreBoosterWorkflow() {
             replyPosts,
             style: `Sorsa ${tone}`,
             stylePrompt: customTonePrompt,
-            backendUrl
+            backendUrl,
+            verifiedXHandle: state.verifiedXHandle
           }, (res) => resolve(res || { success: false }));
         });
 
@@ -2575,6 +2631,15 @@ async function startFollowersIncreaseWorkflow() {
     return;
   }
 
+  const curatedFollower = state.curatedLists?.[niche];
+  if (curatedFollower) {
+    if (curatedFollower.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
+      alert(`🔒 Pro Plan Required!\n\n"${curatedFollower.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
+      switchExtTab('credits');
+      return;
+    }
+  }
+
   const startBtn = document.getElementById('runFollowerIncreaseBtn');
   const stopBtn = document.getElementById('stopFollowerIncreaseBtn');
   const progressCard = document.getElementById('followerProgressCard');
@@ -2604,13 +2669,7 @@ async function startFollowersIncreaseWorkflow() {
   if (countdownEl) countdownEl.style.display = 'none';
 
   let targetUrl = '';
-  const curatedFollower = state.curatedLists?.[niche];
   if (curatedFollower) {
-    if (curatedFollower.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
-      alert(`🔒 Pro Plan Required!\n\n"${curatedFollower.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
-      switchExtTab('credits');
-      return;
-    }
     const customTargets = (curatedFollower.targets && curatedFollower.targets.length > 0) ? curatedFollower.targets : [];
     if (customTargets.length > 0) {
       const clean = customTargets.map(h => h.replace('@', '').trim()).filter(Boolean);
@@ -2640,7 +2699,7 @@ async function startFollowersIncreaseWorkflow() {
     if (statusText) statusText.textContent = `Opening niche discussion feed: ${niche.toUpperCase()}...`;
     if (barEl) barEl.style.width = '15%';
 
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: false });
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
     workingTabId = listTab.id;
     shouldCloseWorkingTab = true;
     await waitForTabComplete(workingTabId);
@@ -2657,7 +2716,7 @@ async function startFollowersIncreaseWorkflow() {
         type: 'AUDIENCE_BUILDER_HUNT_USERS',
         dateRange: 'all',
         sortBy: 'replies',
-        targetCount
+        targetCount: Math.max(targetCount * 2, 20)
       }, (res) => resolve(res || { success: false, profiles: [], topTweets: [] }));
     });
 
@@ -2771,7 +2830,8 @@ async function startFollowersIncreaseWorkflow() {
             replyPosts: true,
             style: activeStyle,
             stylePrompt: activePrompt,
-            backendUrl
+            backendUrl,
+            verifiedXHandle: state.verifiedXHandle
           }, (res) => resolve(res || { success: false }));
         });
 

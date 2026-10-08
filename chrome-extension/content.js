@@ -1051,10 +1051,10 @@ async function huntAudienceUsers(options = {}) {
 
   console.log(`[ATOMX AUDIENCE] Starting deep timeline scan (Target: ${targetCount}, Date: ${dateRange}, Sort: ${sortBy})...`);
 
-  // Dynamically scale scan cycles: for 10 -> 15 cycles; 25 -> 32 cycles; 50 -> 60 cycles; 100 -> 90 cycles
-  const maxScanCycles = Math.min(100, Math.max(15, Math.ceil(targetCount * 1.25)));
+  // DYNAMIC SCROLL ENGINE: Keep scrolling until targetCount profiles are collected
   let consecutiveStalls = 0;
   let prevDiscoveredCount = 0;
+  const maxScanCycles = Math.max(120, targetCount * 5); // Large ceiling so it never cuts off prematurely
 
   for (let cycle = 0; cycle < maxScanCycles; cycle++) {
     if (isWorkflowAborted) break;
@@ -1120,27 +1120,38 @@ async function huntAudienceUsers(options = {}) {
       }
     }
 
-    // Early termination buffer: if we have indexed more than enough creators and tweets, stop scrolling
-    if (directProfiles.length >= Math.max(targetCount * 1.5, targetCount + 20) && tweetMap.size >= 15) {
-      console.log(`[ATOMX AUDIENCE DEEP SCAN] Target buffer satisfied (${directProfiles.length} profiles). Stopping scan early at cycle ${cycle + 1}.`);
+    // TARGET SATISFACTION: Stop scrolling ONLY when full target count is met
+    if (directProfiles.length >= targetCount) {
+      console.log(`[ATOMX AUDIENCE DEEP SCAN] Target reached: collected ${directProfiles.length}/${targetCount} profiles!`);
       break;
     }
 
-    // Stall check: if no new tweets discovered for 4 consecutive cycles, break
-    if (tweetMap.size === prevDiscoveredCount) {
+    // Check if feed is stuck or needs retry button clicked
+    if (directProfiles.length === prevDiscoveredCount) {
       consecutiveStalls++;
-      if (consecutiveStalls >= 4) {
-        console.log(`[ATOMX AUDIENCE DEEP SCAN] Feed reached end or stalled at ${tweetMap.size} tweets.`);
+      // Auto-click any "Retry" or "Show" buttons if Twitter stopped loading
+      const loadMoreBtns = Array.from(document.querySelectorAll('button[role="button"], div[role="button"]')).filter(b => {
+        const t = (b.innerText || '').toLowerCase();
+        return t.includes('retry') || t.includes('show') || t.includes('load more');
+      });
+      if (loadMoreBtns.length > 0) {
+        loadMoreBtns[0].click();
+        await sleep(1000);
+      }
+
+      // Allow up to 12 consecutive attempts before giving up on truly exhausted feeds
+      if (consecutiveStalls >= 12) {
+        console.log(`[ATOMX AUDIENCE DEEP SCAN] Timeline exhausted at ${directProfiles.length} profiles.`);
         break;
       }
     } else {
       consecutiveStalls = 0;
-      prevDiscoveredCount = tweetMap.size;
+      prevDiscoveredCount = directProfiles.length;
     }
 
     // Smooth scroll down to load next batch of timeline posts
-    window.scrollBy({ top: 1050, behavior: 'smooth' });
-    await sleep(700);
+    window.scrollBy({ top: 1200, behavior: 'smooth' });
+    await sleep(850);
   }
 
   const allDiscovered = Array.from(tweetMap.values());
@@ -1158,9 +1169,9 @@ async function huntAudienceUsers(options = {}) {
   // Provide candidate busy tweets (with replies)
   let topTweets = allDiscovered.filter(t => t.repliesCount > 0 && t.tweetUrl);
   if (topTweets.length === 0 && allDiscovered.length > 0) {
-    topTweets = allDiscovered.filter(t => t.tweetUrl).slice(0, 15);
+    topTweets = allDiscovered.filter(t => t.tweetUrl).slice(0, 20);
   } else {
-    topTweets = topTweets.slice(0, Math.min(25, Math.max(10, Math.ceil(targetCount / 2))));
+    topTweets = topTweets.slice(0, Math.min(30, Math.max(12, targetCount)));
   }
 
   if (topTweets.length > 0) {
@@ -1182,7 +1193,7 @@ async function huntAudienceUsers(options = {}) {
 const scanActiveProfilesFromList = (count) => huntAudienceUsers({ targetCount: count });
 
 /**
- * Agent 1: Collect active repliers/commenters from a busy tweet discussion thread (Phase C)
+ * Agent 1 & Agent 4: Collect active repliers/commenters from a busy tweet discussion thread
  * Extracts the real community members who participated and replied to the busy tweet.
  * Dynamically scrolls until targetCount is met or thread replies are exhausted.
  */
@@ -1193,8 +1204,8 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
   const seenHandles = new Set();
   const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
 
-  // Dynamically scroll discussion thread up to 25 cycles or until target reached
-  const maxThreadScrolls = Math.min(25, Math.max(6, Math.ceil(numTarget * 1.2)));
+  // DYNAMIC SCROLL: Keep scrolling until targetCount repliers are met
+  const maxThreadScrolls = Math.max(80, numTarget * 4);
   let consecutiveNoNew = 0;
 
   for (let s = 0; s < maxThreadScrolls; s++) {
@@ -1216,7 +1227,7 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
 
       seenHandles.add(cleanHandle);
       newInThisScroll++;
-      console.log(`[ATOMX THREAD REPLIER] Collected engaged user: @${cleanHandle}`);
+      console.log(`[ATOMX THREAD REPLIER] Collected engaged user (${collected.length + 1}/${numTarget}): @${cleanHandle}`);
       collected.push({
         handle: data.authorHandle || `@${cleanHandle}`,
         cleanHandle,
@@ -1227,9 +1238,19 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
 
     if (collected.length >= numTarget || isWorkflowAborted) break;
 
+    // Check for "Show replies" or "Show more replies" buttons and click them
+    const showBtns = Array.from(document.querySelectorAll('button[role="button"], div[role="button"]')).filter(b => {
+      const txt = (b.innerText || '').toLowerCase();
+      return txt.includes('show replies') || txt.includes('show more replies') || txt.includes('show probability') || txt.includes('hidden replies');
+    });
+    if (showBtns.length > 0) {
+      showBtns[0].click();
+      await sleep(1000);
+    }
+
     if (newInThisScroll === 0) {
       consecutiveNoNew++;
-      if (consecutiveNoNew >= 3) {
+      if (consecutiveNoNew >= 8) {
         // Thread replies exhausted
         break;
       }
@@ -1237,8 +1258,8 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
       consecutiveNoNew = 0;
     }
 
-    window.scrollBy({ top: 900, behavior: 'smooth' });
-    await sleep(750);
+    window.scrollBy({ top: 1100, behavior: 'smooth' });
+    await sleep(850);
   }
 
   return {
@@ -1719,10 +1740,14 @@ async function executeAutoUnfollowStep(params = {}) {
 // =========================================================================
 async function auditPostCommenters(params = {}) {
   isWorkflowAborted = false;
-  const maxScrolls = params.maxScrolls || 14;
+  const targetCount = Number(params.targetCount || params.maxCount || 100);
+  const maxScrolls = Math.max(params.maxScrolls || 40, targetCount * 3);
   const commenters = new Set();
   const mainArticle = getMainPostArticle();
   const mainHandle = mainArticle ? (extractTweetData(mainArticle).authorHandle || '').toLowerCase().replace(/^@/, '').trim() : '';
+
+  let consecutiveNoNew = 0;
+  let prevSize = 0;
 
   for (let i = 0; i < maxScrolls; i++) {
     if (isWorkflowAborted) break;
@@ -1746,8 +1771,30 @@ async function auditPostCommenters(params = {}) {
       }
     });
 
-    window.scrollBy({ top: 850, behavior: 'smooth' });
-    await sleep(1100);
+    if (commenters.size >= targetCount) {
+      break;
+    }
+
+    // Auto-click show more replies
+    const showBtns = Array.from(document.querySelectorAll('button[role="button"], div[role="button"]')).filter(b => {
+      const txt = (b.innerText || '').toLowerCase();
+      return txt.includes('show replies') || txt.includes('show more replies') || txt.includes('show probability');
+    });
+    if (showBtns.length > 0) {
+      showBtns[0].click();
+      await sleep(1000);
+    }
+
+    if (commenters.size === prevSize) {
+      consecutiveNoNew++;
+      if (consecutiveNoNew >= 8) break;
+    } else {
+      consecutiveNoNew = 0;
+      prevSize = commenters.size;
+    }
+
+    window.scrollBy({ top: 950, behavior: 'smooth' });
+    await sleep(900);
   }
 
   return {
