@@ -1392,7 +1392,7 @@ async function startAudienceBuilderWorkflow() {
     if (stateBadge) stateBadge.textContent = 'FINDING_TWEETS';
     if (statusText) statusText.textContent = `Opening target feed: ${targetUrl}...`;
 
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: false });
     workingTabId = listTab.id;
     shouldCloseWorkingTab = true;
     await waitForTabComplete(workingTabId);
@@ -1670,7 +1670,7 @@ async function startSorsaScoreBoosterWorkflow() {
     if (statusText) statusText.textContent = `Opening ${tier === 'tier1' ? 'Tier 1 KOLs' : 'Tier 2 Ecosystem Projects'} feed...`;
     if (barEl) barEl.style.width = '15%';
 
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: false });
     workingTabId = listTab.id;
     shouldCloseWorkingTab = true;
     await waitForTabComplete(workingTabId);
@@ -1894,7 +1894,7 @@ async function startFollowersIncreaseWorkflow() {
     if (statusText) statusText.textContent = `Opening niche discussion feed: ${niche.toUpperCase()}...`;
     if (barEl) barEl.style.width = '15%';
 
-    const listTab = await chrome.tabs.create({ url: targetUrl, active: true });
+    const listTab = await chrome.tabs.create({ url: targetUrl, active: false });
     workingTabId = listTab.id;
     shouldCloseWorkingTab = true;
     await waitForTabComplete(workingTabId);
@@ -2124,7 +2124,7 @@ async function startReplyBackLoopWorkflow() {
       updateAgentConsole('Reply Loop Running', `Accessing ${postNumberStr}: ${currentPostUrl}`);
 
       if (!workingTabId) {
-        const tab = await chrome.tabs.create({ url: currentPostUrl, active: true });
+        const tab = await chrome.tabs.create({ url: currentPostUrl, active: false });
         workingTabId = tab.id;
         shouldCloseWorkingTab = true;
       } else {
@@ -3455,7 +3455,7 @@ async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
   } else if (tweetUrl && activeTab && activeTab.url && activeTab.url.includes(tweetUrl.split('?')[0])) {
     targetTabId = activeTab.id;
   } else if (tweetUrl) {
-    const newTab = await chrome.tabs.create({ url: tweetUrl, active: true });
+    const newTab = await chrome.tabs.create({ url: tweetUrl, active: false });
     targetTabId = newTab.id;
     shouldClose = true;
     await waitForTabComplete(targetTabId);

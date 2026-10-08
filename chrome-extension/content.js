@@ -621,15 +621,28 @@ function sanitizeClientComment(text, maxWords = 10) {
   // 5. Auto-Repost Action (MAIN POST ONLY)
   if (actions.repost && !isWorkflowAborted) {
     try {
-      const rtBtn = mainArticle.querySelector('button[data-testid="retweet"]');
-      if (rtBtn) {
-        rtBtn.click();
-        await sleep(500);
-        const confirmBtn = await waitForElement('div[data-testid="retweetConfirm"], button[data-testid="retweetConfirm"]', 3000);
-        if (confirmBtn) {
-          confirmBtn.click();
-          performed.push('Reposted 🔁');
+      const isAlreadyReposted = !!mainArticle.querySelector('button[data-testid="unretweet"], div[data-testid="unretweet"]');
+      if (isAlreadyReposted) {
+        performed.push('Already Reposted');
+      } else {
+        const rtBtn = mainArticle.querySelector('button[data-testid="retweet"], div[data-testid="retweet"], button[aria-label*="Repost" i], button[aria-label*="Retweet" i]');
+        if (rtBtn) {
+          rtBtn.click();
           await sleep(600);
+          // Twitter confirms with either data-testid="retweetConfirm" or menuitem containing text Repost
+          let confirmBtn = document.querySelector('div[data-testid="retweetConfirm"], button[data-testid="retweetConfirm"]');
+          if (!confirmBtn) {
+            const menuItems = Array.from(document.querySelectorAll('div[role="menuitem"], span, div'));
+            confirmBtn = menuItems.find(el => {
+              const txt = (el.innerText || '').trim();
+              return txt === 'Repost' || txt === 'Retweet';
+            });
+          }
+          if (confirmBtn) {
+            confirmBtn.click();
+            performed.push('Reposted 🔁');
+            await sleep(600);
+          }
         }
       }
     } catch (e) {
@@ -642,17 +655,47 @@ function sanitizeClientComment(text, maxWords = 10) {
   // 6. Auto-Follow Creator Action
   if (actions.follow && !isWorkflowAborted) {
     try {
-      const followButtons = Array.from(mainArticle.querySelectorAll('button'));
-      const followBtn = followButtons.find(b => {
-        const txt = b.innerText.trim();
+      // 1. Look inside mainArticle
+      let followBtn = Array.from(mainArticle.querySelectorAll('button, div[role="button"]')).find(b => {
+        const txt = (b.innerText || '').trim();
         const testId = b.getAttribute('data-testid') || '';
-        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following');
+        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
       });
 
-      if (followBtn && followBtn.innerText.trim() === 'Follow') {
+      // 2. Look across whole page for creator's follow button
+      if (!followBtn) {
+        followBtn = Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => {
+          const txt = (b.innerText || '').trim();
+          const testId = b.getAttribute('data-testid') || '';
+          return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
+        });
+      }
+
+      // 3. Hover over author avatar/name to trigger Twitter HoverCard if not visible
+      if (!followBtn) {
+        const authorLink = mainArticle.querySelector('div[data-testid="User-Name"] a, a[role="link"][href*="/"]');
+        if (authorLink) {
+          authorLink.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+          await sleep(650);
+          const hoverCard = document.querySelector('div[data-testid="HoverCard"], div[role="dialog"]');
+          if (hoverCard) {
+            followBtn = Array.from(hoverCard.querySelectorAll('button')).find(b => {
+              const txt = (b.innerText || '').trim();
+              return txt === 'Follow' && !txt.includes('Following');
+            });
+          }
+        }
+      }
+
+      if (followBtn) {
         followBtn.click();
-        performed.push('Followed ➕');
+        performed.push('Followed Creator ➕');
         await sleep(600);
+      } else {
+        const isFollowing = Array.from(document.querySelectorAll('button')).some(b => (b.innerText || '').trim() === 'Following');
+        if (isFollowing) {
+          performed.push('Already Following');
+        }
       }
     } catch (e) {
       console.warn('Follow action error:', e);
@@ -802,7 +845,11 @@ async function huntAudienceUsers(options = {}) {
   const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
 
   let maxAgeMs = Infinity;
-  if (dateRange === '24h') maxAgeMs = 24 * 3600 * 1000;
+  if (dateRange === '1h') maxAgeMs = 1 * 3600 * 1000;
+  else if (dateRange === '2h') maxAgeMs = 2 * 3600 * 1000;
+  else if (dateRange === '4h') maxAgeMs = 4 * 3600 * 1000;
+  else if (dateRange === '12h') maxAgeMs = 12 * 3600 * 1000;
+  else if (dateRange === '24h') maxAgeMs = 24 * 3600 * 1000;
   else if (dateRange === '3d') maxAgeMs = 3 * 24 * 3600 * 1000;
   else if (dateRange === '7d') maxAgeMs = 7 * 24 * 3600 * 1000;
 
@@ -1092,8 +1139,24 @@ async function engageAndFollowProfile(options = {}) {
     }
 
     // Step 5: Generate AI Reply adhering to "Tone & Style (Applied Globally)" and comment on centered recent post
-    // Human Strategy Variance: ~70% chance to comment, ~30% chance to skip comment and follow directly
-    const shouldCommentThisProfile = replyPosts && (options.forceComment ? true : Math.random() > 0.30);
+    // Strict Freshness Check: Determine post age from <time> tag to skip old posts (12-16h old posts)
+    let isPostFresh = false;
+    let postAgeHours = 999;
+    if (targetRecentPost) {
+      const timeEl = targetRecentPost.querySelector('time');
+      const dt = timeEl ? timeEl.getAttribute('datetime') : null;
+      if (dt) {
+        const postTimestamp = new Date(dt).getTime();
+        postAgeHours = (Date.now() - postTimestamp) / (1000 * 60 * 60);
+        // Only comment if the post was made within the last 4 hours (Strict Freshness Rule!)
+        isPostFresh = postAgeHours <= 4;
+      }
+    }
+
+    const shouldCommentThisProfile = replyPosts && isPostFresh && (options.forceComment ? true : Math.random() > 0.25);
+    if (!isPostFresh && replyPosts) {
+      console.log(`[ATOMX AUDIENCE] Post is ${Math.round(postAgeHours)}h old (exceeds 4h freshness limit). Skipping comment to ensure high relevance.`);
+    }
     if (shouldCommentThisProfile && targetRecentPost && !isWorkflowAborted) {
       try {
         const tweetData = extractTweetData(targetRecentPost);

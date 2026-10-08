@@ -8,18 +8,40 @@ const supabase = require('./supabase');
 
 // Helper to resolve user UUID from either UUID or numeric fallback (e.g. 1)
 async function resolveUser(userIdOrId) {
-  if (!supabase) return null;
+  if (!supabase || !userIdOrId) return null;
   
-  // If valid UUID format
-  const isUuid = typeof userIdOrId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userIdOrId);
+  const val = String(userIdOrId).trim();
+  // 1. If valid UUID format
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
   if (isUuid) {
-    const { data } = await supabase.from('users').select('*').eq('id', userIdOrId).maybeSingle();
+    const { data } = await supabase.from('users').select('*').eq('id', val).maybeSingle();
     if (data) return data;
   }
 
-  // Fallback: Default to admin or first user
-  const { data } = await supabase.from('users').select('*').order('created_at', { ascending: true }).limit(1);
-  return data?.[0] || null;
+  // 2. If email format
+  if (val.includes('@') && val.includes('.')) {
+    const { data } = await supabase.from('users').select('*').eq('email', val.toLowerCase()).maybeSingle();
+    if (data) return data;
+  }
+
+  // 3. If Twitter handle
+  const cleanHandle = val.replace(/^@/, '').toLowerCase();
+  const { data: handleUser } = await supabase.from('users').select('*').or(`handle.eq.@${cleanHandle},handle.eq.${cleanHandle}`).maybeSingle();
+  if (handleUser) return handleUser;
+
+  // 4. If numeric ID
+  if (!isNaN(val)) {
+    const { data: numUser } = await supabase.from('users').select('*').eq('id', val).maybeSingle();
+    if (numUser) return numUser;
+  }
+
+  // Fallback: Default to admin or first user only if explicitly '1' or 'admin'
+  if (val === '1' || val === 'admin') {
+    const { data } = await supabase.from('users').select('*').order('created_at', { ascending: true }).limit(1);
+    return data?.[0] || null;
+  }
+
+  return null;
 }
 
 module.exports = {
@@ -56,7 +78,9 @@ module.exports = {
 
   async updateUserPassword(userId, password) {
     if (!supabase) return true;
-    const { data, error } = await supabase.from('users').update({ password_hash: password }).eq('id', userId).select();
+    const user = await resolveUser(userId);
+    if (!user) throw new Error('User not found');
+    const { data, error } = await supabase.from('users').update({ password_hash: password }).eq('id', user.id).select();
     if (error) throw new Error(error.message);
     return data?.[0];
   },

@@ -79,17 +79,36 @@ exports.rejectRequest = async (req, res) => {
 
 
 exports.adjustCredits = async (req, res) => {
-  const { userId, amount, action = 'Admin Adjustment', reason = 'Manual credit update' } = req.body;
-  if (!userId || typeof amount !== 'number') {
-    return res.status(400).json({ error: 'Valid userId and numeric amount required' });
+  const { userId, email, handle, amount, action = 'Admin Adjustment', reason = 'Manual credit update' } = req.body;
+  const targetId = userId || email || handle;
+  if (!targetId || typeof amount !== 'number') {
+    return res.status(400).json({ error: 'Valid userId, email or handle and numeric amount required' });
   }
 
   try {
-    const newBalance = await db.addCredits(userId, amount, action, 'Admin Control Panel', reason);
+    const newBalance = await db.addCredits(targetId, amount, action, 'Admin Control Panel', reason);
     res.json({
       message: 'Credit adjustment successful',
-      userId,
+      userId: targetId,
       newBalance
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.setUserPassword = async (req, res) => {
+  const { userId, email, handle, password } = req.body;
+  const targetId = userId || email || handle;
+  if (!targetId || !password || String(password).length < 4) {
+    return res.status(400).json({ error: 'Valid user identifier and password (minimum 4 characters) required' });
+  }
+
+  try {
+    const updated = await db.updateUserPassword(targetId, String(password).trim());
+    res.json({
+      message: 'Password successfully updated for user',
+      user: { id: updated.id, email: updated.email, handle: updated.handle }
     });
   } catch (err) {
     res.status(400).json({ error: err.message });
