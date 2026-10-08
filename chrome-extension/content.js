@@ -964,6 +964,14 @@ function ensureFloatingHud() {
       statusText: 'Workflow stopped by user.',
       isStopped: true
     });
+    chrome.storage.local.set({
+      atomx_active_hud: {
+        stateBadge: 'STOPPED',
+        statusText: 'Workflow stopped by user.',
+        isStopped: true,
+        active: false
+      }
+    }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
   });
 
@@ -1077,6 +1085,28 @@ function hideFloatingHud() {
   if (floatingHudEl) {
     floatingHudEl.style.display = 'none';
   }
+}
+
+// Automatically sync & hydrate on-page floating HUD from chrome.storage.local
+if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  chrome.storage.local.get(['atomx_active_hud'], (res) => {
+    if (res?.atomx_active_hud && res.atomx_active_hud.active) {
+      updateFloatingHud(res.atomx_active_hud);
+    }
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.atomx_active_hud) {
+      const val = changes.atomx_active_hud.newValue;
+      if (val && val.active) {
+        updateFloatingHud(val);
+      } else if (val && val.isStopped) {
+        updateFloatingHud(val);
+      } else {
+        hideFloatingHud();
+      }
+    }
+  });
 }
 
 async function insertIntoTwitterInput(text) {

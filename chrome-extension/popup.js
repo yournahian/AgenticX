@@ -75,15 +75,43 @@ let replyBackWorkingTabId = null;
 let autoUnfollowWorkingTabId = null;
 let reciprocatorWorkingTabId = null;
 
-// Real-time synchronization helper for on-page Floating Mini HUD
-function syncFloatingHud(tabId, data = {}) {
-  if (!tabId || typeof chrome === 'undefined' || !chrome.tabs?.sendMessage) return;
+// Real-time synchronization helper for on-page Floating Mini HUD & Detached Mini Window
+async function syncFloatingHud(tabId, data = {}) {
+  // 1. Save state to chrome.storage.local so all tabs hydrate it immediately
   try {
-    chrome.tabs.sendMessage(tabId, {
-      type: 'UPDATE_FLOATING_HUD',
-      data
-    }).catch(() => null);
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const stored = await chrome.storage.local.get(['atomx_active_hud']).catch(() => ({}));
+      const current = stored?.atomx_active_hud || {};
+      const merged = { ...current, ...data, active: !data.isStopped };
+      await chrome.storage.local.set({ atomx_active_hud: merged }).catch(() => null);
+    }
   } catch (e) {}
+
+  // 2. Broadcast UPDATE_FLOATING_HUD to active tab and all Twitter/X tabs
+  if (typeof chrome !== 'undefined' && chrome.tabs) {
+    try {
+      const tabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }).catch(() => []);
+      for (const t of tabs) {
+        chrome.tabs.sendMessage(t.id, {
+          type: 'UPDATE_FLOATING_HUD',
+          data
+        }).catch(() => null);
+      }
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+      if (activeTab && activeTab.id) {
+        chrome.tabs.sendMessage(activeTab.id, {
+          type: 'UPDATE_FLOATING_HUD',
+          data
+        }).catch(() => null);
+      }
+      if (tabId && (!activeTab || activeTab.id !== tabId)) {
+        chrome.tabs.sendMessage(tabId, {
+          type: 'UPDATE_FLOATING_HUD',
+          data
+        }).catch(() => null);
+      }
+    } catch (e) {}
+  }
 }
 
 // Global runtime listener for instant Twitter Rate Limit auto-abort & worker notifications
@@ -776,21 +804,35 @@ function initListeners() {
     }
   });
 
-  // Open in Floating Mini Window (Detached Popout Window)
+  // Open in Floating Mini Window (Detached Mini HUD matching Screenshot 2)
   document.getElementById('popoutWindowBtn')?.addEventListener('click', async () => {
     try {
       if (chrome.windows && typeof chrome.windows.create === 'function') {
         await chrome.windows.create({
-          url: chrome.runtime.getURL('popup.html'),
+          url: chrome.runtime.getURL('mini-hud.html'),
           type: 'popup',
-          width: 420,
-          height: 650,
+          width: 380,
+          height: 260,
           focused: true
         });
-        window.close();
       }
     } catch (err) {
       console.warn('Could not open detached mini window:', err);
+    }
+  });
+
+  // Automatically open Floating Mini Window if user closes extension popup during active workflow
+  window.addEventListener('pagehide', () => {
+    if (state.isWorkflowRunning && !state.isAborted) {
+      try {
+        chrome.windows?.create({
+          url: chrome.runtime.getURL('mini-hud.html'),
+          type: 'popup',
+          width: 380,
+          height: 260,
+          focused: false
+        }).catch(() => null);
+      } catch (e) {}
     }
   });
 
@@ -1036,6 +1078,13 @@ function initAgentListeners() {
 
   document.getElementById('stopAudienceBuilderBtn')?.addEventListener('click', () => {
     state.isAborted = true;
+    state.isWorkflowRunning = false;
+    syncFloatingHud(null, {
+      title: 'Audience Builder',
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      isStopped: true
+    });
     if (audienceWorkingTabId) {
       chrome.tabs.sendMessage(audienceWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       chrome.tabs.remove(audienceWorkingTabId).catch(() => null);
@@ -1087,6 +1136,13 @@ function initAgentListeners() {
   });
   document.getElementById('stopSorsaBoosterBtn')?.addEventListener('click', () => {
     state.isAborted = true;
+    state.isWorkflowRunning = false;
+    syncFloatingHud(null, {
+      title: 'Sorsa Booster',
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      isStopped: true
+    });
     if (sorsaWorkingTabId) {
       chrome.tabs.sendMessage(sorsaWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       chrome.tabs.remove(sorsaWorkingTabId).catch(() => null);
@@ -1112,6 +1168,13 @@ function initAgentListeners() {
   });
   document.getElementById('stopFollowerIncreaseBtn')?.addEventListener('click', () => {
     state.isAborted = true;
+    state.isWorkflowRunning = false;
+    syncFloatingHud(null, {
+      title: 'Followers Growth',
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      isStopped: true
+    });
     if (followerWorkingTabId) {
       chrome.tabs.sendMessage(followerWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       chrome.tabs.remove(followerWorkingTabId).catch(() => null);
@@ -1201,6 +1264,13 @@ function initAgentListeners() {
 
   document.getElementById('stopReplyBackBtn')?.addEventListener('click', () => {
     state.isAborted = true;
+    state.isWorkflowRunning = false;
+    syncFloatingHud(null, {
+      title: 'Reply Back Loop',
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      isStopped: true
+    });
     if (replyBackWorkingTabId) {
       chrome.tabs.sendMessage(replyBackWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       chrome.tabs.remove(replyBackWorkingTabId).catch(() => null);
@@ -2219,9 +2289,21 @@ async function startAudienceBuilderWorkflow() {
   const countdownEl = document.getElementById('audienceCountdownText');
 
   state.isAborted = false;
+  state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
+
+  syncFloatingHud(null, {
+    title: 'Audience Builder',
+    stateBadge: 'COLLECTING',
+    indicator: `Profile 0/${targetCount}`,
+    done: 0,
+    collected: 0,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: 'Resolving target accounts for audience collection...'
+  });
 
   // Load existing followed IDs & counters
   const storageData = await new Promise(r => {
@@ -2618,9 +2700,21 @@ async function startSorsaScoreBoosterWorkflow() {
   const countdownEl = document.getElementById('sorsaCountdownText');
 
   state.isAborted = false;
+  state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
+
+  syncFloatingHud(null, {
+    title: 'Sorsa Booster',
+    stateBadge: 'BOOSTING',
+    indicator: `Account 0/${targetCount}`,
+    done: 0,
+    collected: 0,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: 'Connecting to X.com & finding high-weight KOLs...'
+  });
 
   let doneCount = 0;
   let skippedCount = 0;
@@ -2916,9 +3010,21 @@ async function startFollowersIncreaseWorkflow() {
   const countdownEl = document.getElementById('followerCountdownText');
 
   state.isAborted = false;
+  state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
+
+  syncFloatingHud(null, {
+    title: 'Followers Growth',
+    stateBadge: 'GROWING',
+    indicator: `Profile 0/${targetCount}`,
+    done: 0,
+    collected: 0,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: 'Opening niche discussion feed & finding active repliers...'
+  });
 
   let doneCount = 0;
   let skippedCount = 0;
@@ -3234,9 +3340,21 @@ async function startReplyBackLoopWorkflow() {
   const countdownEl = document.getElementById('replyBackCountdownText');
 
   state.isAborted = false;
+  state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
+
+  syncFloatingHud(null, {
+    title: 'Reply Back Loop',
+    stateBadge: 'SCANNING',
+    indicator: `Posts 0/${postUrls.length}`,
+    done: 0,
+    collected: postUrls.length,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: 'Accessing posts & snapshotting comments...'
+  });
 
   if (stateBadge) stateBadge.textContent = 'POSTS_ADDED';
   if (doneEl) doneEl.textContent = '0';
