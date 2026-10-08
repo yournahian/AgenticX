@@ -491,6 +491,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  // Agent 13: Commenter Reciprocator — Engage on commenter profile
+  if (message.type === 'RECIPROCAL_PROFILE_ENGAGEMENT') {
+    executeReciprocalProfileEngagement(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 // Wait for element helper with timeout
@@ -1696,4 +1704,185 @@ async function executeLiveRaidEngagement(params = {}) {
     bookmarked
   };
 }
+
+// =========================================================================
+// AGENT 13: COMMENTER RECIPROCATOR PROFILE ENGAGEMENT ENGINE
+// =========================================================================
+async function executeReciprocalProfileEngagement(params = {}) {
+  isWorkflowAborted = false;
+
+  // 1-to-1 Verified Account Enforcement
+  if (params.verifiedXHandle) {
+    const expected = params.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
+    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
+    if (!current || current !== expected) {
+      showAccountMismatchModal(expected, current || 'Not Logged In');
+      return {
+        success: false,
+        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        unauthorizedAccount: true
+      };
+    }
+  }
+
+  const targetHandle = (params.handle || '').replace(/^@/, '').trim();
+  const likePost = params.likePost !== false;
+  const followUser = !!params.followUser;
+  const style = params.style || 'Natural & Concise';
+  const stylePrompt = params.stylePrompt || null;
+  const backendUrl = (params.backendUrl || 'https://agenticx-two.vercel.app').replace(/\/+$/, '');
+
+  let likeDone = false;
+  let replyDone = false;
+  let followDone = false;
+  let replyText = '';
+  let tweetUrl = '';
+
+  try {
+    // 1. Scroll past profile header/bio to reveal recent posts
+    window.scrollBy({ top: 600, behavior: 'smooth' });
+    await sleep(1200);
+
+    // 2. Find recent tweets, skip pinned tweets
+    let allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    if (allArticles.length === 0) {
+      window.scrollBy({ top: 500, behavior: 'smooth' });
+      await sleep(1400);
+      allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    }
+
+    if (allArticles.length === 0) {
+      return { success: false, reason: 'NO_POSTS_FOUND', error: 'No posts found on this user profile' };
+    }
+
+    const nonPinnedArticles = allArticles.filter(art => {
+      const socialCtx = art.querySelector('div[data-testid="socialContext"]')?.innerText?.toLowerCase() || '';
+      return !socialCtx.includes('pinned') && !socialCtx.includes('pin');
+    });
+
+    const targetArticle = nonPinnedArticles[0] || allArticles[0];
+    if (!targetArticle) {
+      return { success: false, reason: 'NO_TARGET_POST', error: 'Could not select target post' };
+    }
+
+    // Scroll target post into center view
+    targetArticle.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await sleep(800);
+
+    if (isWorkflowAborted) return { success: false, aborted: true };
+
+    const tweetData = extractTweetData(targetArticle);
+    const tweetText = tweetData.text || '';
+    tweetUrl = tweetData.tweetUrl || '';
+
+    // 3. Like the target post
+    if (likePost) {
+      const likeBtn = targetArticle.querySelector('button[data-testid="like"]');
+      if (likeBtn) {
+        likeBtn.click();
+        likeDone = true;
+        await sleep(650);
+      }
+    }
+
+    if (isWorkflowAborted) return { success: false, aborted: true, likeDone };
+
+    // 4. Generate contextual AI reply for this commenter's post
+    try {
+      const aiRes = await chrome.runtime.sendMessage({
+        type: 'GENERATE_AI_REPLY',
+        tweetText: tweetText || 'Great post!',
+        tweetAuthor: `@${targetHandle}`,
+        style,
+        stylePrompt
+      });
+      if (aiRes?.success && aiRes.reply) {
+        replyText = aiRes.reply.trim();
+      }
+    } catch (e) {}
+
+    if (!replyText) {
+      try {
+        const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tweetText: tweetText || 'Great post!',
+            tweetAuthor: `@${targetHandle}`,
+            style,
+            stylePrompt
+          })
+        }).then(r => r.json()).catch(() => null);
+        if (directRes?.reply) replyText = directRes.reply.trim();
+      } catch (e) {}
+    }
+
+    if (!replyText) {
+      replyText = 'Appreciate you sharing this perspective!';
+    }
+
+    // Sanitize comment (5-10 words, crisp, authentic)
+    replyText = sanitizeClientComment(replyText, 12);
+
+    // 5. Click reply button on the target post
+    const replyBtn = targetArticle.querySelector('button[data-testid="reply"]');
+    if (!replyBtn) {
+      return { success: false, reason: 'REPLY_BTN_NOT_FOUND', error: 'Reply button not found on post', likeDone };
+    }
+
+    replyBtn.click();
+    await sleep(750);
+
+    // 6. Focus textarea & type letter-by-letter with human variation
+    const textarea = await waitForElement('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]', 4000);
+    if (!textarea) {
+      return { success: false, reason: 'TEXTAREA_NOT_FOUND', error: 'Reply textarea did not open', likeDone };
+    }
+
+    await typeTextHumanLike(textarea, replyText);
+    await sleep(700);
+
+    if (isWorkflowAborted) return { success: false, aborted: true, likeDone };
+
+    // 7. Click submit button
+    const submitBtn = document.querySelector('button[data-testid="tweetButtonInline"]') ||
+                      document.querySelector('button[data-testid="tweetButton"]');
+    if (!submitBtn) {
+      return { success: false, reason: 'SUBMIT_BTN_NOT_FOUND', error: 'Submit button not found', likeDone };
+    }
+
+    submitBtn.removeAttribute('disabled');
+    submitBtn.click();
+    await sleep(1200);
+    replyDone = true;
+
+    // 8. Optional Follow user
+    if (followUser) {
+      const followButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+      const followBtn = followButtons.find(b => {
+        const txt = (b.innerText || '').trim();
+        const testId = b.getAttribute('data-testid') || '';
+        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following');
+      });
+      if (followBtn) {
+        followBtn.click();
+        followDone = true;
+        await sleep(600);
+      }
+    }
+
+    return {
+      success: true,
+      handle: targetHandle,
+      likeDone,
+      replyDone,
+      replyText,
+      tweetUrl,
+      followDone
+    };
+  } catch (err) {
+    return { success: false, error: err.message, likeDone, replyDone };
+  }
+}
+
 

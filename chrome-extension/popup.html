@@ -234,6 +234,17 @@
               <div class="bento-desc">Continuous raid liker — keeps tab open for screen record proof</div>
               <div class="bento-action">Start Raid ➔</div>
             </button>
+
+            <!-- 13. Commenter Reciprocator -->
+            <button type="button" class="bento-card" data-agent-id="reciprocator">
+              <div class="bento-top">
+                <span class="bento-emoji">🤝</span>
+                <span class="badge-mini growth">RECIPROCAL</span>
+              </div>
+              <div class="bento-title">Commenter Reciprocator</div>
+              <div class="bento-desc">Visits your post commenters & comments back on their recent posts</div>
+              <div class="bento-action">Reciprocate ➔</div>
+            </button>
           </div>
         </div>
 
@@ -1111,6 +1122,108 @@
                     <div style="font-weight:800; font-size:14px; color:#3B82F6;" id="tgLiveCountBookmarked">0</div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <!-- Workspace 13: Commenter Reciprocator (A13, Reciprocal Engagement Pod) -->
+            <div class="agent-panel-content" id="panel-agent-reciprocator" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Reciprocal Cross-Engagement:</strong> Collects all accounts who commented on your post, visits their profiles, and automatically engages back with a contextual AI reply on their recent posts.
+              </div>
+
+              <!-- Phase 1: Your Post URL -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Your Tweet Post Link</label>
+                  <button type="button" class="badge-mini" id="reciprocatorUseCurrentTabBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">⚡ Current Tab</button>
+                </div>
+                <input type="text" id="reciprocatorPostUrl" class="ext-input" placeholder="https://x.com/yourhandle/status/18420958...">
+              </div>
+
+              <!-- Phase 2: Controls & Options -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Target Commenters Limit</label>
+                  <select id="reciprocatorMaxCount" class="ext-select">
+                    <option value="10" selected>10 Commenters</option>
+                    <option value="25">25 Commenters</option>
+                    <option value="50">50 Commenters</option>
+                    <option value="100">100 Commenters</option>
+                    <option value="999">All Found Commenters</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Delay Between Profiles</label>
+                  <select id="reciprocatorDelaySelect" class="ext-select">
+                    <option value="15" selected>15 - 20s (Recommended)</option>
+                    <option value="12">10 - 15s (Faster)</option>
+                    <option value="25">20 - 30s (Ultra Safe)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">AI Reply Tone</label>
+                  <select id="reciprocatorToneSelect" class="ext-select">
+                    <option value="Natural & Concise" selected>Natural & Concise</option>
+                    <option value="Bullish">Bullish & Supportive</option>
+                    <option value="Founder Alpha">Founder / Operator Alpha</option>
+                    <option value="Friendly">Warm & Grateful</option>
+                    <option value="Engaging Question">Insightful Follow-up</option>
+                  </select>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px; margin-top:14px;">
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                    <input type="checkbox" id="reciprocatorOptLike" checked>
+                    <span>❤️ Auto-Like their post</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
+                    <input type="checkbox" id="reciprocatorOptFollow">
+                    <span>➕ Follow commenter</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Cost Notice -->
+              <div style="font-size:10.5px; color:var(--text-muted); background:var(--bg-canvas); padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle);">
+                💳 <strong>Cost:</strong> 1 credit per reciprocal comment posted. Skips self and previously engaged accounts.
+              </div>
+
+              <!-- Progress & State Machine Card -->
+              <div id="reciprocatorProgressCard" style="display:none; padding:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="live-dot" id="reciprocatorLiveDot"></span>
+                    <span id="reciprocatorStateBadge" class="badge-mini growth" style="font-family:monospace;">IDLE</span>
+                  </div>
+                  <span id="reciprocatorQueueIndicator" style="font-weight:700; color:var(--text-primary);">Commenter 0/0</span>
+                </div>
+                <div style="width:100%; height:6px; background:var(--bg-canvas); border-radius:3px; overflow:hidden; margin-bottom:8px;">
+                  <div id="reciprocatorProgressBar" style="width:0%; height:100%; background:var(--blue-primary); transition:width 0.3s ease;"></div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; text-align:center; margin-bottom:8px;">
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:#10B981;">Commented</div>
+                    <div style="font-weight:800; font-size:13px; color:#10B981;" id="reciprocatorCountDone">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--blue-primary);">Queue</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--blue-primary);" id="reciprocatorCountQueue">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--text-muted);">Skipped</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--text-muted);" id="reciprocatorCountSkipped">0</div>
+                  </div>
+                </div>
+                <div id="reciprocatorLiveStatusText" style="color:var(--text-secondary); font-size:11px; line-height:1.3;">Ready to scan commenters...</div>
+                <div id="reciprocatorCountdownText" style="display:none; color:var(--blue-primary); font-weight:700; font-size:10.5px; margin-top:4px;">⏱️ Next commenter in 15s...</div>
+              </div>
+
+              <!-- Action Controls -->
+              <div style="display:flex; gap:6px; margin-top:2px;">
+                <button type="button" class="primary-btn mini-btn" id="runReciprocatorBtn" style="flex:2; margin-top:0;">🤝 START RECIPROCAL COMMENTING</button>
+                <button type="button" class="secondary-btn mini-btn" id="stopReciprocatorBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
               </div>
             </div>
 

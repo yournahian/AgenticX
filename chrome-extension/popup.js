@@ -709,7 +709,8 @@ const AGENT_META = {
   creators: { title: 'Favorite Creators Radar', icon: '⭐', badge: 'RADAR', desc: 'Save favorite handles ➔ Instant top early comment spots' },
   replystudio: { title: 'AI Reply Assistant', icon: '💬', badge: '1-CLICK', desc: 'Contextual 1-click reply engine calibrated to your tone' },
   defaulter: { title: 'Find Defaulters', icon: '🔍', badge: 'AUDIT POD', desc: 'Scan post comments & detect members who skipped commenting' },
-  tgliveliker: { title: 'TG Live Liker (Proof Rec)', icon: '🔴', badge: 'PROOF REC', desc: 'Continuous raid liker — keeps tab open for screen record proof' }
+  tgliveliker: { title: 'TG Live Liker (Proof Rec)', icon: '🔴', badge: 'PROOF REC', desc: 'Continuous raid liker — keeps tab open for screen record proof' },
+  reciprocator: { title: 'Commenter Reciprocator', icon: '🤝', badge: 'RECIPROCAL', desc: 'Visits accounts who commented on your post & comments back on their recent posts' }
 };
 
 function initAgentListeners() {
@@ -1072,6 +1073,39 @@ function initAgentListeners() {
 
   document.getElementById('startTgLiveRaidBtn')?.addEventListener('click', startTgLiveRaidWorkflow);
   document.getElementById('stopTgLiveRaidBtn')?.addEventListener('click', stopTgLiveRaidWorkflow);
+
+  // Agent 13: Commenter Reciprocator Listeners
+  document.getElementById('reciprocatorUseCurrentTabBtn')?.addEventListener('click', async () => {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com')) && tabs[0].url.includes('/status/')) {
+        const inp = document.getElementById('reciprocatorPostUrl');
+        if (inp) inp.value = tabs[0].url.split('?')[0];
+        showExtToast('Current Tweet URL Linked', '⚡');
+      } else {
+        alert('Please open your target tweet on Twitter / X in your active browser tab first.');
+      }
+    } catch (e) { }
+  });
+
+  document.getElementById('runReciprocatorBtn')?.addEventListener('click', startCommenterReciprocatorWorkflow);
+  document.getElementById('stopReciprocatorBtn')?.addEventListener('click', () => {
+    state.isAborted = true;
+    chrome.tabs?.query({ active: true, currentWindow: true }).then(tabs => {
+      if (tabs && tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+    });
+    updateAgentConsole('⏹️ Stopped', 'Commenter Reciprocator stopped by user.');
+    const startBtn = document.getElementById('runReciprocatorBtn');
+    const stopBtn = document.getElementById('stopReciprocatorBtn');
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    const statusText = document.getElementById('reciprocatorLiveStatusText');
+    if (statusText) statusText.textContent = 'Workflow stopped by user.';
+    const badge = document.getElementById('reciprocatorStateBadge');
+    if (badge) badge.textContent = 'STOPPED';
+    const countdown = document.getElementById('reciprocatorCountdownText');
+    if (countdown) countdown.style.display = 'none';
+  });
 }
 
 function renderCreatorChips() {
@@ -1388,6 +1422,224 @@ function stopTgLiveRaidWorkflow() {
   const statusText = document.getElementById('tgLiveStatusText');
   if (statusText) statusText.textContent = 'Raid stopped by user. Tab is left open.';
   showExtToast('Live raid stopped (tab left open)', '⏹');
+}
+
+// =========================================================================
+// AGENT 13: COMMENTER RECIPROCATOR WORKFLOW ENGINE
+// =========================================================================
+async function startCommenterReciprocatorWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
+  const postUrlInput = document.getElementById('reciprocatorPostUrl');
+  let postUrl = postUrlInput ? postUrlInput.value.trim() : '';
+
+  if (!postUrl || (!postUrl.includes('twitter.com') && !postUrl.includes('x.com'))) {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+    if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com')) && tabs[0].url.includes('/status/')) {
+      postUrl = tabs[0].url.split('?')[0];
+      if (postUrlInput) postUrlInput.value = postUrl;
+    } else {
+      alert('⚠️ Please enter a valid tweet URL (e.g. https://x.com/yourhandle/status/18420958...) or open it in your active tab.');
+      return;
+    }
+  }
+
+  if (state.credits < 1) {
+    alert('⚠️ Insufficient credits!\nYou need at least 1 credit to reciprocate and comment on commenters\' posts.\nPlease top up in the Credits tab.');
+    switchExtTab('credits');
+    return;
+  }
+
+  const maxCount = Number(document.getElementById('reciprocatorMaxCount')?.value || 10);
+  const delaySec = Number(document.getElementById('reciprocatorDelaySelect')?.value || 15);
+  const tone = document.getElementById('reciprocatorToneSelect')?.value || 'Natural & Concise';
+  const optLike = document.getElementById('reciprocatorOptLike')?.checked ?? true;
+  const optFollow = document.getElementById('reciprocatorOptFollow')?.checked ?? false;
+
+  const startBtn = document.getElementById('runReciprocatorBtn');
+  const stopBtn = document.getElementById('stopReciprocatorBtn');
+  const progressCard = document.getElementById('reciprocatorProgressCard');
+  const stateBadge = document.getElementById('reciprocatorStateBadge');
+  const queueIndicator = document.getElementById('reciprocatorQueueIndicator');
+  const barEl = document.getElementById('reciprocatorProgressBar');
+  const doneEl = document.getElementById('reciprocatorCountDone');
+  const queueEl = document.getElementById('reciprocatorCountQueue');
+  const skipEl = document.getElementById('reciprocatorCountSkipped');
+  const statusText = document.getElementById('reciprocatorLiveStatusText');
+  const countdownEl = document.getElementById('reciprocatorCountdownText');
+
+  state.isAborted = false;
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (progressCard) progressCard.style.display = 'block';
+
+  if (stateBadge) stateBadge.textContent = 'COLLECTING_COMMENTERS';
+  if (doneEl) doneEl.textContent = '0';
+  if (queueEl) queueEl.textContent = '0';
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (countdownEl) countdownEl.style.display = 'none';
+  if (queueIndicator) queueIndicator.textContent = 'Commenter 0/0';
+
+  let doneCount = 0;
+  let skippedCount = 0;
+  let workingTabId = null;
+  let shouldCloseWorkingTab = false;
+
+  // Load persisted reciprocated accounts to avoid duplicate runs
+  let persistedReciprocated = [];
+  try {
+    const stored = await chrome.storage.local.get(['atomx_reciprocated_commenters']).catch(() => ({}));
+    if (Array.isArray(stored?.atomx_reciprocated_commenters)) persistedReciprocated = stored.atomx_reciprocated_commenters;
+  } catch (e) {}
+  const reciprocatedSet = new Set(persistedReciprocated.map(h => h.toLowerCase()));
+
+  try {
+    // Phase 1: Open post and collect commenters list
+    if (statusText) statusText.textContent = `Opening post: ${postUrl}... Collecting commenters.`;
+    updateAgentConsole('Scanning Commenters', `Accessing post: ${postUrl}`);
+
+    const tab = await chrome.tabs.create({ url: postUrl, active: false });
+    workingTabId = tab.id;
+    shouldCloseWorkingTab = true;
+    await waitForTabComplete(workingTabId);
+    await sleep(3000);
+
+    if (state.isAborted) return;
+
+    if (statusText) statusText.textContent = `Scanning all comments on your post to build queue...`;
+    const scanResult = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(workingTabId, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, (res) => resolve(res || { success: false, commenters: [] }));
+    });
+
+    if (state.isAborted) return;
+
+    const rawCommenters = Array.isArray(scanResult?.commenters) ? scanResult.commenters : [];
+    const mainAuthor = (scanResult?.mainAuthor || '').toLowerCase();
+    const myHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').toLowerCase();
+
+    // Filter out self and deduplicate
+    const uniqueCommenters = [];
+    const seenHandles = new Set();
+
+    for (const raw of rawCommenters) {
+      const clean = raw.toLowerCase().trim();
+      if (!clean || clean === mainAuthor || clean === myHandle || seenHandles.has(clean)) continue;
+      if (reciprocatedSet.has(clean)) continue;
+
+      seenHandles.add(clean);
+      uniqueCommenters.push(clean);
+      if (uniqueCommenters.length >= maxCount) break;
+    }
+
+    if (uniqueCommenters.length === 0) {
+      alert(`⚠️ No new commenters found on this post!\n\n• Scanned ${rawCommenters.length} comments.\n• Either all commenters were already engaged, or no comments exist.`);
+      return;
+    }
+
+    const totalInQueue = uniqueCommenters.length;
+    if (queueEl) queueEl.textContent = totalInQueue;
+    if (stateBadge) stateBadge.textContent = 'QUEUE_READY';
+    if (statusText) statusText.textContent = `Queue ready! Found ${totalInQueue} unique commenters to reciprocate. Starting profile loop...`;
+    await sleep(1500);
+
+    const backendUrl = await getBackendUrl();
+
+    // Phase 2: Per-Commenter Loop
+    for (let i = 0; i < totalInQueue; i++) {
+      if (state.isAborted) break;
+
+      const commenterHandle = uniqueCommenters[i];
+      const progPercent = Math.round(((i + 1) / totalInQueue) * 100);
+      if (barEl) barEl.style.width = `${progPercent}%`;
+      if (queueIndicator) queueIndicator.textContent = `Commenter ${i + 1}/${totalInQueue}`;
+
+      if (stateBadge) stateBadge.textContent = 'VISITING_PROFILE';
+      if (statusText) statusText.textContent = `[${i + 1}/${totalInQueue}] Visiting @${commenterHandle}'s profile...`;
+
+      try {
+        await chrome.tabs.update(workingTabId, { url: `https://x.com/${commenterHandle}` });
+        await waitForTabComplete(workingTabId);
+        await sleep(2200);
+
+        if (state.isAborted) break;
+
+        if (stateBadge) stateBadge.textContent = 'READING_POST';
+        if (statusText) statusText.textContent = `Scanning recent post & generating contextual AI reply for @${commenterHandle}...`;
+
+        const engageRes = await new Promise((resolve) => {
+          chrome.tabs.sendMessage(workingTabId, {
+            type: 'RECIPROCAL_PROFILE_ENGAGEMENT',
+            handle: commenterHandle,
+            likePost: optLike,
+            followUser: optFollow,
+            style: tone,
+            stylePrompt: state.selectedTonePrompt,
+            backendUrl,
+            verifiedXHandle: state.verifiedXHandle
+          }, (res) => resolve(res || { success: false, error: 'No response' }));
+        });
+
+        if (engageRes?.success && engageRes.replyDone) {
+          doneCount++;
+          if (doneEl) doneEl.textContent = doneCount;
+          if (stateBadge) stateBadge.textContent = 'CONFIRMING';
+
+          // Deduct 1 credit per successfully posted reply
+          deductCredits(1);
+
+          reciprocatedSet.add(commenterHandle.toLowerCase());
+          persistedReciprocated.push(commenterHandle);
+          chrome.storage.local.set({ atomx_reciprocated_commenters: persistedReciprocated }).catch(() => null);
+
+          if (statusText) statusText.textContent = `✓ Reciprocated with @${commenterHandle}! Reply: "${(engageRes.replyText || '').slice(0, 30)}..."`;
+        } else {
+          skippedCount++;
+          if (skipEl) skipEl.textContent = skippedCount;
+          if (statusText) statusText.textContent = `Skipped @${commenterHandle} (${engageRes?.reason || engageRes?.error || 'No recent post'}).`;
+        }
+      } catch (cErr) {
+        console.warn(`Error on commenter @${commenterHandle}:`, cErr);
+        skippedCount++;
+        if (skipEl) skipEl.textContent = skippedCount;
+      }
+
+      // Phase 3: Pacing Delay between profiles
+      if (i < totalInQueue - 1 && !state.isAborted) {
+        if (stateBadge) stateBadge.textContent = 'PACING_DELAY';
+        if (countdownEl) countdownEl.style.display = 'inline-block';
+        for (let s = delaySec; s > 0; s--) {
+          if (state.isAborted) break;
+          const pad = s < 10 ? '0' + s : s;
+          if (countdownEl) countdownEl.textContent = `Next commenter in 0:${pad}`;
+          await sleep(1000);
+        }
+        if (countdownEl) countdownEl.style.display = 'none';
+      }
+    }
+
+    if (!state.isAborted) {
+      if (stateBadge) stateBadge.textContent = 'DONE';
+      if (barEl) barEl.style.width = '100%';
+      if (countdownEl) countdownEl.style.display = 'none';
+      if (statusText) statusText.textContent = `✓ Reciprocal loop complete! Commented: ${doneCount}, Skipped: ${skippedCount}.`;
+      alert(`🤝 Reciprocal Commenting Finished!\n\n• Target Commenters: ${totalInQueue}\n• Successfully Commented Back: ${doneCount}\n• Skipped (No post / Protected): ${skippedCount}\n• Cost: ${doneCount} Credit(s)\n\nEngaged your community with contextual AI replies!`);
+    } else {
+      if (stateBadge) stateBadge.textContent = 'STOPPED';
+      if (statusText) statusText.textContent = 'Workflow stopped by user.';
+    }
+  } catch (err) {
+    console.error('Commenter Reciprocator error:', err);
+    if (stateBadge) stateBadge.textContent = 'FAILED';
+    alert('Reciprocator error: ' + err.message);
+  } finally {
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (countdownEl) countdownEl.style.display = 'none';
+    if (shouldCloseWorkingTab && workingTabId) {
+      chrome.tabs?.remove(workingTabId).catch(() => null);
+    }
+  }
 }
 
 // =========================================================================
