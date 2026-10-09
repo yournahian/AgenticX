@@ -189,10 +189,33 @@ exports.deleteUser = async (req, res) => {
 exports.getPasswordRequests = async (req, res) => {
   try {
     const ledger = await db.getAllLedger();
-    const requests = (ledger || []).filter(l => l.action === 'Forgot Password');
+    const requests = (ledger || []).filter(l => l.action === 'Forgot Password').map(l => {
+      const handleMatch = (l.reason || '').match(/for\s+(@?[\w_]+)/i);
+      const tgMatch = (l.reason || '').match(/TG:\s*(@?[\w_]+)/i);
+      const emailMatch = (l.reason || '').match(/Email:\s*([^\s|]+)/i);
+      const handle = l.user_handle || (l.users && l.users.handle) || (handleMatch ? handleMatch[1] : (l.user_name || 'User'));
+      const formattedHandle = handle.startsWith('@') ? handle : `@${handle}`;
+      return {
+        ...l,
+        user: formattedHandle,
+        handle: formattedHandle,
+        email: (l.users && l.users.email) || l.user_email || (emailMatch ? emailMatch[1] : ''),
+        telegram: tgMatch ? tgMatch[1] : ''
+      };
+    });
     res.json({ requests });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+exports.resolvePasswordRequest = async (req, res) => {
+  try {
+    const { userId, handle } = req.body;
+    await db.resolvePasswordReset(userId || handle);
+    res.json({ success: true, message: 'Password reset request marked as resolved.' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 };
 
@@ -578,12 +601,15 @@ exports.saveActiveModel = async (req, res) => {
 const toneStylesPath = path.join(__dirname, '../data/toneStyles.json');
 const tmpToneStylesPath = path.join('/tmp', 'toneStyles.json');
 let inMemoryToneStyles = null;
+let lastToneFetchTime = 0;
+const TONE_CACHE_TTL = 3000; // 3 seconds TTL so updates propagate across instances
 
 exports.getToneStylesCached = () => inMemoryToneStyles;
 
 exports.getToneStyles = async (req, res) => {
   try {
-    if (inMemoryToneStyles && inMemoryToneStyles.defaultTones) {
+    const now = Date.now();
+    if (inMemoryToneStyles && inMemoryToneStyles.defaultTones && (now - lastToneFetchTime < TONE_CACHE_TTL)) {
       return res.json(inMemoryToneStyles);
     }
 
@@ -596,8 +622,9 @@ exports.getToneStyles = async (req, res) => {
           .eq('id', 'system_tone_styles')
           .maybeSingle();
 
-        if (!error && data && data.features && data.features.defaultTones) {
+        if (!error && data && data.features && Array.isArray(data.features.defaultTones)) {
           inMemoryToneStyles = data.features;
+          lastToneFetchTime = now;
           return res.json(inMemoryToneStyles);
         }
       } catch (e) {
@@ -654,6 +681,7 @@ exports.saveToneStyles = async (req, res) => {
     };
 
     inMemoryToneStyles = updated;
+    lastToneFetchTime = Date.now();
 
     // 1. Persist to Supabase cloud database
     if (supabase) {

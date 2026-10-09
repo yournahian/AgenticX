@@ -79,63 +79,88 @@ const referralService = require('../services/referralService');
 
 exports.requestAccess = async (req, res) => {
   const { fullName, email, handle, xHandle, password, useCase, telegram, referredBy, ref } = req.body;
-  if (!fullName || !email) {
-    return res.status(400).json({ error: 'Full name and email are required' });
+  if (!fullName || !fullName.trim()) {
+    return res.status(400).json({ error: 'Full name is required.' });
+  }
+
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ error: 'A valid email address is required.' });
   }
 
   const rawHandle = (handle || xHandle || '').trim().replace(/^@/, '');
   if (!rawHandle) {
-    return res.status(400).json({ error: 'Your X (Twitter) ID or handle is required to verify your account.' });
+    return res.status(400).json({ error: 'Your Twitter / X handle is required to verify your account.' });
+  }
+
+  const rawTelegram = (telegram || '').trim().replace(/^@/, '');
+  if (!rawTelegram) {
+    return res.status(400).json({ error: 'Your Telegram ID is required.' });
   }
 
   const formattedHandle = '@' + rawHandle;
-  const rawTelegram = (telegram || '').trim();
-  const formattedTelegram = rawTelegram ? (rawTelegram.startsWith('@') ? rawTelegram : '@' + rawTelegram) : '';
+  const formattedTelegram = '@' + rawTelegram;
+  const cleanTelegramLower = rawTelegram.toLowerCase();
+  const cleanHandleLower = rawHandle.toLowerCase();
 
   const rawReferrer = (referredBy || ref || '').trim().replace(/^@/, '');
-  const formattedReferrer = rawReferrer && rawReferrer.toLowerCase() !== rawHandle.toLowerCase() ? '@' + rawReferrer : '';
+  const formattedReferrer = rawReferrer && rawReferrer.toLowerCase() !== cleanHandleLower ? '@' + rawReferrer : '';
 
   try {
-    // 1. Strict 1 account per email
-    const existingEmail = await db.getUserByEmail(email);
+    const existingReqs = await db.getAccessRequests();
+
+    // 1. Strict 1 account per email (Zero duplicates in users and access_requests)
+    const existingEmail = await db.getUserByEmail(cleanEmail);
     if (existingEmail) {
-      return res.status(400).json({ error: 'An account with this email already exists' });
+      return res.status(400).json({ error: `An account with this email (${cleanEmail}) already exists. Multiple accounts with the same email are strictly prohibited.` });
+    }
+    const duplicateEmailReq = (existingReqs || []).find(r => (r.email || '').toLowerCase() === cleanEmail && (r.status === 'PENDING' || r.status === 'APPROVED'));
+    if (duplicateEmailReq) {
+      return res.status(400).json({ 
+        error: `An access request with this email (${cleanEmail}) already exists (${duplicateEmailReq.status}). Multiple accounts with the same email are strictly prohibited.`,
+        alreadyApproved: duplicateEmailReq.status === 'APPROVED'
+      });
     }
 
-    // 2. Strict 1 account per X ID (Enforce zero duplicate X accounts)
+    // 2. Strict 1 account per Twitter / X ID (Zero duplicates in users and access_requests)
     const existingHandleUser = await db.getUserByHandle(rawHandle);
     if (existingHandleUser) {
       return res.status(400).json({ 
-        error: `This Twitter / X handle (${formattedHandle}) is already registered and approved. Please sign in directly with your password.`,
+        error: `This Twitter / X handle (${formattedHandle}) is already registered. Multiple accounts with the same Twitter / X ID are strictly prohibited.`,
         alreadyApproved: true
       });
     }
-
-    // 3. Check for existing pending request with this X ID
-    const existingReqs = await db.getAccessRequests();
-    const duplicateReq = (existingReqs || []).find(r => {
+    const duplicateHandleReq = (existingReqs || []).find(r => {
       const h = (r.handle || '').replace(/^@/, '').toLowerCase();
-      return h === rawHandle.toLowerCase() && (r.status === 'PENDING' || r.status === 'APPROVED');
+      return h === cleanHandleLower && (r.status === 'PENDING' || r.status === 'APPROVED');
     });
-    if (duplicateReq) {
-      const isApproved = duplicateReq.status === 'APPROVED';
+    if (duplicateHandleReq) {
       return res.status(400).json({ 
-        error: isApproved 
-          ? `The request for ${formattedHandle} has already been approved! Please sign in directly.` 
-          : `An access request for ${formattedHandle} has already been submitted (${duplicateReq.status}). Multiple accounts with the same X ID are strictly prohibited.`,
-        alreadyApproved: isApproved
+        error: `An access request for Twitter / X ID ${formattedHandle} has already been submitted (${duplicateHandleReq.status}). Multiple accounts with the same Twitter / X ID are strictly prohibited.`,
+        alreadyApproved: duplicateHandleReq.status === 'APPROVED'
       });
     }
 
-    const note = `X_ID:${formattedHandle}${formattedTelegram ? ` | TG:${formattedTelegram}` : ''}${formattedReferrer ? ` | REF:${formattedReferrer}` : ''} | Note: ${useCase || 'User access request'}`;
-    await db.createAccessRequest(fullName, email, note, formattedHandle, password);
+    // 3. Strict 1 account per Telegram ID (Zero duplicates in access_requests)
+    const duplicateTgReq = (existingReqs || []).find(r => {
+      const tg = (r.telegram || '').replace(/^@/, '').toLowerCase();
+      return tg && tg === cleanTelegramLower && (r.status === 'PENDING' || r.status === 'APPROVED');
+    });
+    if (duplicateTgReq) {
+      return res.status(400).json({
+        error: `This Telegram ID (${formattedTelegram}) is already registered with another account (${duplicateTgReq.status}). Multiple accounts with the same Telegram ID are strictly prohibited.`
+      });
+    }
+
+    const note = `X_ID:${formattedHandle} | TG:${formattedTelegram}${formattedReferrer ? ` | REF:${formattedReferrer}` : ''} | Note: ${useCase || 'User access request'}`;
+    await db.createAccessRequest(fullName, cleanEmail, note, formattedHandle, password);
 
     // 4. Record pending referral if referred
     if (formattedReferrer) {
       referralService.recordPendingReferral({
         referrerHandle: formattedReferrer,
         refereeHandle: formattedHandle,
-        refereeEmail: email,
+        refereeEmail: cleanEmail,
         refereeName: fullName
       });
     }
@@ -337,18 +362,18 @@ exports.requestReview = async (req, res) => {
 exports.requestPasswordReset = async (req, res) => {
   try {
     const { identifier, handle, email, telegram } = req.body;
-    const loginKey = (handle || email || identifier || '').trim();
-    if (!loginKey) {
-      return res.status(400).json({ error: 'Please enter your Twitter / X ID or registered email' });
-    }
     const cleanHandle = (handle || identifier || '').trim();
     const cleanEmail = (email || '').trim();
     const cleanTelegram = (telegram || '').trim();
 
-    const result = await db.requestPasswordReset(loginKey, cleanTelegram, cleanEmail, cleanHandle);
+    if (!cleanHandle || !cleanEmail || !cleanTelegram) {
+      return res.status(400).json({ error: 'All 3 fields (Twitter / X handle, registered email, and Telegram ID) are required to request a password reset.' });
+    }
+
+    const result = await db.requestPasswordReset(cleanHandle, cleanTelegram, cleanEmail, cleanHandle);
     res.json({
       success: true,
-      message: `✓ Password reset request sent to Admin! Admin will review your account and message your temporary login password to Telegram (${cleanTelegram || 'your account'}).`,
+      message: `✓ Password reset request sent to Admin! Admin will review your account and message your temporary login password to your Telegram (${cleanTelegram.startsWith('@') ? cleanTelegram : '@' + cleanTelegram}).`,
       user: result.user
     });
   } catch (err) {

@@ -4385,6 +4385,10 @@ async function handleExtSubmitRequest() {
     alert('Please enter a valid email address.');
     return;
   }
+  if (!telegram) {
+    alert('Please enter your Telegram ID (e.g. @username). All 3 fields (X ID, Email, Telegram) are strictly required.');
+    return;
+  }
   if (!handle) {
     alert('Please enter your real Twitter / X ID (e.g. @mythopair).');
     return;
@@ -4837,12 +4841,16 @@ async function handleExtSubmitForgotPwd() {
   const formContainer = document.getElementById('extForgotFormContainer');
   const successText = document.getElementById('extForgotSuccessText');
 
-  if (!handle && !email) {
-    alert('Please enter your Twitter / X ID or registered email.');
+  if (!handle) {
+    alert('Please enter your Twitter / X ID (e.g. @mythopair). All 3 details are required to verify your identity.');
+    return;
+  }
+  if (!email || !email.includes('@')) {
+    alert('Please enter your registered email address.');
     return;
   }
   if (!telegram) {
-    alert('Please enter your Telegram Username / ID so the admin can send you the temporary password.');
+    alert('Please enter your registered Telegram Username / ID.');
     return;
   }
 

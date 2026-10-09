@@ -1033,6 +1033,12 @@ function navigateToScreen(screenId, preserveScroll = false) {
   }
 
   AtomXState.currentScreen = screenId;
+  try {
+    localStorage.setItem('atomx_admin_screen', screenId);
+    if (window.location.hash !== `#${screenId}`) {
+      history.replaceState(null, '', `#${screenId}`);
+    }
+  } catch (e) {}
   const selectDropdown = document.getElementById('screenDropdown');
   if (selectDropdown) selectDropdown.value = screenId;
   
@@ -3560,7 +3566,11 @@ function renderAdminUsers(container) {
                 <div>
                   <strong style="color:#EAB308; font-size:13.5px;">Password Reset Requests (${pwdReqs.length})</strong>
                   <div style="color:var(--text-secondary); font-size:12px; margin-top:2px;">
-                    Users requesting reset: ${pwdReqs.map(p => `<strong style="color:var(--text-primary);">${p.user || 'User'}</strong>`).join(', ')}. Click user row to assign their temporary password.
+                    Users requesting reset: ${pwdReqs.map(p => {
+                      const raw = p.handle || p.user || p.user_handle || 'User';
+                      const displayHandle = raw.startsWith('@') ? raw : `@${raw}`;
+                      return `<strong style="color:var(--text-primary); cursor:pointer;" onclick="setAdminUserSearch('${raw.replace(/^@/, '')}')" title="Click to filter">${displayHandle}</strong>`;
+                    }).join(', ')}. Click user row to assign their temporary password.
                   </div>
                 </div>
               </div>
@@ -3718,12 +3728,15 @@ function openAdminUserProfileModal(userId) {
 
         <!-- Notification if Password Reset Requested -->
         ${pwdReq ? `
-          <div style="background:rgba(234,179,8,0.14); border:1px solid rgba(234,179,8,0.4); border-radius:8px; padding:12px 14px; margin-bottom:16px; display:flex; align-items:center; gap:10px;">
-            <span style="font-size:22px;">🔑</span>
-            <div>
-              <div style="font-weight:700; color:#EAB308; font-size:13px;">User Requested Password Reset!</div>
-              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">User forgot their password. Set a new password below and provide it to the user. They will enter it as current password to log in.</div>
+          <div style="background:rgba(234,179,8,0.14); border:1px solid rgba(234,179,8,0.4); border-radius:8px; padding:12px 14px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:22px;">🔑</span>
+              <div>
+                <div style="font-weight:700; color:#EAB308; font-size:13px;">User Requested Password Reset!</div>
+                <div style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">User forgot their password. Set a new password below and provide it to the user, or click Mark Resolved.</div>
+              </div>
             </div>
+            <button class="btn btn-secondary btn-xs" onclick="handleAdminResolvePasswordReset('${user.id}', '${cleanHandle}')" style="white-space:nowrap; border-color:#EAB308; color:#EAB308;">✓ Mark Resolved</button>
           </div>
         ` : ''}
 
@@ -3894,7 +3907,42 @@ window.handleAdminModalSetPassword = async function(userId, userName) {
     showToast(`✓ Password set! Share "${password}" with user as their temporary password.`, 'success');
     const input = document.getElementById('modalNewPassword');
     if (input) input.value = '';
-    await loadAdminServerData();
+
+    // Clear from local password requests list immediately
+    AtomXState.passwordRequests = (AtomXState.passwordRequests || []).filter(pr => {
+      const uHandle = (userName || '').toLowerCase().replace(/^@/, '');
+      const pUser = (pr.user || pr.handle || '').toLowerCase().replace(/^@/, '');
+      return pr.user_id !== userId && pUser !== uHandle;
+    });
+
+    closeModal();
+    await loadAdminServerData(true);
+    navigateToScreen(AtomXState.currentScreen, true);
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
+
+window.handleAdminResolvePasswordReset = async function(userId, handle) {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/resolve-password-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, handle })
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      throw new Error(d.error || 'Failed to resolve password reset');
+    }
+    AtomXState.passwordRequests = (AtomXState.passwordRequests || []).filter(pr => {
+      const uHandle = (handle || '').toLowerCase().replace(/^@/, '');
+      const pUser = (pr.user || pr.handle || '').toLowerCase().replace(/^@/, '');
+      return pr.user_id !== userId && pUser !== uHandle;
+    });
+    closeModal();
+    showToast('✓ Password reset request marked as resolved!', 'success');
+    await loadAdminServerData(true);
+    navigateToScreen(AtomXState.currentScreen, true);
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
   }
@@ -4135,6 +4183,15 @@ async function handleAdminSetPassword(userId, name) {
 
     closeModal();
     showToast(`✓ Password updated successfully for ${name}!`, 'success');
+
+    // Clear user from pending password requests and refresh
+    AtomXState.passwordRequests = (AtomXState.passwordRequests || []).filter(pr => {
+      const uHandle = (name || '').toLowerCase().replace(/^@/, '');
+      const pUser = (pr.user || pr.handle || '').toLowerCase().replace(/^@/, '');
+      return pr.user_id !== userId && pUser !== uHandle;
+    });
+    await loadAdminServerData(true);
+    navigateToScreen(AtomXState.currentScreen, true);
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
     if (btn) {
@@ -5729,7 +5786,7 @@ function renderAdminToneStyles(container) {
             <p class="page-subtitle">Configure default AI tone system prompts, add new styles, and set custom template allowances for free users.</p>
           </div>
           <div style="display:flex; gap:10px;">
-            <button class="btn btn-secondary btn-sm" onclick="promptAddNewToneStyle()">+ Add New Tone</button>
+            <button class="btn btn-secondary btn-sm" onclick="openAddToneModal()">+ Add New Tone</button>
             <button class="btn btn-primary btn-sm" onclick="saveAdminToneStylesToServer()">Save & Broadcast to Extension</button>
           </div>
         </div>
@@ -5821,13 +5878,13 @@ function handleSaveCustomQuota() {
   saveAdminToneStylesToServer();
 }
 
-function handleSaveSingleTone(idx) {
+async function handleSaveSingleTone(idx) {
   const name = document.getElementById(`tone-name-${idx}`)?.value.trim();
   const desc = document.getElementById(`tone-desc-${idx}`)?.value.trim();
   const prompt = document.getElementById(`tone-prompt-${idx}`)?.value.trim();
 
   if (!name || !prompt) {
-    alert('Name and System Prompt are required.');
+    showToast('Name and System Prompt are required.', 'error');
     return;
   }
 
@@ -5836,35 +5893,96 @@ function handleSaveSingleTone(idx) {
     AtomXState.toneStylesData.defaultTones[idx].description = desc;
     AtomXState.toneStylesData.defaultTones[idx].prompt = prompt;
   }
-  saveAdminToneStylesToServer();
+  await saveAdminToneStylesToServer();
+  showToast(`✓ Saved changes for "${name}"!`, 'success');
 }
 
-function handleDeleteTone(idx) {
+async function handleDeleteTone(idx) {
   if (confirm('Are you sure you want to delete this default tone?')) {
+    const deleted = AtomXState.toneStylesData?.defaultTones?.[idx]?.name || 'tone';
     AtomXState.toneStylesData.defaultTones.splice(idx, 1);
-    saveAdminToneStylesToServer();
+    await saveAdminToneStylesToServer();
     renderAdminToneStyles(document.getElementById('mainContentArea'));
+    showToast(`✓ Deleted "${deleted}"`, 'info');
   }
 }
 
-function promptAddNewToneStyle() {
-  const name = prompt('Enter new Tone & Style Name (e.g. "Sarcastic Dev" or "Alpha Insider"):');
-  if (!name) return;
-  const id = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
-  const promptText = prompt('Enter AI Prompt Instructions for this tone:', 'Deliver high-signal, sharp perspective. Be concise, punchy, and authentic.');
-  if (!promptText) return;
+function openAddToneModal() {
+  closeModal();
+  const modalHTML = `
+    <div class="modal-backdrop" id="addToneModal" onclick="if(event.target===this) closeModal()">
+      <div class="modal-box" style="max-width:520px; padding:24px; border-radius:12px; background:var(--bg-surface); border:1px solid var(--border-subtle); box-shadow:0 20px 45px rgba(0,0,0,0.5);">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <h3 class="modal-title" style="margin:0; font-size:17px; font-weight:700; color:var(--text-primary);">+ Add New AI Tone &amp; Style</h3>
+          <button class="modal-close-btn" onclick="closeModal()" style="font-size:24px; cursor:pointer; background:none; border:none; color:var(--text-muted);">&times;</button>
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label class="form-label" style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:4px; display:block;">Tone Name</label>
+          <input type="text" id="newToneNameInput" class="form-input" placeholder="e.g. Sarcastic Dev, Alpha Insider, Contrarian" oninput="document.getElementById('newToneIdPreview').value = this.value.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-')" style="width:100%;">
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label class="form-label" style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:4px; display:block;">Tone Identifier (Slug)</label>
+          <input type="text" id="newToneIdPreview" class="form-input" placeholder="auto-generated-slug" style="width:100%; font-family:monospace; font-size:12px;" readonly>
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label class="form-label" style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:4px; display:block;">Short Description</label>
+          <input type="text" id="newToneDescInput" class="form-input" placeholder="e.g. Witty developer banter with subtle cynicism" style="width:100%;">
+        </div>
+        <div class="form-group" style="margin-bottom:18px;">
+          <label class="form-label" style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:4px; display:block;">System Prompt Instructions</label>
+          <textarea id="newTonePromptInput" class="form-input" style="width:100%; min-height:100px; font-size:12px; line-height:1.4; resize:vertical;" placeholder="Deliver high-signal, sharp perspective. Be concise, punchy, and authentic. No generic AI clichés.">Deliver high-signal, sharp perspective. Be concise, punchy, and authentic. Strictly between 5 and 10 words.</textarea>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" id="submitCreateToneBtn" onclick="handleCreateNewToneStyle()">Create &amp; Broadcast Tone</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  setTimeout(() => document.getElementById('newToneNameInput')?.focus(), 50);
+}
 
-  if (!AtomXState.toneStylesData) AtomXState.toneStylesData = { maxCustomTemplatesPerUser: 2, defaultTones: [] };
+async function handleCreateNewToneStyle() {
+  const name = document.getElementById('newToneNameInput')?.value.trim();
+  const slug = document.getElementById('newToneIdPreview')?.value.trim();
+  const desc = document.getElementById('newToneDescInput')?.value.trim();
+  const prompt = document.getElementById('newTonePromptInput')?.value.trim();
+  const btn = document.getElementById('submitCreateToneBtn');
+
+  if (!name) {
+    showToast('Please enter a tone name', 'error');
+    return;
+  }
+  if (!prompt) {
+    showToast('Please enter system prompt instructions for this tone', 'error');
+    return;
+  }
+
+  const toneId = slug || name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  if (!AtomXState.toneStylesData) {
+    AtomXState.toneStylesData = { maxCustomTemplatesPerUser: 2, defaultTones: [] };
+  }
+  if (!Array.isArray(AtomXState.toneStylesData.defaultTones)) {
+    AtomXState.toneStylesData.defaultTones = [];
+  }
+
   AtomXState.toneStylesData.defaultTones.push({
-    id,
+    id: toneId,
     name,
-    description: 'Custom system calibrated tone',
-    prompt: promptText
+    description: desc || 'Custom system calibrated tone',
+    prompt
   });
 
-  saveAdminToneStylesToServer();
+  closeModal();
+  await saveAdminToneStylesToServer();
   renderAdminToneStyles(document.getElementById('mainContentArea'));
-  showToast(`✓ Added new tone: ${name}`);
+  showToast(`✓ Added & broadcasted new tone: ${name}`, 'success');
 }
 
 async function saveAdminToneStylesToServer() {
@@ -5875,7 +5993,7 @@ async function saveAdminToneStylesToServer() {
       body: JSON.stringify(AtomXState.toneStylesData)
     });
     if (res.ok) {
-      showToast('✓ Tone & style prompts successfully updated & broadcasted to all extensions!');
+      showToast('✓ Tone & style prompts saved to cloud database & broadcasted to extension!');
       return;
     }
   } catch (e) {
@@ -6658,7 +6776,9 @@ async function loadAdminServerData(preserveScroll = true) {
 function initAtomXApp() {
   try {
     initTheme();
-    navigateToScreen('12'); // Shows Admin Password Gate if not authenticated
+    const hashScreen = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+    const initialScreen = hashScreen || localStorage.getItem('atomx_admin_screen') || '12';
+    navigateToScreen(initialScreen);
     fetchLiveModelsForProvider('groq');
     if (AtomXState.isAdminAuthenticated) {
       loadAdminServerData(false);
@@ -6670,6 +6790,13 @@ function initAtomXApp() {
         loadAdminServerData(true);
       }
     }, 10000);
+
+    window.addEventListener('hashchange', () => {
+      const currentHash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+      if (currentHash && currentHash !== AtomXState.currentScreen) {
+        navigateToScreen(currentHash, true);
+      }
+    });
   } catch (err) {
     console.error('[AtomX Init Error]', err);
   }

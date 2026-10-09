@@ -104,7 +104,30 @@ module.exports = {
     if (!user) throw new Error('User not found');
     const { data, error } = await supabase.from('users').update({ password_hash: password }).eq('id', user.id).select();
     if (error) throw new Error(error.message);
+
+    // Automatically mark pending password reset request as resolved in credits_ledger
+    try {
+      await supabase.from('credits_ledger')
+        .update({ action: 'Password Reset (Resolved)' })
+        .eq('user_id', user.id)
+        .eq('action', 'Forgot Password');
+    } catch (ledgerErr) {
+      console.warn('Could not update ledger reset status:', ledgerErr.message);
+    }
+
     return data?.[0];
+  },
+
+  async resolvePasswordReset(userIdOrHandle) {
+    if (!supabase) return true;
+    const user = await resolveUser(userIdOrHandle);
+    if (!user) return true;
+    const { error } = await supabase.from('credits_ledger')
+      .update({ action: 'Password Reset (Resolved)' })
+      .eq('user_id', user.id)
+      .eq('action', 'Forgot Password');
+    if (error) console.warn('Could not mark password reset resolved:', error.message);
+    return true;
   },
 
   async updateUserPlan(userId, plan) {
@@ -215,15 +238,20 @@ module.exports = {
     if (!supabase) return [];
     const { data } = await supabase
       .from('credits_ledger')
-      .select('*, users(full_name, email)')
+      .select('*, users(full_name, email, handle)')
       .order('created_at', { ascending: false })
       .limit(100);
 
-    return (data || []).map(l => ({
-      ...l,
-      user_name: l.users?.full_name || 'System User',
-      user_email: l.users?.email || 'user@atomx.io'
-    }));
+    return (data || []).map(l => {
+      const handleMatch = (l.reason || '').match(/for\s+(@?[\w_]+)/i);
+      const userHandle = l.users?.handle || (handleMatch ? handleMatch[1] : null);
+      return {
+        ...l,
+        user_name: l.users?.full_name || 'System User',
+        user_email: l.users?.email || 'user@atomx.io',
+        user_handle: userHandle ? (userHandle.startsWith('@') ? userHandle : `@${userHandle}`) : null
+      };
+    });
   },
 
   async getUserByHandle(handle) {
@@ -385,28 +413,50 @@ module.exports = {
 
   async requestPasswordReset(identifier, telegram, email, handle) {
     if (!supabase) return { success: true };
-    let user = await resolveUser(identifier);
-    if (!user && handle) {
-      user = await resolveUser(handle);
-    }
-    if (!user && email) {
-      user = await resolveUser(email);
-    }
-    if (!user) {
-      throw new Error('Account not found with this Twitter / X ID or email. Please verify your details.');
+    const cleanHandle = (handle || identifier || '').trim().replace(/^@/, '').toLowerCase();
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanTg = (telegram || '').trim().replace(/^@/, '').toLowerCase();
+
+    if (!cleanHandle || !cleanEmail || !cleanTg) {
+      throw new Error('Twitter/X ID, registered email, and Telegram ID are all required to request a password reset.');
     }
 
-    if (telegram) {
-      const cleanTg = telegram.startsWith('@') ? telegram : `@${telegram}`;
-      try {
-        await supabase.from('users').update({ telegram: cleanTg }).eq('id', user.id);
-      } catch (tgErr) {
-        console.warn('Could not update user telegram:', tgErr.message);
+    // 1. Resolve user
+    let user = await this.getUserByHandle(cleanHandle);
+    if (!user) {
+      user = await this.getUserByEmail(cleanEmail);
+    }
+    if (!user) {
+      throw new Error('Account not found with this Twitter / X handle. Please verify your details.');
+    }
+
+    // 2. Verify Email matches registered user
+    if ((user.email || '').trim().toLowerCase() !== cleanEmail) {
+      throw new Error('Verification failed: The registered email does not match this Twitter / X account.');
+    }
+
+    // 3. Verify Handle matches registered user
+    const userCleanHandle = (user.handle || '').trim().replace(/^@/, '').toLowerCase();
+    if (userCleanHandle !== cleanHandle) {
+      throw new Error('Verification failed: The Twitter / X ID does not match this account.');
+    }
+
+    // 4. Verify Telegram ID matches account registration record
+    const reqs = await this.getAccessRequests();
+    const matchReq = (reqs || []).find(r => 
+      (r.email || '').toLowerCase() === cleanEmail ||
+      (r.handle || '').replace(/^@/, '').toLowerCase() === cleanHandle
+    );
+    if (matchReq && matchReq.telegram) {
+      const regTg = matchReq.telegram.replace(/^@/, '').toLowerCase();
+      if (regTg && regTg !== cleanTg) {
+        throw new Error('Verification failed: The Telegram ID does not match the Telegram ID registered with this account.');
       }
     }
 
-    const tgInfo = telegram ? ` | TG: ${telegram}` : (user.telegram ? ` | TG: ${user.telegram}` : '');
-    const emailInfo = email ? ` | Email: ${email}` : (user.email ? ` | Email: ${user.email}` : '');
+    const tgDisplay = `@${cleanTg}`;
+    const emailDisplay = cleanEmail;
+    const handleDisplay = user.handle?.startsWith('@') ? user.handle : `@${cleanHandle}`;
 
     await supabase.from('credits_ledger').insert({
       user_id: user.id,
@@ -414,7 +464,7 @@ module.exports = {
       balance_after: user.credits || 0,
       action: 'Forgot Password',
       admin_source: 'Extension Request',
-      reason: `Password reset requested for ${user.handle}${emailInfo}${tgInfo}`
+      reason: `Password reset requested for ${handleDisplay} | Email: ${emailDisplay} | TG: ${tgDisplay}`
     });
     return { success: true, user };
   },
