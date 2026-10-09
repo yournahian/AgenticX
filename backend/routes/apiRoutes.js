@@ -92,6 +92,11 @@ router.post('/admin/curated-lists', adminController.saveCuratedLists);
 router.get('/admin/active-model', adminController.getActiveModel);
 router.post('/admin/active-model', adminController.saveActiveModel);
 
+// Failover Cascade Providers Chain (Max 5 Providers)
+router.get('/admin/failover-providers', adminController.getFailoverProviders);
+router.post('/admin/failover-providers', adminController.saveFailoverProviders);
+router.post('/admin/test-failover-chain', adminController.testFailoverChain);
+
 // Dynamic AI API Keys Management
 router.get('/admin/api-keys', adminController.getApiKeys);
 router.post('/admin/api-keys', adminController.saveApiKey);

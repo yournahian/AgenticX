@@ -569,13 +569,25 @@ async function saveAiSettingsData(settingsData) {
 }
 exports.getAiSettingsData = getAiSettingsData;
 
+const DEFAULT_FAILOVER_PROVIDERS = [
+  { priority: 1, provider: 'groq', model: 'llama-3.3-70b-versatile', enabled: true },
+  { priority: 2, provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', enabled: true },
+  { priority: 3, provider: 'openai', model: 'gpt-4o-mini', enabled: true },
+  { priority: 4, provider: 'anthropic', model: 'claude-3-5-haiku-20241022', enabled: true },
+  { priority: 5, provider: 'gemini', model: 'gemini-1.5-flash', enabled: true }
+];
+exports.DEFAULT_FAILOVER_PROVIDERS = DEFAULT_FAILOVER_PROVIDERS;
+
 exports.getActiveModel = async (req, res) => {
   try {
     const data = await getAiSettingsData();
+    const failoverProviders = Array.isArray(data.failoverProviders) && data.failoverProviders.length > 0
+      ? data.failoverProviders
+      : DEFAULT_FAILOVER_PROVIDERS;
     if (data.activeProvider && data.activeModel) {
-      return res.json(data);
+      return res.json({ ...data, failoverProviders });
     }
-    res.json({ activeProvider: 'groq', activeModel: 'llama-3.3-70b-versatile' });
+    res.json({ activeProvider: 'groq', activeModel: 'llama-3.3-70b-versatile', failoverProviders });
   } catch (err) {
     res.status(500).json({ error: 'Failed to read AI settings' });
   }
@@ -600,6 +612,117 @@ exports.saveActiveModel = async (req, res) => {
     res.json({ message: `Active AI model set to ${provider.toUpperCase()}: ${model}`, settings: data });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save active AI model: ' + err.message });
+  }
+};
+
+exports.getFailoverProviders = async (req, res) => {
+  try {
+    const data = await getAiSettingsData();
+    const chain = Array.isArray(data.failoverProviders) && data.failoverProviders.length > 0
+      ? data.failoverProviders
+      : DEFAULT_FAILOVER_PROVIDERS;
+    res.json({ success: true, failoverProviders: chain.slice(0, 5) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve failover providers: ' + err.message });
+  }
+};
+
+exports.saveFailoverProviders = async (req, res) => {
+  try {
+    const raw = req.body.failoverProviders;
+    if (!Array.isArray(raw)) {
+      return res.status(400).json({ error: 'failoverProviders must be an array (up to 5 providers).' });
+    }
+
+    const defaultModelMap = {
+      groq: 'llama-3.3-70b-versatile',
+      openrouter: 'meta-llama/llama-3.3-70b-instruct',
+      openai: 'gpt-4o-mini',
+      anthropic: 'claude-3-5-haiku-20241022',
+      gemini: 'gemini-1.5-flash'
+    };
+
+    const sanitized = raw.slice(0, 5).map((item, idx) => {
+      const prov = (item.provider || 'groq').toLowerCase().trim();
+      const model = (item.model || '').trim() || defaultModelMap[prov] || 'llama-3.3-70b-versatile';
+      return {
+        priority: idx + 1,
+        provider: prov,
+        model,
+        enabled: item.enabled !== false
+      };
+    });
+
+    const current = await getAiSettingsData();
+    const data = {
+      ...current,
+      failoverProviders: sanitized,
+      lastUpdated: new Date().toISOString(),
+      updatedBy: 'Admin Failover Control'
+    };
+
+    await saveAiSettingsData(data);
+    res.json({
+      success: true,
+      message: `✓ Failover sequence saved successfully (${sanitized.length} providers configured)!`,
+      failoverProviders: sanitized
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save failover providers: ' + err.message });
+  }
+};
+
+exports.testFailoverChain = async (req, res) => {
+  try {
+    const data = await getAiSettingsData();
+    const chain = Array.isArray(data.failoverProviders) && data.failoverProviders.length > 0
+      ? data.failoverProviders
+      : DEFAULT_FAILOVER_PROVIDERS;
+
+    const results = [];
+    for (let i = 0; i < chain.length; i++) {
+      const step = chain[i];
+      if (step.enabled === false) {
+        results.push({
+          priority: i + 1,
+          provider: step.provider,
+          model: step.model,
+          enabled: false,
+          status: 'DISABLED',
+          latencyMs: 0,
+          message: 'Provider is disabled'
+        });
+        continue;
+      }
+
+      const t0 = Date.now();
+      try {
+        const testRes = await multiProviderService.testSingleProviderKey(step.provider);
+        results.push({
+          priority: i + 1,
+          provider: step.provider,
+          model: step.model,
+          enabled: true,
+          status: testRes.status === 'HEALTHY' ? 'HEALTHY' : 'ERROR',
+          latencyMs: testRes.latencyMs || (Date.now() - t0),
+          message: testRes.message
+        });
+      } catch (e) {
+        results.push({
+          priority: i + 1,
+          provider: step.provider,
+          model: step.model,
+          enabled: true,
+          status: 'ERROR',
+          latencyMs: Date.now() - t0,
+          message: e.message
+        });
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to test failover sequence: ' + err.message });
   }
 };
 

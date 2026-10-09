@@ -25,6 +25,14 @@ const AtomXState = {
   ],
   currentProvider: 'groq',
   currentModel: 'llama-3.3-70b-versatile',
+  failoverProviders: [
+    { priority: 1, provider: 'groq', model: 'llama-3.3-70b-versatile', enabled: true },
+    { priority: 2, provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', enabled: true },
+    { priority: 3, provider: 'openai', model: 'gpt-4o-mini', enabled: true },
+    { priority: 4, provider: 'anthropic', model: 'claude-3-5-haiku-20241022', enabled: true },
+    { priority: 5, provider: 'gemini', model: 'gemini-1.5-flash', enabled: true }
+  ],
+  failoverTestResults: null,
   modelsCache: {
     openai: [],
     gemini: [],
@@ -3402,6 +3410,243 @@ function filterModalModelsList(query, providerId) {
   }
 }
 
+// -------------------------------------------------------------
+// FAILOVER CASCADE ROUTING ENGINE (UP TO 5 PROVIDERS)
+// -------------------------------------------------------------
+const FAILOVER_RECOMMENDED_DEFAULTS = [
+  { priority: 1, provider: 'groq', model: 'llama-3.3-70b-versatile', enabled: true },
+  { priority: 2, provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', enabled: true },
+  { priority: 3, provider: 'openai', model: 'gpt-4o-mini', enabled: true },
+  { priority: 4, provider: 'anthropic', model: 'claude-3-5-haiku-20241022', enabled: true },
+  { priority: 5, provider: 'gemini', model: 'gemini-1.5-flash', enabled: true }
+];
+
+function getFailoverChainList() {
+  if (Array.isArray(AtomXState.failoverProviders) && AtomXState.failoverProviders.length > 0) {
+    const list = [...AtomXState.failoverProviders];
+    while (list.length < 5) {
+      const def = FAILOVER_RECOMMENDED_DEFAULTS[list.length] || { priority: list.length + 1, provider: 'groq', model: 'llama-3.3-70b-versatile', enabled: true };
+      list.push({ ...def, priority: list.length + 1 });
+    }
+    return list.slice(0, 5);
+  }
+  return [...FAILOVER_RECOMMENDED_DEFAULTS];
+}
+
+function renderAdminFailoverSlotsHTML() {
+  const chain = getFailoverChainList();
+  const testResults = AtomXState.failoverTestResults || {};
+
+  return chain.map((step, idx) => {
+    const priority = idx + 1;
+    const provId = (step.provider || 'groq').toLowerCase();
+    const keyInfo = getAdminApiKeyInfo(provId);
+    const stepTest = testResults[priority];
+    const isStepEnabled = step.enabled !== false;
+
+    let testBadgeHTML = '';
+    if (stepTest) {
+      if (stepTest.status === 'HEALTHY') {
+        testBadgeHTML = `<span class="badge badge-success" style="font-size:10.5px; padding:3px 8px; font-weight:700;">🟢 Healthy (${stepTest.latencyMs || 0}ms)</span>`;
+      } else if (stepTest.status === 'DISABLED') {
+        testBadgeHTML = `<span class="badge" style="background:var(--bg-canvas); color:var(--text-muted); font-size:10px; border:1px solid var(--border-subtle);">⚪ Disabled</span>`;
+      } else {
+        testBadgeHTML = `<span class="badge badge-danger" style="font-size:10.5px; padding:3px 8px; font-weight:700;" title="${stepTest.message || 'Error'}">❌ Failed</span>`;
+      }
+    }
+
+    const connectorHTML = idx < 4 ? `
+      <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin:2px 0; color:var(--text-muted); font-size:11px; font-weight:700;">
+        <span style="opacity:0.6;">│</span>
+        <span style="background:var(--bg-canvas); padding:2px 10px; border-radius:12px; border:1px dashed var(--border-subtle); color:var(--text-secondary); font-size:10px;">
+          ⬇️ If Priority #${priority} fails (rate limit, quota or 429) ➔ Cascades to Priority #${priority + 1} ⬇️
+        </span>
+        <span style="opacity:0.6;">│</span>
+      </div>
+    ` : '';
+
+    return `
+      <div class="failover-step-card" data-step-idx="${idx}" style="background:var(--bg-card); border:${isStepEnabled ? '1px solid var(--border-subtle)' : '1px dashed rgba(255,255,255,0.08)'}; border-radius:10px; padding:12px 16px; opacity:${isStepEnabled ? '1' : '0.65'}; transition:all 0.2s ease;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <!-- LEFT: PRIORITY & ENABLED -->
+          <div style="display:flex; align-items:center; gap:12px; min-width:200px;">
+            <div style="width:34px; height:34px; border-radius:8px; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; color:var(--blue-primary);">
+              #${priority}
+            </div>
+            <div>
+              <div style="font-weight:800; font-size:13px; color:var(--text-primary);">
+                Priority ${priority} ${priority === 1 ? '(1st Fallback)' : priority === 2 ? '(2nd Fallback)' : priority === 3 ? '(3rd Fallback)' : priority === 4 ? '(4th Fallback)' : '(5th Fallback)'}
+              </div>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:11px; color:var(--text-secondary); margin-top:2px;">
+                <input type="checkbox" id="failover_enabled_${idx}" ${isStepEnabled ? 'checked' : ''} onchange="toggleFailoverStepEnabled(${idx}, this.checked)" style="cursor:pointer;" />
+                <span>${isStepEnabled ? 'Active in Cascade' : 'Disabled (Bypassed)'}</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- MIDDLE: PROVIDER & MODEL SELECTORS -->
+          <div style="flex:1; display:flex; align-items:center; gap:10px; min-width:280px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:140px;">
+              <select id="failover_prov_${idx}" class="form-select" style="font-size:12px; padding:7px 10px; font-weight:700; width:100%; border-radius:8px;" onchange="handleFailoverProvChange(${idx}, this.value)">
+                ${ADMIN_AI_PROVIDERS.map(p => `
+                  <option value="${p.id}" ${provId === p.id ? 'selected' : ''}>${p.icon} ${p.name}</option>
+                `).join('')}
+              </select>
+            </div>
+            <div style="flex:1.5; min-width:180px;">
+              <input type="text" id="failover_model_${idx}" class="form-input" value="${step.model || ''}" placeholder="Model ID (e.g. gpt-4o-mini)" style="font-size:12px; font-family:monospace; padding:7px 10px; border-radius:8px; width:100%; box-sizing:border-box;" />
+            </div>
+            <div>
+              <span class="badge ${keyInfo.hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10px; padding:4px 8px; font-weight:700;" title="${keyInfo.maskedKey || 'No key'}">
+                ${keyInfo.hasKey ? '🟢 Key Ready' : '⚪ Missing Key'}
+              </span>
+            </div>
+          </div>
+
+          <!-- RIGHT: TEST STATUS & REORDER BUTTONS -->
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${testBadgeHTML}
+            <div style="display:flex; gap:3px;">
+              <button type="button" class="btn btn-secondary btn-sm" style="padding:4px 8px; font-size:11px;" onclick="reorderFailoverStep(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} title="Move Up">▲</button>
+              <button type="button" class="btn btn-secondary btn-sm" style="padding:4px 8px; font-size:11px;" onclick="reorderFailoverStep(${idx}, 1)" ${idx === 4 ? 'disabled' : ''} title="Move Down">▼</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      ${connectorHTML}
+    `;
+  }).join('');
+}
+
+function toggleFailoverStepEnabled(idx, isChecked) {
+  const chain = getFailoverChainList();
+  if (chain[idx]) {
+    chain[idx].enabled = isChecked;
+    AtomXState.failoverProviders = chain;
+    const container = document.getElementById('adminFailoverChainContainer');
+    if (container) container.innerHTML = renderAdminFailoverSlotsHTML();
+  }
+}
+
+function handleFailoverProvChange(idx, newProv) {
+  const chain = getFailoverChainList();
+  const defaultModelMap = {
+    groq: 'llama-3.3-70b-versatile',
+    openrouter: 'meta-llama/llama-3.3-70b-instruct',
+    openai: 'gpt-4o-mini',
+    anthropic: 'claude-3-5-haiku-20241022',
+    gemini: 'gemini-1.5-flash'
+  };
+  if (chain[idx]) {
+    chain[idx].provider = newProv;
+    chain[idx].model = defaultModelMap[newProv] || 'gpt-4o-mini';
+    AtomXState.failoverProviders = chain;
+    const container = document.getElementById('adminFailoverChainContainer');
+    if (container) container.innerHTML = renderAdminFailoverSlotsHTML();
+  }
+}
+
+function reorderFailoverStep(idx, direction) {
+  const chain = getFailoverChainList();
+  const targetIdx = idx + direction;
+  if (targetIdx < 0 || targetIdx >= chain.length) return;
+
+  const temp = chain[idx];
+  chain[idx] = chain[targetIdx];
+  chain[targetIdx] = temp;
+
+  chain.forEach((item, i) => { item.priority = i + 1; });
+  AtomXState.failoverProviders = chain;
+  const container = document.getElementById('adminFailoverChainContainer');
+  if (container) container.innerHTML = renderAdminFailoverSlotsHTML();
+}
+
+function handleResetFailoverDefaults() {
+  AtomXState.failoverProviders = JSON.parse(JSON.stringify(FAILOVER_RECOMMENDED_DEFAULTS));
+  AtomXState.failoverTestResults = null;
+  const container = document.getElementById('adminFailoverChainContainer');
+  if (container) container.innerHTML = renderAdminFailoverSlotsHTML();
+  showToast('↻ Reset failover slots to recommended 5-provider sequence.');
+}
+
+async function handleSaveFailoverChain() {
+  const btn = document.getElementById('btnSaveFailoverChain');
+  const chain = getFailoverChainList();
+
+  for (let i = 0; i < 5; i++) {
+    const provSelect = document.getElementById(`failover_prov_${i}`);
+    const modelInput = document.getElementById(`failover_model_${i}`);
+    const enabledCheck = document.getElementById(`failover_enabled_${i}`);
+    if (provSelect && modelInput && chain[i]) {
+      chain[i].provider = provSelect.value;
+      chain[i].model = modelInput.value.trim();
+      chain[i].enabled = enabledCheck ? enabledCheck.checked : true;
+    }
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>💾 Saving...</span>';
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/failover-providers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ failoverProviders: chain })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save failover chain');
+
+    AtomXState.failoverProviders = data.failoverProviders || chain;
+    showToast('✓ Failover provider sequence saved successfully (5 slots configured)!');
+    const container = document.getElementById('adminFailoverChainContainer');
+    if (container) container.innerHTML = renderAdminFailoverSlotsHTML();
+  } catch (err) {
+    showToast('❌ Failed to save failover chain: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>💾 Save Failover Chain</span>';
+    }
+  }
+}
+
+async function handleTestFailoverChain() {
+  const btn = document.getElementById('btnTestFailoverChain');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>⚡ Testing 5 Steps...</span>';
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/test-failover-chain`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Test failed');
+
+    const map = {};
+    (data.results || []).forEach(r => {
+      map[r.priority] = r;
+    });
+    AtomXState.failoverTestResults = map;
+
+    const healthyCount = (data.results || []).filter(r => r.status === 'HEALTHY').length;
+    showToast(`✓ Failover Diagnostic: ${healthyCount} / ${(data.results || []).length} providers ready for failover!`);
+    const container = document.getElementById('adminFailoverChainContainer');
+    if (container) container.innerHTML = renderAdminFailoverSlotsHTML();
+  } catch (err) {
+    showToast('❌ Failover test error: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>⚡ Test Failover Sequence</span>';
+    }
+  }
+}
+
 function renderAdminAIEngine(container) {
   container.innerHTML = `
     <div class="app-layout">
@@ -3438,7 +3683,37 @@ function renderAdminAIEngine(container) {
             </div>
           </div>
 
-          <!-- 2. PROVIDER API KEYS HEALTH & LIVE STATUS -->
+          <!-- 2. FAILOVER CASCADE ROUTING ENGINE (MAX 5 PROVIDERS) -->
+          <div class="atomx-card" style="margin-bottom:24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+              <div>
+                <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                  <span>🛡️ Failover Provider Cascade Chain</span>
+                  <span class="badge badge-info" style="font-size:10px; font-weight:800; letter-spacing:0.3px;">● 5-LEVEL AUTO-FAILOVER CHAIN</span>
+                </h3>
+                <p style="font-size:12px; color:var(--text-secondary); margin-top:3px;">
+                  Automatic zero-downtime routing. If the primary provider fails (rate limit, quota exceeded, or network outage), AtomX cascades sequentially through up to 5 backup providers: <strong>Priority 1 ➔ 2 ➔ 3 ➔ 4 ➔ 5</strong>.
+                </p>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnTestFailoverChain" onclick="handleTestFailoverChain()" style="font-weight:700; display:flex; align-items:center; gap:5px;">
+                  <span>⚡ Test Failover Sequence</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="handleResetFailoverDefaults()" style="font-weight:600; font-size:11px;">
+                  ↺ Recommended Defaults
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnSaveFailoverChain" onclick="handleSaveFailoverChain()" style="font-weight:800; display:flex; align-items:center; gap:5px;">
+                  <span>💾 Save Failover Chain</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="adminFailoverChainContainer" style="display:flex; flex-direction:column; gap:8px;">
+              ${renderAdminFailoverSlotsHTML()}
+            </div>
+          </div>
+
+          <!-- 3. PROVIDER API KEYS HEALTH & LIVE STATUS -->
           <div class="atomx-card" style="margin-bottom:24px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
               <div>
@@ -6626,7 +6901,7 @@ async function saveAdminActiveModel() {
 // Real-time server sync for admin datasets
 async function loadAdminServerData(preserveScroll = true) {
   try {
-    const [statsRes, usersRes, reqsRes, ledgerRes, txRes, engRes, modelRes, logsRes, tonesRes, keysRes, pwdRes, plansRes, offerRes, refRes, curatedRes] = await Promise.all([
+    const [statsRes, usersRes, reqsRes, ledgerRes, txRes, engRes, modelRes, logsRes, tonesRes, keysRes, pwdRes, plansRes, offerRes, refRes, curatedRes, failoverRes] = await Promise.all([
       fetch(`${API_BASE}/api/admin/stats`).catch(() => null),
       fetch(`${API_BASE}/api/admin/users`).catch(() => null),
       fetch(`${API_BASE}/api/admin/access-requests`).catch(() => null),
@@ -6641,8 +6916,16 @@ async function loadAdminServerData(preserveScroll = true) {
       fetch(`${API_BASE}/api/admin/plans`).catch(() => null),
       fetch(`${API_BASE}/api/offers/current`).catch(() => null),
       fetch(`${API_BASE}/api/admin/referrals`).catch(() => null),
-      fetch(`${API_BASE}/api/curated-lists`).catch(() => null)
+      fetch(`${API_BASE}/api/curated-lists`).catch(() => null),
+      fetch(`${API_BASE}/api/admin/failover-providers`).catch(() => null)
     ]);
+
+    if (failoverRes && failoverRes.ok) {
+      const fd = await failoverRes.json();
+      if (Array.isArray(fd.failoverProviders)) {
+        AtomXState.failoverProviders = fd.failoverProviders;
+      }
+    }
 
     if (pwdRes && pwdRes.ok) {
       const pd = await pwdRes.json();

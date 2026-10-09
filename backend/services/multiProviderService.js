@@ -642,7 +642,281 @@ function buildPromptMessages(tweetText, styleInstruction) {
 }
 
 /**
- * Generate AI reply using the specified provider and model
+ * Failover chain loader (Max 5 ordered providers)
+ */
+async function getFailoverChain() {
+  try {
+    const adminController = require('../controllers/adminController');
+    const settings = await adminController.getAiSettingsData();
+    if (settings && Array.isArray(settings.failoverProviders) && settings.failoverProviders.length > 0) {
+      return settings.failoverProviders.slice(0, 5);
+    }
+  } catch (e) {}
+
+  try {
+    const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
+    if (fs.existsSync(tmpAiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(tmpAiSettingsPath, 'utf8'));
+      if (Array.isArray(data.failoverProviders) && data.failoverProviders.length > 0) {
+        return data.failoverProviders.slice(0, 5);
+      }
+    }
+  } catch (e) {}
+
+  return [
+    { priority: 1, provider: 'groq', model: 'llama-3.3-70b-versatile', enabled: true },
+    { priority: 2, provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', enabled: true },
+    { priority: 3, provider: 'openai', model: 'gpt-4o-mini', enabled: true },
+    { priority: 4, provider: 'anthropic', model: 'claude-3-5-haiku-20241022', enabled: true },
+    { priority: 5, provider: 'gemini', model: 'gemini-1.5-flash', enabled: true }
+  ];
+}
+
+/**
+ * Execute single provider generation with full error handling and telemetry logging
+ */
+async function executeProviderCall({
+  prov,
+  model,
+  systemPrompt,
+  userContent,
+  maxTokens,
+  tweetText,
+  tweetAuthor,
+  tweetAuthorName,
+  styleInstruction,
+  userHandle,
+  userName,
+  userEmail,
+  logTag = ''
+}) {
+  const normProv = (prov || 'openai').toLowerCase().trim();
+  const apiKey = getProviderKey(normProv);
+  if (!apiKey || apiKey.length < 5) return null;
+
+  const selectedModel = model || (DEFAULT_MODELS[normProv]?.[0]?.id || 'gpt-4o-mini');
+  const t0 = Date.now();
+
+  try {
+    if (normProv === 'gemini') {
+      const geminiCleanModel = selectedModel.replace('models/', '');
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiCleanModel}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `${systemPrompt}\n\n${userContent}` }]
+            }
+          ],
+          generationConfig: {
+            maxOutputTokens: maxTokens,
+            temperature: 0.65
+          }
+        })
+      });
+      const latencyMs = Date.now() - t0;
+
+      if (response.ok) {
+        const data = await response.json();
+        let reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
+        if (reply) {
+          addApiLog({
+            provider: `GEMINI${logTag}`,
+            model: selectedModel,
+            user: userHandle,
+            userName,
+            userEmail,
+            status: 'SUCCESS',
+            statusCode: 200,
+            targetSnippet: tweetText,
+            author: tweetAuthor,
+            reply,
+            latencyMs
+          });
+          return {
+            reply,
+            provider: `Google Gemini${logTag}`,
+            modelUsed: selectedModel,
+            tokensUsed: data.usageMetadata?.totalTokenCount || 50
+          };
+        }
+      } else {
+        const errBody = await response.text();
+        console.warn(`[MultiProvider] GEMINI${logTag} returned ${response.status}:`, errBody.slice(0, 150));
+        addApiLog({
+          provider: `GEMINI${logTag}`,
+          model: selectedModel,
+          user: userHandle,
+          userName,
+          userEmail,
+          status: 'FAILED',
+          statusCode: response.status,
+          targetSnippet: tweetText,
+          author: tweetAuthor,
+          error: errBody.slice(0, 200),
+          latencyMs
+        });
+      }
+    } else if (normProv === 'anthropic') {
+      const baseUrl = getAnthropicBaseUrl();
+      const endpoint = `${baseUrl}/v1/messages`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }]
+        })
+      });
+      const latencyMs = Date.now() - t0;
+
+      if (response.ok) {
+        const data = await response.json();
+        let reply = data.content?.[0]?.text?.trim() || '';
+        reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
+        if (reply) {
+          addApiLog({
+            provider: `ANTHROPIC${logTag}`,
+            model: data.model || selectedModel,
+            user: userHandle,
+            userName,
+            userEmail,
+            status: 'SUCCESS',
+            statusCode: 200,
+            targetSnippet: tweetText,
+            author: tweetAuthor,
+            reply,
+            latencyMs
+          });
+          return {
+            reply,
+            provider: `ANTHROPIC${logTag}`,
+            modelUsed: data.model || selectedModel,
+            tokensUsed: data.usage?.output_tokens || 50
+          };
+        }
+      } else {
+        const errBody = await response.text();
+        console.warn(`[MultiProvider] ANTHROPIC${logTag} returned ${response.status}:`, errBody.slice(0, 150));
+        addApiLog({
+          provider: `ANTHROPIC${logTag}`,
+          model: selectedModel,
+          user: userHandle,
+          userName,
+          userEmail,
+          status: 'FAILED',
+          statusCode: response.status,
+          targetSnippet: tweetText,
+          author: tweetAuthor,
+          error: errBody.slice(0, 200),
+          latencyMs
+        });
+      }
+    } else {
+      // OpenAI, Groq, OpenRouter compatible
+      let endpoint = `${getOpenAIBaseUrl()}/chat/completions`;
+      let headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      };
+
+      if (normProv === 'groq') {
+        endpoint = 'https://api.groq.com/openai/v1/chat/completions';
+      } else if (normProv === 'openrouter') {
+        endpoint = 'https://openrouter.ai/api/v1/chat/completions';
+        headers['HTTP-Referer'] = 'https://atomx.io';
+        headers['X-Title'] = 'ATOMX ENGAGE';
+      }
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+          ],
+          max_tokens: maxTokens,
+          temperature: 0.65
+        })
+      });
+      const latencyMs = Date.now() - t0;
+
+      if (response.ok) {
+        const data = await response.json();
+        let reply = data.choices?.[0]?.message?.content?.trim() || '';
+        reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
+        if (reply) {
+          addApiLog({
+            provider: `${normProv.toUpperCase()}${logTag}`,
+            model: data.model || selectedModel,
+            user: userHandle,
+            userName,
+            userEmail,
+            status: 'SUCCESS',
+            statusCode: 200,
+            targetSnippet: tweetText,
+            author: tweetAuthor,
+            reply,
+            latencyMs
+          });
+          return {
+            reply,
+            provider: `${normProv.toUpperCase()}${logTag}`,
+            modelUsed: data.model || selectedModel,
+            tokensUsed: data.usage?.total_tokens || 50
+          };
+        }
+      } else {
+        const errBody = await response.text();
+        console.warn(`[MultiProvider] ${normProv.toUpperCase()}${logTag} returned ${response.status}:`, errBody.slice(0, 150));
+        addApiLog({
+          provider: `${normProv.toUpperCase()}${logTag}`,
+          model: selectedModel,
+          user: userHandle,
+          userName,
+          userEmail,
+          status: 'FAILED',
+          statusCode: response.status,
+          targetSnippet: tweetText,
+          author: tweetAuthor,
+          error: errBody.slice(0, 200),
+          latencyMs
+        });
+      }
+    }
+  } catch (err) {
+    console.warn(`[MultiProvider] Call to ${normProv.toUpperCase()}${logTag} failed:`, err.message);
+    addApiLog({
+      provider: `${normProv.toUpperCase()}${logTag}`,
+      model: selectedModel,
+      user: userHandle,
+      userName,
+      userEmail,
+      status: 'NETWORK_ERROR',
+      statusCode: 500,
+      targetSnippet: tweetText,
+      author: tweetAuthor,
+      error: err.message,
+      latencyMs: Date.now() - t0
+    });
+  }
+  return null;
+}
+
+/**
+ * Generate AI reply using primary provider with automatic multi-level failover cascade (Up to 5 providers)
  */
 async function generateWithProvider({
   provider = 'openai',
@@ -659,302 +933,69 @@ async function generateWithProvider({
 }) {
   const userHandle = user || '@user';
   const prov = (provider || 'openai').toLowerCase();
-  const apiKey = getProviderKey(prov);
   const selectedModel = model || (DEFAULT_MODELS[prov]?.[0]?.id || 'gpt-4o-mini');
 
   const styleInstruction = await resolveStyleInstruction(style, stylePrompt);
   const maxTokens = length === 'short' ? 45 : length === 'long' ? 140 : 80;
+  const { systemPrompt, userContent } = buildPromptMessages(tweetText, styleInstruction);
 
-  // Real API execution if key exists
-  if (apiKey && apiKey.length > 5) {
-    try {
-      const { systemPrompt, userContent } = buildPromptMessages(tweetText, styleInstruction);
+  // 1. PRIMARY PROVIDER CALL
+  const primaryResult = await executeProviderCall({
+    prov,
+    model: selectedModel,
+    systemPrompt,
+    userContent,
+    maxTokens,
+    tweetText,
+    tweetAuthor,
+    tweetAuthorName,
+    styleInstruction,
+    userHandle,
+    userName,
+    userEmail,
+    logTag: ''
+  });
 
-      if (prov === 'gemini') {
-        // Native Google Gemini generateContent call
-        const geminiCleanModel = selectedModel.replace('models/', '');
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiCleanModel}:generateContent?key=${apiKey}`;
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  { text: `${systemPrompt}\n\n${userContent}` }
-                ]
-              }
-            ],
-            generationConfig: {
-              maxOutputTokens: maxTokens,
-              temperature: 0.65
-            }
-          })
-        });
+  if (primaryResult) {
+    return primaryResult;
+  }
 
-        if (response.ok) {
-          const data = await response.json();
-          let reply = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-          reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
-          if (reply) {
-            return {
-              reply,
-              provider: 'Google Gemini',
-              modelUsed: selectedModel,
-              tokensUsed: data.usageMetadata?.totalTokenCount || 50
-            };
-          }
-        }
-      } else if (prov === 'anthropic') {
-        const t0 = Date.now();
-        const baseUrl = getAnthropicBaseUrl();
-        const endpoint = `${baseUrl}/v1/messages`;
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            max_tokens: maxTokens,
-            system: systemPrompt,
-            messages: [
-              { role: 'user', content: userContent }
-            ]
-          })
-        });
+  // 2. FAILOVER CASCADE: If primary provider failed, cycle sequentially through configured failover chain (Max 5 steps: 1 -> 2 -> 3 -> 4 -> 5)
+  const failoverChain = await getFailoverChain();
+  for (let i = 0; i < failoverChain.length; i++) {
+    const fb = failoverChain[i];
+    if (!fb || fb.enabled === false) continue;
+    const fbProv = (fb.provider || '').toLowerCase().trim();
+    const fbModel = (fb.model || '').trim();
 
-        const latencyMs = Date.now() - t0;
-        if (response.ok) {
-          const data = await response.json();
-          let reply = data.content?.[0]?.text?.trim() || '';
-          reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
-          if (reply) {
-            addApiLog({
-              provider: 'ANTHROPIC',
-              model: data.model || selectedModel,
-              user: userHandle,
-              userName,
-              userEmail,
-              status: 'SUCCESS',
-              statusCode: 200,
-              targetSnippet: tweetText,
-              author: tweetAuthor,
-              reply,
-              latencyMs
-            });
-            return {
-              reply,
-              provider: 'ANTHROPIC',
-              modelUsed: data.model || selectedModel,
-              tokensUsed: data.usage?.output_tokens || 50
-            };
-          }
-        } else {
-          const errBody = await response.text();
-          console.warn(`[MultiProvider] ANTHROPIC returned ${response.status}:`, errBody);
-          addApiLog({
-            provider: 'ANTHROPIC',
-            model: selectedModel,
-            user: userHandle,
-            userName,
-            userEmail,
-            status: 'FAILED',
-            statusCode: response.status,
-            targetSnippet: tweetText,
-            author: tweetAuthor,
-            error: errBody.slice(0, 200),
-            latencyMs
-          });
-        }
-      } else {
-        // OpenAI, Groq, and OpenRouter all use OpenAI-compatible Chat Completions
-        let endpoint = `${getOpenAIBaseUrl()}/chat/completions`;
-        let headers = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        };
+    // Skip if identical to primary that just failed
+    if (fbProv === prov && fbModel === selectedModel) continue;
 
-        if (prov === 'groq') {
-          endpoint = 'https://api.groq.com/openai/v1/chat/completions';
-        } else if (prov === 'openrouter') {
-          endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-          headers['HTTP-Referer'] = 'https://atomx.io';
-          headers['X-Title'] = 'ATOMX ENGAGE';
-        }
+    console.log(`[MultiProvider] Primary ${prov.toUpperCase()} unavailable. Cascading to Failover Step #${fb.priority || i + 1}: ${fbProv.toUpperCase()} (${fbModel})...`);
 
-        const t0 = Date.now();
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userContent }
-            ],
-            max_tokens: maxTokens,
-            temperature: 0.65
-          })
-        });
+    const fbResult = await executeProviderCall({
+      prov: fbProv,
+      model: fbModel,
+      systemPrompt,
+      userContent,
+      maxTokens,
+      tweetText,
+      tweetAuthor,
+      tweetAuthorName,
+      styleInstruction,
+      userHandle,
+      userName,
+      userEmail,
+      logTag: ` (Failover #${fb.priority || i + 1})`
+    });
 
-        const latencyMs = Date.now() - t0;
-
-        if (response.ok) {
-          const data = await response.json();
-          let reply = data.choices?.[0]?.message?.content?.trim() || '';
-          reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
-          if (reply) {
-            addApiLog({
-              provider: prov.toUpperCase(),
-              model: data.model || selectedModel,
-              user: userHandle,
-              userName,
-              userEmail,
-              status: 'SUCCESS',
-              statusCode: 200,
-              targetSnippet: tweetText,
-              author: tweetAuthor,
-              reply,
-              latencyMs
-            });
-            return {
-              reply,
-              provider: prov.toUpperCase(),
-              modelUsed: data.model || selectedModel,
-              tokensUsed: data.usage?.total_tokens || 50
-            };
-          }
-        } else {
-          const errBody = await response.text();
-          console.warn(`[MultiProvider] ${prov.toUpperCase()} returned ${response.status}:`, errBody);
-          addApiLog({
-            provider: prov.toUpperCase(),
-            model: selectedModel,
-            user: userHandle,
-            userName,
-            userEmail,
-            status: 'FAILED',
-            statusCode: response.status,
-            targetSnippet: tweetText,
-            author: tweetAuthor,
-            error: errBody.slice(0, 200),
-            latencyMs
-          });
-        }
-      }
-    } catch (err) {
-      console.warn(`[MultiProvider] Live call to ${prov} failed: ${err.message}.`);
-      addApiLog({
-        provider: prov.toUpperCase(),
-        model: selectedModel,
-        user: userHandle,
-        userName,
-        userEmail,
-        status: 'NETWORK_ERROR',
-        statusCode: 500,
-        targetSnippet: tweetText,
-        author: tweetAuthor,
-        error: err.message,
-        latencyMs: 0
-      });
+    if (fbResult) {
+      console.log(`[MultiProvider] Failover to Step #${fb.priority || i + 1} (${fbProv.toUpperCase()}) SUCCEEDED.`);
+      return fbResult;
     }
   }
 
-  // FAILOVER CASCADE: If primary model/provider failed, attempt secondary working live provider
-  const fallbackAttempts = [
-    { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct' },
-    { provider: 'groq', model: 'allam-2-7b' },
-    { provider: 'groq', model: 'qwen/qwen3.8-27b' }
-  ];
-
-  for (const fb of fallbackAttempts) {
-    if (fb.provider === prov && fb.model === selectedModel) continue;
-    const fbKey = getProviderKey(fb.provider);
-    if (!fbKey) continue;
-
-    try {
-      let fbEndpoint = fb.provider === 'groq'
-        ? 'https://api.groq.com/openai/v1/chat/completions'
-        : 'https://openrouter.ai/api/v1/chat/completions';
-      
-      let fbHeaders = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${fbKey}`
-      };
-      if (fb.provider === 'openrouter') {
-        fbHeaders['HTTP-Referer'] = 'https://atomx.io';
-        fbHeaders['X-Title'] = 'ATOMX ENGAGE';
-      }
-
-      const fbT0 = Date.now();
-      const { systemPrompt, userContent } = buildPromptMessages(tweetText, styleInstruction);
-      const fbRes = await fetch(fbEndpoint, {
-        method: 'POST',
-        headers: fbHeaders,
-        body: JSON.stringify({
-          model: fb.model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userContent }
-          ],
-          max_tokens: maxTokens,
-          temperature: 0.65
-        })
-      });
-
-      const fbLatency = Date.now() - fbT0;
-
-      if (fbRes.ok) {
-        const data = await fbRes.json();
-        let reply = data.choices?.[0]?.message?.content?.trim() || '';
-        reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
-        if (reply) {
-          addApiLog({
-            provider: `${fb.provider.toUpperCase()} (Failover)`,
-            model: fb.model,
-            user: userHandle,
-            userName,
-            userEmail,
-            status: 'SUCCESS',
-            statusCode: 200,
-            targetSnippet: tweetText,
-            author: tweetAuthor,
-            reply,
-            latencyMs: fbLatency
-          });
-          return {
-            reply,
-            provider: `${fb.provider.toUpperCase()} (Failover)`,
-            modelUsed: fb.model,
-            tokensUsed: data.usage?.total_tokens || 50
-          };
-        }
-      } else {
-        const errText = await fbRes.text();
-        addApiLog({
-          provider: `${fb.provider.toUpperCase()} (Failover)`,
-          model: fb.model,
-          user: userHandle,
-          userName,
-          userEmail,
-          status: 'FAILED',
-          statusCode: fbRes.status,
-          targetSnippet: tweetText,
-          author: tweetAuthor,
-          error: errText.slice(0, 150),
-          latencyMs: fbLatency
-        });
-      }
-    } catch (e) {
-      // Continue to next failover option
-    }
-  }
-
-  // Graceful synthesis engine tailored to the prompt instructions
+  // 3. EMERGENCY LOCAL SYNTHESIS: If all live providers fail or lack keys
   const fallback = createSynthesizedReply(tweetText, tweetAuthor, style, styleInstruction);
   addApiLog({
     provider: 'FALLBACK_SYNTHESIS',
@@ -967,7 +1008,7 @@ async function generateWithProvider({
     targetSnippet: tweetText,
     author: tweetAuthor,
     reply: fallback,
-    error: 'All live API calls failed or exhausted'
+    error: 'Primary and all configured failover providers failed or exhausted'
   });
 
   return {
