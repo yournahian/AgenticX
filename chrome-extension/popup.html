@@ -1786,9 +1786,29 @@
             </p>
           </div>
 
+          <div style="margin-bottom:12px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:10px;">
+            <div style="font-size:11px; color:var(--text-secondary); margin-bottom:6px; line-height:1.4;">
+              Forgot your password? Notify the administrator to assign you a temporary password:
+            </div>
+            <button type="button" class="mini-btn" id="extNotifyAdminForgotPwdBtn" style="width:100%; font-size:11px; padding:6px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:#f59e0b; font-weight:700; cursor:pointer; border-radius:4px;">
+              📢 Request Admin Password Reset
+            </button>
+            <div id="extForgotPwdNotifySuccess" style="display:none; font-size:11px; color:#10B981; font-weight:600; margin-top:6px; text-align:center;">
+              ✓ Admin notified! Once admin provides your temporary password, enter it below.
+            </div>
+          </div>
+
           <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Twitter / X ID or Registered Email</label>
             <input type="text" id="extResetIdentifierInput" class="ext-input" placeholder="e.g. @mythopair or user@email.com">
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Current / Admin-Assigned Password</label>
+            <div style="position:relative; display:flex; align-items:center;">
+              <input type="password" id="extResetCurrentPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="Temporary password assigned by admin">
+              <button type="button" class="pwd-eye-toggle-btn" data-target="extResetCurrentPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
+            </div>
           </div>
 
           <div style="margin-bottom:8px;">

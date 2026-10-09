@@ -349,13 +349,29 @@ function resolveStyleInstruction(style, stylePrompt) {
     return style.trim();
   }
 
-  // Look up in toneStyles.json
+  // Look up in dynamically updated toneStyles (Admin Dashboard live prompts)
   try {
+    let toneData = null;
+    try {
+      const adminController = require('../controllers/adminController');
+      if (adminController.getToneStylesCached) {
+        toneData = adminController.getToneStylesCached();
+      }
+    } catch(e) {}
+
+    const tmpTonePath = path.join('/tmp', 'toneStyles.json');
+    if (!toneData && fs.existsSync(tmpTonePath)) {
+      try { toneData = JSON.parse(fs.readFileSync(tmpTonePath, 'utf8')); } catch(e){}
+    }
+
     const tonePath = path.join(__dirname, '../data/toneStyles.json');
-    if (fs.existsSync(tonePath)) {
-      const toneData = JSON.parse(fs.readFileSync(tonePath, 'utf8'));
+    if (!toneData && fs.existsSync(tonePath)) {
+      try { toneData = JSON.parse(fs.readFileSync(tonePath, 'utf8')); } catch(e){}
+    }
+
+    if (toneData && Array.isArray(toneData.defaultTones)) {
       const sLower = style.toLowerCase();
-      const found = (toneData.defaultTones || []).find(t =>
+      const found = toneData.defaultTones.find(t =>
         (t.id && t.id.toLowerCase() === sLower) ||
         (t.name && t.name.toLowerCase() === sLower) ||
         (t.id && (sLower.includes(t.id.toLowerCase()) || t.id.toLowerCase().includes(sLower))) ||

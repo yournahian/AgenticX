@@ -1080,8 +1080,8 @@ function initListeners() {
   document.getElementById('extGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extGoToRequestLink')?.addEventListener('click', () => showAccessSubView('request'));
   document.getElementById('extGoToResetPwdLink')?.addEventListener('click', () => showAccessSubView('reset'));
-  document.getElementById('extBackToLoginFromResetBtn')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extResetPasswordSubmitBtn')?.addEventListener('click', handleExtResetPassword);
+  document.getElementById('extNotifyAdminForgotPwdBtn')?.addEventListener('click', handleExtNotifyAdminForgotPwd);
   document.getElementById('extRequestReviewBtn')?.addEventListener('click', handleExtRequestReview);
   document.getElementById('extSuspendedLogoutBtn')?.addEventListener('click', handleExtLogout);
   document.getElementById('extSaveNewPasswordSubmitBtn')?.addEventListener('click', handleExtSetPassword);
@@ -4054,6 +4054,27 @@ async function syncServerStateNetwork() {
       return;
     }
 
+    // IF SERVER CONFIRMS USER IS SUSPENDED, LOCK IMMEDIATELY!
+    if (stData.status === 'SUSPENDED') {
+      console.warn('[ATOMX] Account is SUSPENDED by administrator. Halting all activities.');
+      if (!state.user) {
+        state.user = { handle: stData.handle || `@${cleanHandle}`, email: stData.email || email, status: 'SUSPENDED' };
+      } else {
+        state.user.status = 'SUSPENDED';
+      }
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        await chrome.storage.local.set({ user: state.user, currentUser: state.user });
+      }
+      // Stop all background automation or active bot cycles
+      try {
+        if (typeof stopAudienceBuilder === 'function') stopAudienceBuilder();
+        if (typeof stopSorsaCycle === 'function') stopSorsaCycle();
+        if (typeof stopFollowerCycle === 'function') stopFollowerCycle();
+      } catch(e) {}
+      await checkAccountVerificationLock();
+      return;
+    }
+
     if (stData.status === 'PENDING') {
       state.user = null;
       state.verifiedXHandle = '';
@@ -4537,8 +4558,47 @@ async function handleExtSetPassword() {
   }
 }
 
+async function handleExtNotifyAdminForgotPwd() {
+  const ident = document.getElementById('extResetIdentifierInput')?.value.trim();
+  const btn = document.getElementById('extNotifyAdminForgotPwdBtn');
+  const successMsg = document.getElementById('extForgotPwdNotifySuccess');
+
+  if (!ident) {
+    alert('Please enter your Twitter / X ID or email address above first.');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Sending Notification...';
+  }
+
+  try {
+    const backendUrl = await getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/auth/request-password-reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: ident })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not send notification');
+    }
+    if (successMsg) successMsg.style.display = 'block';
+    alert(data.message || '✓ Admin notified! Contact administrator to receive your temporary password.');
+  } catch (e) {
+    alert(`❌ Notification error: ${e.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '📢 Request Admin Password Reset';
+    }
+  }
+}
+
 async function handleExtResetPassword() {
   const ident = document.getElementById('extResetIdentifierInput')?.value.trim();
+  const currentPass = document.getElementById('extResetCurrentPasswordInput')?.value.trim();
   const p1 = document.getElementById('extResetNewPasswordInput')?.value.trim();
   const p2 = document.getElementById('extResetConfirmPasswordInput')?.value.trim();
   const btn = document.getElementById('extResetPasswordSubmitBtn');
@@ -4547,8 +4607,12 @@ async function handleExtResetPassword() {
     alert('Please enter your X ID or registered email.');
     return;
   }
-  if (!p1 || p1.length < 6) {
-    alert('Please enter a password with at least 6 characters.');
+  if (!currentPass) {
+    alert('Please enter the Current / Admin-provided temporary password.');
+    return;
+  }
+  if (!p1 || p1.length < 4) {
+    alert('Please enter a new password with at least 4 characters.');
     return;
   }
   if (p1 !== p2) {
@@ -4566,7 +4630,7 @@ async function handleExtResetPassword() {
     const res = await fetch(`${backendUrl}/api/auth/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: ident, newPassword: p1 })
+      body: JSON.stringify({ identifier: ident, currentPassword: currentPass, newPassword: p1 })
     });
     const data = await res.json();
     if (!res.ok) {
@@ -4585,6 +4649,7 @@ async function handleExtResetPassword() {
     }
   }
 }
+
 
 async function handleExtRequestReview() {
   const btn = document.getElementById('extRequestReviewBtn');
@@ -5420,3 +5485,32 @@ async function getBackendUrl() {
   }
   return (url || '').replace(/\/+$/, '');
 }
+
+// Live 15-second status watchdog while extension popup is active: locks immediately if admin suspends user
+setInterval(async () => {
+  try {
+    const cleanHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').trim();
+    const email = (state.user?.email || '').trim();
+    if (!cleanHandle && !email) return;
+
+    const backendUrl = await getBackendUrl();
+    const stRes = await fetch(`${backendUrl}/api/auth/check-status?handle=${encodeURIComponent(cleanHandle)}&email=${encodeURIComponent(email)}`, { credentials: 'omit' });
+    if (stRes.ok) {
+      const d = await stRes.json();
+      if (d.status === 'SUSPENDED') {
+        if (!state.user || state.user.status !== 'SUSPENDED') {
+          console.warn('[ATOMX Watchdog] Account was suspended by administrator. Locking down extension.');
+          if (!state.user) state.user = { handle: d.handle || `@${cleanHandle}`, email: d.email || email, status: 'SUSPENDED' };
+          else state.user.status = 'SUSPENDED';
+          chrome.storage?.local.set({ user: state.user, currentUser: state.user });
+          state.isWorkflowRunning = false;
+          tgWorkingTabId = null;
+          await checkAccountVerificationLock();
+        }
+      } else if (d.status === 'NOT_FOUND') {
+        await purgeExtLocalUserSession();
+      }
+    }
+  } catch (e) {}
+}, 15000);
+

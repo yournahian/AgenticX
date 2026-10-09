@@ -298,14 +298,35 @@ exports.requestReview = async (req, res) => {
   }
 };
 
+exports.requestPasswordReset = async (req, res) => {
+  try {
+    const { identifier, handle, email } = req.body;
+    const loginKey = (identifier || handle || email || '').trim();
+    if (!loginKey) {
+      return res.status(400).json({ error: 'Please enter your X ID or email' });
+    }
+    const result = await db.requestPasswordReset(loginKey);
+    res.json({
+      success: true,
+      message: '✓ Password reset notification sent to Administrator! Once admin sets your temporary password, enter it in Current Password below.',
+      user: result.user
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
 exports.resetPassword = async (req, res) => {
   try {
-    const { identifier, email, handle, newPassword } = req.body;
+    const { identifier, email, handle, currentPassword, newPassword } = req.body;
     const loginKey = (identifier || email || handle || '').trim();
     if (!loginKey || !newPassword) {
       return res.status(400).json({ error: 'Account handle/email and new password are required' });
     }
-    const updatedUser = await db.resetUserPassword(loginKey, newPassword);
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Current / Admin-provided password is required' });
+    }
+    const updatedUser = await db.resetUserPassword(loginKey, newPassword, currentPassword);
     res.json({
       success: true,
       message: '✓ Password reset successfully! You can now log in with your new password.',

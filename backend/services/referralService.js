@@ -12,30 +12,104 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('../config/db');
+const supabase = require('../config/supabase');
 
 const REFERRALS_FILE = path.join(__dirname, '../data/referrals.json');
+const TMP_REFERRALS_FILE = path.join('/tmp', 'referrals.json');
+
+let inMemoryReferrals = null;
+let isDbLoaded = false;
 
 function ensureDataDir() {
-  const dir = path.dirname(REFERRALS_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(REFERRALS_FILE)) {
-    fs.writeFileSync(REFERRALS_FILE, JSON.stringify([], null, 2), 'utf8');
+  try {
+    const dir = path.dirname(REFERRALS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(REFERRALS_FILE)) {
+      fs.writeFileSync(REFERRALS_FILE, JSON.stringify([], null, 2), 'utf8');
+    }
+  } catch (e) {
+    // Read-only filesystem on Vercel serverless /var/task is expected
   }
 }
 
 function loadReferrals() {
-  ensureDataDir();
+  if (Array.isArray(inMemoryReferrals)) {
+    return inMemoryReferrals;
+  }
+
+  // Fallback to local files if available
   try {
-    const raw = fs.readFileSync(REFERRALS_FILE, 'utf8');
-    return JSON.parse(raw);
+    if (fs.existsSync(TMP_REFERRALS_FILE)) {
+      const raw = fs.readFileSync(TMP_REFERRALS_FILE, 'utf8');
+      inMemoryReferrals = JSON.parse(raw);
+      return inMemoryReferrals;
+    }
+  } catch (e) {}
+
+  try {
+    if (fs.existsSync(REFERRALS_FILE)) {
+      const raw = fs.readFileSync(REFERRALS_FILE, 'utf8');
+      inMemoryReferrals = JSON.parse(raw);
+      return inMemoryReferrals;
+    }
+  } catch (e) {}
+
+  inMemoryReferrals = [];
+  return inMemoryReferrals;
+}
+
+// Async preloader from Supabase
+async function initReferralsFromSupabase() {
+  if (isDbLoaded || !supabase) return;
+  try {
+    const { data, error } = await supabase
+      .from('plans')
+      .select('features')
+      .eq('id', 'system_referrals')
+      .maybeSingle();
+
+    if (!error && data && Array.isArray(data.features)) {
+      inMemoryReferrals = data.features;
+      isDbLoaded = true;
+    }
   } catch (e) {
-    return [];
+    console.warn('[Referral] Supabase load warning:', e.message);
   }
 }
 
+// Trigger initial async fetch
+initReferralsFromSupabase().catch(() => {});
+
 function saveReferrals(records) {
-  ensureDataDir();
-  fs.writeFileSync(REFERRALS_FILE, JSON.stringify(records, null, 2), 'utf8');
+  inMemoryReferrals = Array.isArray(records) ? records : [];
+
+  // 1. Persist to Supabase cloud database
+  if (supabase) {
+    supabase.from('plans').upsert({
+      id: 'system_referrals',
+      name: 'System Referrals Storage',
+      price_monthly: 0,
+      credits_monthly: 0,
+      is_popular: false,
+      is_active: false,
+      features: inMemoryReferrals
+    }, { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.warn('[Referral] Supabase upsert error:', error.message);
+      else console.log('✓ [Referral] Referrals persisted to Supabase cloud');
+    }).catch(err => console.warn('[Referral] Supabase exception:', err.message));
+  }
+
+  // 2. Safe local file write (try /tmp first, then local if writable)
+  try {
+    fs.writeFileSync(TMP_REFERRALS_FILE, JSON.stringify(inMemoryReferrals, null, 2), 'utf8');
+  } catch (e) {}
+
+  try {
+    ensureDataDir();
+    fs.writeFileSync(REFERRALS_FILE, JSON.stringify(inMemoryReferrals, null, 2), 'utf8');
+  } catch (fsErr) {
+    // EROFS on Vercel is safely ignored
+  }
 }
 
 module.exports = {

@@ -91,6 +91,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // ── Suspension Enforcement ─────────────────────────────────────────
+  if (['GENERATE_AI_REPLY', 'GENERATE_INLINE_REPLY', 'BG_START_TG_RAID', 'BG_START_AGENT_WORKFLOW'].includes(request.type)) {
+    chrome.storage.local.get(['user', 'currentUser'], (res) => {
+      const u = res?.user || res?.currentUser;
+      if (u && (u.status || '').toUpperCase() === 'SUSPENDED') {
+        sendResponse({ error: 'Account suspended by administrator.', status: 'SUSPENDED' });
+        return;
+      }
+    });
+  }
+
   // ── AI Reply Generation (bypasses page CORS) ────────────────────
   if (request.type === 'GENERATE_AI_REPLY' || request.type === 'GENERATE_INLINE_REPLY') {
     handleAiReplyGeneration(request, sendResponse);

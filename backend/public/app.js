@@ -2821,6 +2821,7 @@ function renderAdminUsers(container) {
     ...u,
     type: 'user',
     handle: u.handle || '@user',
+    referredBy: u.referredBy || u.referred_by || 'Direct / —',
     rawStatus: (u.status || 'ACTIVE').toUpperCase(),
     dateDisplay: u.lastActive || 'Active'
   }));
@@ -2834,6 +2835,7 @@ function renderAdminUsers(container) {
     plan: 'Pending Tier',
     credits: 0,
     type: 'request',
+    referredBy: r.referredBy || r.referred_by || 'Direct / —',
     rawStatus: (r.status || 'PENDING').toUpperCase(),
     dateDisplay: r.requestedDate || 'Recent'
   }));
@@ -2854,6 +2856,7 @@ function renderAdminUsers(container) {
   const activeCount = registeredUsers.filter(u => u.rawStatus === 'ACTIVE').length;
   const suspendedCount = registeredUsers.filter(u => u.rawStatus === 'SUSPENDED').length;
   const rejectedCount = (AtomXState.accessRequests || []).filter(r => (r.status || '').toUpperCase() === 'REJECTED').length;
+  const pwdReqs = AtomXState.passwordRequests || [];
 
   let displayed = allAccounts.filter(acc => {
     if (activeFilter === 'Pending') return acc.rawStatus === 'PENDING';
@@ -2894,6 +2897,20 @@ function renderAdminUsers(container) {
         </div>
 
         <div class="workspace-body">
+          ${pwdReqs.length > 0 ? `
+            <div style="background:rgba(234,179,8,0.12); border:1px solid rgba(234,179,8,0.35); border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:22px;">🔑</span>
+                <div>
+                  <strong style="color:#EAB308; font-size:13.5px;">Password Reset Requests (${pwdReqs.length})</strong>
+                  <div style="color:var(--text-secondary); font-size:12px; margin-top:2px;">
+                    Users requesting reset: ${pwdReqs.map(p => `<strong style="color:var(--text-primary);">${p.user || 'User'}</strong>`).join(', ')}. Click user row to assign their temporary password.
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
             <div class="style-pills">
               <span class="style-pill ${activeFilter === 'All' ? 'active' : ''}" onclick="setAdminUserFilter('All')">All Accounts (${totalCount})</span>
@@ -2940,17 +2957,22 @@ function renderAdminUsers(container) {
                   const isRejected = s === 'REJECTED';
                   const isActive = s === 'ACTIVE';
 
+                  const hasPwdReq = pwdReqs.some(pr => (pr.user && (pr.user === u.handle || pr.user === u.email || pr.user === u.name)) || (pr.reason && (pr.reason.includes(u.handle) || pr.reason.includes(u.email))));
+
                   const cleanHandle = (u.handle || '@user').replace(/^@/, '');
-                  const handleLink = `<a href="https://x.com/${cleanHandle}" target="_blank" style="color:var(--blue-primary); text-decoration:none; font-weight:700;">@${cleanHandle}</a>`;
+                  const handleLink = `<a href="https://x.com/${cleanHandle}" target="_blank" onclick="event.stopPropagation();" style="color:var(--blue-primary); text-decoration:none; font-weight:700;">@${cleanHandle}</a>`;
 
                   return `
-                  <tr>
+                  <tr onclick="openAdminUserProfileModal('${u.id}')" style="cursor:pointer;" class="clickable-user-row" title="Click to view full user profile & settings">
                     <td style="font-weight:600;">
                       <div style="display:flex; align-items:center; gap:8px;">
                         <div class="user-avatar" style="width:28px; height:28px; font-size:11px; background:var(--border-subtle); color:var(--text-primary);">
                           ${(u.name || 'U').slice(0, 2).toUpperCase()}
                         </div>
-                        <span>${u.name}</span>
+                        <div>
+                          <span>${u.name}</span>
+                          ${hasPwdReq ? `<span class="badge badge-warning" style="font-size:9.5px; padding:1px 4px; margin-left:4px;" title="User requested password reset">🔑 Reset Req</span>` : ''}
+                        </div>
                       </div>
                     </td>
                     <td>${handleLink}</td>
@@ -2975,19 +2997,20 @@ function renderAdminUsers(container) {
                         `<span style="color:var(--text-muted); font-size:12px;">Direct / —</span>`}
                     </td>
                     <td style="color:var(--text-muted); font-size:11px;">${u.dateDisplay}</td>
-                    <td style="text-align:right;">
-                      <div style="display:inline-flex; gap:6px; justify-content:flex-end; flex-wrap:wrap;">
+                    <td style="text-align:right;" onclick="event.stopPropagation();">
+                      <div style="display:inline-flex; gap:6px; justify-content:flex-end; align-items:center;">
                         ${isPending ? `
                           <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')">Approve</button>
                           <button class="btn btn-danger btn-sm" onclick="rejectUserRequest('${u.id}')">Reject</button>
                         ` : isRejected ? `
-                          <button class="btn btn-secondary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')">Re-Approve</button>
+                          <span class="badge badge-error" style="font-size:11px; font-weight:700;">Rejected</span>
+                          <button class="btn btn-secondary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')" style="margin-left:4px;">Re-Approve</button>
+                        ` : isSuspended ? `
+                          <span class="badge badge-error" style="font-size:11px; font-weight:700;">Suspended</span>
+                          <button class="btn btn-secondary btn-sm" onclick="openAdminUserProfileModal('${u.id}')" style="margin-left:4px;">Profile</button>
                         ` : `
-                          <button class="btn btn-secondary btn-sm" onclick="onAdminManageUserCredits('${u.id}')" title="Adjust credits for this user">Credits</button>
-                          <button class="btn btn-secondary btn-sm" onclick="openAdminPasswordModal('${u.id}', '${u.name}', '${u.handle}')" title="Set or reset user password">🔑 Password</button>
-                          <button class="btn ${isSuspended ? 'btn-primary' : 'btn-danger'} btn-sm" onclick="toggleSuspendUser('${u.id}')">
-                            ${isSuspended ? 'Unsuspend' : 'Suspend'}
-                          </button>
+                          <span class="badge badge-success" style="font-size:11px; font-weight:700;">Approved</span>
+                          <button class="btn btn-secondary btn-sm" onclick="openAdminUserProfileModal('${u.id}')" style="margin-left:4px;">Profile</button>
                         `}
                       </div>
                     </td>
@@ -3002,6 +3025,261 @@ function renderAdminUsers(container) {
     </div>
   `;
 }
+
+function openAdminUserProfileModal(userId) {
+  closeModal();
+  const user = (AtomXState.adminUsers || []).find(u => String(u.id) === String(userId)) ||
+               (AtomXState.accessRequests || []).find(r => String(r.id) === String(userId));
+  if (!user) {
+    showToast('User account not found', 'error');
+    return;
+  }
+
+  const pwdReqs = AtomXState.passwordRequests || [];
+  const pwdReq = pwdReqs.find(pr => 
+    (pr.user && (pr.user === user.handle || pr.user === user.email || pr.user === user.name)) ||
+    (pr.reason && (pr.reason.includes(user.handle) || pr.reason.includes(user.email)))
+  );
+
+  const statusUpper = (user.status || 'ACTIVE').toUpperCase();
+  const isSuspended = statusUpper === 'SUSPENDED';
+  const cleanHandle = (user.handle || '@user').replace(/^@/, '');
+
+  const modalHTML = `
+    <div class="modal-backdrop" id="userProfileModal" onclick="if(event.target===this) closeModal()">
+      <div class="modal-box" style="max-width: 600px; max-height: 88vh; overflow-y: auto; padding: 24px; border-radius: 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); box-shadow: 0 20px 45px rgba(0,0,0,0.45);">
+        <!-- Modal Header -->
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <h3 class="modal-title" style="margin:0; font-size:18px; font-weight:700; color:var(--text-primary);">User Profile & Management</h3>
+              <span class="badge ${isSuspended ? 'badge-error' : 'badge-success'}">${isSuspended ? 'SUSPENDED' : 'ACTIVE'}</span>
+            </div>
+            <p style="margin:4px 0 0 0; font-size:12px; color:var(--text-muted);">Manage plan tier, credits, password, suspension, or permanently delete user.</p>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal()" style="font-size:24px; cursor:pointer; background:none; border:none; color:var(--text-muted); line-height:1;">&times;</button>
+        </div>
+
+        <!-- Notification if Password Reset Requested -->
+        ${pwdReq ? `
+          <div style="background:rgba(234,179,8,0.14); border:1px solid rgba(234,179,8,0.4); border-radius:8px; padding:12px 14px; margin-bottom:16px; display:flex; align-items:center; gap:10px;">
+            <span style="font-size:22px;">🔑</span>
+            <div>
+              <div style="font-weight:700; color:#EAB308; font-size:13px;">User Requested Password Reset!</div>
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">User forgot their password. Set a new password below and provide it to the user. They will enter it as current password to log in.</div>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- User Information Card -->
+        <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:10px; padding:14px; margin-bottom:18px;">
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+            <div class="user-avatar" style="width:42px; height:42px; font-size:16px; background:var(--blue-primary); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700;">
+              ${(user.name || 'U').slice(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <div style="font-size:16px; font-weight:700; color:var(--text-primary);">${user.name}</div>
+              <div style="display:flex; gap:8px; align-items:center; font-size:12px; margin-top:2px; flex-wrap:wrap;">
+                <a href="https://x.com/${cleanHandle}" target="_blank" style="color:var(--blue-primary); font-weight:700; text-decoration:none;">
+                  @${cleanHandle} ↗
+                </a>
+                <span style="color:var(--text-muted);">•</span>
+                <span style="color:var(--text-secondary);">${user.email || 'No email'}</span>
+                ${user.telegram ? `<span style="color:var(--text-muted);">•</span><span style="color:#229ED9; font-weight:600;">✈️ ${user.telegram}</span>` : ''}
+              </div>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; padding-top:10px; border-top:1px solid var(--border-subtle); font-size:12px;">
+            <div>
+              <span style="color:var(--text-muted); display:block; font-size:11px;">Current Plan</span>
+              <strong style="color:var(--text-primary);">${user.plan || 'Free Plan'}</strong>
+            </div>
+            <div>
+              <span style="color:var(--text-muted); display:block; font-size:11px;">Credits Balance</span>
+              <strong style="color:var(--blue-primary);">${(user.credits || 0).toLocaleString()} C</strong>
+            </div>
+            <div>
+              <span style="color:var(--text-muted); display:block; font-size:11px;">Referred By</span>
+              <strong style="color:var(--text-primary); font-family:monospace;">${user.referredBy || 'Direct / —'}</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 1: Plan Tier -->
+        <div style="margin-bottom:18px; padding-bottom:16px; border-bottom:1px solid var(--border-subtle);">
+          <label style="display:block; margin:0 0 6px 0; font-size:13px; font-weight:700; color:var(--text-primary);">⭐ Subscription Plan Tier</label>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <select id="modalPlanSelect" class="form-select" style="flex:1;">
+              <option value="Free Plan" ${user.plan === 'Free Plan' ? 'selected' : ''}>Free Plan (100 Credits)</option>
+              <option value="Starter Plan" ${user.plan === 'Starter Plan' ? 'selected' : ''}>Starter Plan (1,000 Credits)</option>
+              <option value="Growth Plan" ${user.plan === 'Growth Plan' ? 'selected' : ''}>Growth Plan (10,000 Credits)</option>
+              <option value="Pro Plan" ${user.plan === 'Pro Plan' ? 'selected' : ''}>Pro Plan (25,000 Credits)</option>
+              <option value="Enterprise Plan" ${user.plan === 'Enterprise Plan' ? 'selected' : ''}>Enterprise Plan (100,000 Credits)</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="handleAdminUpdateUserPlan('${user.id}')" style="white-space:nowrap;">Update Plan</button>
+          </div>
+        </div>
+
+        <!-- Section 2: Credit Adjustment -->
+        <div style="margin-bottom:18px; padding-bottom:16px; border-bottom:1px solid var(--border-subtle);">
+          <label style="display:block; margin:0 0 6px 0; font-size:13px; font-weight:700; color:var(--text-primary);">⚡ Adjust Credits Balance</label>
+          <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary btn-xs" onclick="document.getElementById('modalCreditAmount').value=1000">+1,000</button>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="document.getElementById('modalCreditAmount').value=5000">+5,000</button>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="document.getElementById('modalCreditAmount').value=10000">+10,000</button>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="document.getElementById('modalCreditAmount').value=-500">-500</button>
+          </div>
+          <div style="display:grid; grid-template-columns: 130px 1fr auto; gap:8px;">
+            <input type="number" id="modalCreditAmount" class="form-input" placeholder="Amount" value="1000">
+            <input type="text" id="modalCreditReason" class="form-input" placeholder="Reason (e.g. Bonus, Top-up)">
+            <button class="btn btn-primary btn-sm" onclick="handleAdminModalAdjustCredits('${user.id}')">Apply</button>
+          </div>
+        </div>
+
+        <!-- Section 3: Password Assignment -->
+        <div style="margin-bottom:18px; padding-bottom:16px; border-bottom:1px solid var(--border-subtle);">
+          <label style="display:block; margin:0 0 4px 0; font-size:13px; font-weight:700; color:var(--text-primary);">🔑 Set / Reset User Password</label>
+          <p style="margin:0 0 8px 0; font-size:11.5px; color:var(--text-muted);">Assign a temporary password for this user. They must enter this as their current password when resetting or signing in.</p>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="modalNewPassword" class="form-input" placeholder="Enter new password (min 4 chars)" style="flex:1;">
+            <button class="btn btn-secondary btn-sm" onclick="handleAdminModalSetPassword('${user.id}', '${user.name}')" style="white-space:nowrap;">Assign Password</button>
+          </div>
+        </div>
+
+        <!-- Section 4: Suspend / Reactivate -->
+        <div style="margin-bottom:18px; padding-bottom:16px; border-bottom:1px solid var(--border-subtle);">
+          <label style="display:block; margin:0 0 4px 0; font-size:13px; font-weight:700; color:var(--text-primary);">🛑 Account Access & Suspension</label>
+          <p style="margin:0 0 8px 0; font-size:11.5px; color:var(--text-muted);">
+            ${isSuspended ? 'User is currently suspended. The extension is completely locked down for them.' : 'Suspending a user immediately locks down their extension in real-time and halts all automation.'}
+          </p>
+          <button class="btn ${isSuspended ? 'btn-primary' : 'btn-danger'} btn-sm" onclick="handleAdminModalToggleSuspend('${user.id}')">
+            ${isSuspended ? '✅ Reactivate User Account' : '🚫 Suspend User Immediately'}
+          </button>
+        </div>
+
+        <!-- Section 5: Danger Zone - Delete User -->
+        <div style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:14px;">
+          <label style="display:block; margin:0 0 4px 0; font-size:13px; font-weight:700; color:var(--status-error);">⚠️ Danger Zone: Delete User</label>
+          <p style="margin:0 0 10px 0; font-size:11.5px; color:var(--text-secondary);">
+            Permanently erases this user from the database including user ID, credits, and access requests.
+          </p>
+          <button class="btn btn-danger btn-sm" onclick="handleAdminModalDeleteUser('${user.id}', '${user.handle || user.name}')" style="background:#EF4444; color:#fff; font-weight:700;">
+            🗑️ Delete User Permanently
+          </button>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; margin-top:20px;">
+          <button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+window.openAdminUserProfileModal = openAdminUserProfileModal;
+
+window.handleAdminUpdateUserPlan = async function(userId) {
+  const plan = document.getElementById('modalPlanSelect')?.value;
+  if (!plan) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/update-user-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, plan })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update plan');
+    showToast(`✓ Plan updated to ${plan}`, 'success');
+    closeModal();
+    await loadAdminServerData();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
+
+window.handleAdminModalAdjustCredits = async function(userId) {
+  const amount = parseInt(document.getElementById('modalCreditAmount')?.value, 10);
+  const reason = document.getElementById('modalCreditReason')?.value.trim() || 'Admin manual adjustment';
+  if (isNaN(amount) || amount === 0) {
+    showToast('Please enter a valid credit amount', 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/adjust-credits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, amount, reason })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to adjust credits');
+    showToast(`✓ Credits updated by ${amount > 0 ? '+' : ''}${amount}`, 'success');
+    closeModal();
+    await loadAdminServerData();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
+
+window.handleAdminModalSetPassword = async function(userId, userName) {
+  const password = document.getElementById('modalNewPassword')?.value.trim();
+  if (!password || password.length < 4) {
+    showToast('Password must be at least 4 characters', 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/set-user-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, password })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to set password');
+    showToast(`✓ Password set! Share "${password}" with user as their temporary password.`, 'success');
+    const input = document.getElementById('modalNewPassword');
+    if (input) input.value = '';
+    await loadAdminServerData();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
+
+window.handleAdminModalToggleSuspend = async function(userId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/toggle-user-status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to toggle status');
+    showToast(`✓ Account status changed to ${data.status}`, 'success');
+    closeModal();
+    await loadAdminServerData();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
+
+window.handleAdminModalDeleteUser = async function(userId, userHandle) {
+  if (!confirm(`Are you sure you want to permanently delete user ${userHandle}?\n\nThis will permanently wipe their account, user ID, credits, transactions, and access requests from the database. This action cannot be undone.`)) {
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/delete-user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete user');
+    showToast(`✓ User ${userHandle} permanently deleted from database`, 'success');
+    closeModal();
+    await loadAdminServerData();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+};
 
 function onAdminManageUserCredits(userId) {
   const user = (AtomXState.adminUsers || []).find(u => String(u.id) === String(userId));
@@ -5245,6 +5523,7 @@ function renderSidebarHTML(activeId) {
 
 function renderAdminSidebarHTML(activeId) {
   const pendingCount = (AtomXState.accessRequests || []).filter(r => (r.status || '').toUpperCase() === 'PENDING').length;
+  const pwdCount = (AtomXState.passwordRequests || []).length;
   return `
     <aside class="app-sidebar">
       <div class="sidebar-header">
@@ -5263,7 +5542,7 @@ function renderAdminSidebarHTML(activeId) {
         <div class="nav-item ${activeId === '14' || activeId === '13' ? 'active' : ''}" onclick="navigateToScreen('14')">
           <svg viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Users & Access</span>
-          ${pendingCount > 0 ? `<span class="badge badge-warning" style="margin-left:auto; font-size:10px; padding:1px 6px;">${pendingCount}</span>` : ''}
+          ${(pendingCount > 0 || pwdCount > 0) ? `<span class="badge ${pwdCount > 0 ? 'badge-warning' : 'badge-info'}" style="margin-left:auto; font-size:10px; padding:1px 6px;">${pendingCount > 0 ? pendingCount : ''}${pwdCount > 0 ? ` 🔑${pwdCount}` : ''}</span>` : ''}
         </div>
         <div class="nav-item ${activeId === '15' ? 'active' : ''}" onclick="navigateToScreen('15')">
           <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><line x1="12" y1="6" x2="12" y2="18"/></svg>
@@ -5400,7 +5679,7 @@ async function saveAdminActiveModel() {
 // Real-time server sync for admin datasets
 async function loadAdminServerData() {
   try {
-    const [statsRes, usersRes, reqsRes, ledgerRes, engRes, modelRes, logsRes, tonesRes, keysRes] = await Promise.all([
+    const [statsRes, usersRes, reqsRes, ledgerRes, engRes, modelRes, logsRes, tonesRes, keysRes, pwdRes] = await Promise.all([
       fetch(`${API_BASE}/api/admin/stats`).catch(() => null),
       fetch(`${API_BASE}/api/admin/users`).catch(() => null),
       fetch(`${API_BASE}/api/admin/access-requests`).catch(() => null),
@@ -5409,8 +5688,14 @@ async function loadAdminServerData() {
       fetch(`${API_BASE}/api/admin/active-model`).catch(() => null),
       fetch(`${API_BASE}/api/admin/api-logs`).catch(() => null),
       fetch(`${API_BASE}/api/tone-styles`).catch(() => null),
-      fetch(`${API_BASE}/api/admin/api-keys`).catch(() => null)
+      fetch(`${API_BASE}/api/admin/api-keys`).catch(() => null),
+      fetch(`${API_BASE}/api/admin/password-requests`).catch(() => null)
     ]);
+
+    if (pwdRes && pwdRes.ok) {
+      const pd = await pwdRes.json();
+      AtomXState.passwordRequests = pd.requests || [];
+    }
 
     if (keysRes && keysRes.ok) {
       const kd = await keysRes.json();
@@ -5456,7 +5741,7 @@ async function loadAdminServerData() {
         plan: u.plan_tier || 'Free Plan',
         credits: u.credits !== undefined ? u.credits : 100,
         status: (u.status || 'ACTIVE').charAt(0).toUpperCase() + (u.status || 'ACTIVE').slice(1).toLowerCase(),
-        referredBy: u.referred_by || u.referredBy || 'Direct / —',
+        referredBy: u.referred_by || u.referredBy || (u.use_case && u.use_case.match(/REF:(@?[\w_]+)/i) ? u.use_case.match(/REF:(@?[\w_]+)/i)[1] : 'Direct / —'),
         telegram: u.telegram || '',
         lastActive: u.created_at ? new Date(u.created_at).toLocaleDateString() : 'Recently'
       }));
@@ -5470,6 +5755,7 @@ async function loadAdminServerData() {
         telegram: r.telegram || (r.use_case && r.use_case.match(/TG:(@?[\w_]+)/i) ? r.use_case.match(/TG:(@?[\w_]+)/i)[1] : ''),
         handle: r.handle || (r.use_case && r.use_case.match(/X_ID:(@?[\w_]+)/i) ? r.use_case.match(/X_ID:(@?[\w_]+)/i)[1] : '@user'),
         requestedDate: r.requested_at ? new Date(r.requested_at).toLocaleDateString() : (r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Today'),
+        referredBy: r.referred_by || r.referredBy || (r.use_case && r.use_case.match(/REF:(@?[\w_]+)/i) ? r.use_case.match(/REF:(@?[\w_]+)/i)[1] : 'Direct / —'),
         status: (r.status || 'Pending').toUpperCase()
       }));
     }

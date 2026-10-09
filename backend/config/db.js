@@ -107,6 +107,55 @@ module.exports = {
     return data?.[0];
   },
 
+  async updateUserPlan(userId, plan) {
+    if (!supabase) throw new Error('Database not connected');
+    const user = await resolveUser(userId);
+    if (!user) throw new Error('User not found');
+    const { data, error } = await supabase.from('users').update({ plan_tier: plan }).eq('id', user.id).select().single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  async deleteUser(userIdOrHandle) {
+    if (!supabase) throw new Error('Database not connected');
+    const user = await resolveUser(userIdOrHandle);
+    let targetId = user?.id;
+    let targetHandle = user?.handle;
+    let targetEmail = user?.email;
+
+    if (!user) {
+      // Check if it's an access request
+      const reqs = await this.getAccessRequests();
+      const match = (reqs || []).find(r => r.id === userIdOrHandle || (r.handle && r.handle.toLowerCase() === String(userIdOrHandle).toLowerCase()) || (r.email && r.email.toLowerCase() === String(userIdOrHandle).toLowerCase()));
+      if (match) {
+        await supabase.from('access_requests').delete().eq('id', match.id);
+        return { success: true, deleted: 'access_request', id: match.id };
+      }
+      throw new Error('User account not found to delete');
+    }
+
+    try { await supabase.from('reply_queue').delete().eq('user_id', targetId); } catch(e){}
+    try { await supabase.from('credits_ledger').delete().eq('user_id', targetId); } catch(e){}
+    try { await supabase.from('engaged_tweets').delete().eq('user_id', String(targetId)); } catch(e){}
+    try { await supabase.from('transactions').delete().eq('user_id', targetId); } catch(e){}
+    if (targetEmail) {
+      try { await supabase.from('access_requests').delete().eq('email', targetEmail); } catch(e){}
+    }
+    if (targetHandle) {
+      try {
+        const referralService = require('../services/referralService');
+        const refs = referralService.getAllReferrals();
+        const filtered = refs.filter(r => r.referee_handle?.toLowerCase() !== targetHandle.toLowerCase());
+        referralService.saveReferrals && referralService.saveReferrals(filtered);
+      } catch(e){}
+    }
+
+    const { error } = await supabase.from('users').delete().eq('id', targetId);
+    if (error) throw new Error(error.message);
+
+    return { success: true, deletedUserId: targetId, handle: targetHandle };
+  },
+
   // Atomic Server-Side Credit Math (Rule: 1 Credit = 1 AI reply)
   async deductCredit(userId, amount = 1, action = 'AI Reply', reason = 'Generated reply') {
     const user = await resolveUser(userId);
@@ -334,7 +383,24 @@ module.exports = {
     return { success: true };
   },
 
-  async resetUserPassword(identifier, newPassword) {
+  async requestPasswordReset(identifier) {
+    if (!supabase) return { success: true };
+    const user = await resolveUser(identifier);
+    if (!user) {
+      throw new Error('Account not found with this handle or email. Please verify and try again.');
+    }
+    await supabase.from('credits_ledger').insert({
+      user_id: user.id,
+      amount: 0,
+      balance_after: user.credits || 0,
+      action: 'Forgot Password',
+      admin_source: 'Extension Request',
+      reason: `Password reset requested by user for ${user.handle}`
+    });
+    return { success: true, user };
+  },
+
+  async resetUserPassword(identifier, newPassword, currentPassword) {
     if (!supabase) throw new Error('Database not connected');
     const clean = (identifier || '').replace(/^@/, '').toLowerCase().trim();
     let user = null;
@@ -357,6 +423,14 @@ module.exports = {
     if (!user) {
       throw new Error('User not found. Please ensure your email or handle is registered.');
     }
+
+    // Verify current / admin-provided password
+    if (currentPassword) {
+      if (user.password_hash && user.password_hash !== currentPassword && user.password_hash !== 'approved_hash') {
+        throw new Error('Current / Admin-provided password is incorrect. Please check with your administrator.');
+      }
+    }
+
     const { data, error } = await supabase.from('users').update({
       password_hash: newPassword,
       status: 'ACTIVE'

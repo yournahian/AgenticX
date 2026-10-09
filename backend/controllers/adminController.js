@@ -117,6 +117,52 @@ exports.setUserPassword = async (req, res) => {
   }
 };
 
+exports.updateUserPlan = async (req, res) => {
+  const { userId, email, handle, plan } = req.body;
+  const targetId = userId || email || handle;
+  if (!targetId || !plan) {
+    return res.status(400).json({ error: 'Valid user identifier and plan required' });
+  }
+  try {
+    const updated = await db.updateUserPlan(targetId, plan);
+    res.json({
+      success: true,
+      message: `Plan successfully updated to "${plan}" for user`,
+      user: updated
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.deleteUser = async (req, res) => {
+  const { userId, email, handle } = req.body;
+  const targetId = userId || email || handle;
+  if (!targetId) {
+    return res.status(400).json({ error: 'Valid user identifier required to delete' });
+  }
+  try {
+    const result = await db.deleteUser(targetId);
+    res.json({
+      success: true,
+      message: 'User account and associated data permanently deleted from database.',
+      result
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.getPasswordRequests = async (req, res) => {
+  try {
+    const ledger = await db.getAllLedger();
+    const requests = (ledger || []).filter(l => l.action === 'Forgot Password');
+    res.json({ requests });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 const plansPath = path.join(__dirname, '../data/plans.json');
 const tmpPlansPath = path.join('/tmp', 'plans.json');
 let inMemoryPlans = null;
@@ -346,11 +392,32 @@ const toneStylesPath = path.join(__dirname, '../data/toneStyles.json');
 const tmpToneStylesPath = path.join('/tmp', 'toneStyles.json');
 let inMemoryToneStyles = null;
 
-exports.getToneStyles = (req, res) => {
+exports.getToneStylesCached = () => inMemoryToneStyles;
+
+exports.getToneStyles = async (req, res) => {
   try {
-    if (inMemoryToneStyles) {
+    if (inMemoryToneStyles && inMemoryToneStyles.defaultTones) {
       return res.json(inMemoryToneStyles);
     }
+
+    // 1. Fetch from Supabase cloud database
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('plans')
+          .select('features')
+          .eq('id', 'system_tone_styles')
+          .maybeSingle();
+
+        if (!error && data && data.features && data.features.defaultTones) {
+          inMemoryToneStyles = data.features;
+          return res.json(inMemoryToneStyles);
+        }
+      } catch (e) {
+        console.warn('⚠️ [Admin] Supabase tone styles load warning:', e.message);
+      }
+    }
+
     if (fs.existsSync(tmpToneStylesPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(tmpToneStylesPath, 'utf8'));
@@ -379,7 +446,7 @@ exports.getToneStyles = (req, res) => {
   }
 };
 
-exports.saveToneStyles = (req, res) => {
+exports.saveToneStyles = async (req, res) => {
   try {
     const { maxCustomTemplatesPerUser, defaultTones } = req.body;
     let current = inMemoryToneStyles;
@@ -401,7 +468,25 @@ exports.saveToneStyles = (req, res) => {
 
     inMemoryToneStyles = updated;
 
-    // Attempt persistent write; handle read-only filesystems (e.g. Vercel) gracefully
+    // 1. Persist to Supabase cloud database
+    if (supabase) {
+      try {
+        await supabase.from('plans').upsert({
+          id: 'system_tone_styles',
+          name: 'System Tone Styles Storage',
+          price_monthly: 0,
+          credits_monthly: 0,
+          is_popular: false,
+          is_active: false,
+          features: updated
+        }, { onConflict: 'id' });
+        console.log('✓ [Admin] Tone & Style settings persisted to Supabase cloud');
+      } catch (dbErr) {
+        console.warn('⚠️ [Admin] Supabase tone styles upsert warning:', dbErr.message);
+      }
+    }
+
+    // 2. Safe local file write (try /tmp first, then local if writable)
     try {
       fs.mkdirSync(path.dirname(toneStylesPath), { recursive: true });
       fs.writeFileSync(toneStylesPath, JSON.stringify(updated, null, 2), 'utf8');
