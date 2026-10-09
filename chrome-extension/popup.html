@@ -1657,9 +1657,22 @@
             🚀 Submit Request for Approval
           </button>
 
-          <div style="margin-top:12px; text-align:center;">
+          <!-- Check Approval Status Card for Users Returning after popup close -->
+          <div style="margin-top:14px; padding:10px 12px; background:rgba(59,130,246,0.06); border:1px solid rgba(59,130,246,0.22); border-radius:8px; text-align:center;">
+            <div style="font-size:11.5px; font-weight:700; color:var(--text-primary); margin-bottom:3px;">
+              Already submitted request previously?
+            </div>
+            <div style="font-size:10.5px; color:var(--text-secondary); margin-bottom:8px; line-height:1.4;">
+              Check if the admin has approved your account &amp; set your password now.
+            </div>
+            <button type="button" id="extCheckApprovalStatusPromptBtn" style="width:100%; font-size:11.5px; font-weight:700; color:var(--blue-primary); border:1px solid rgba(59,130,246,0.35); padding:7px 10px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; background:rgba(59,130,246,0.08); border-radius:6px;">
+              🔍 Check Approval Status &amp; Set Password
+            </button>
+          </div>
+
+          <div style="margin-top:10px; text-align:center;">
             <button type="button" id="extGoToLoginLink" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
-              Already approved? Sign in with X ID & Password
+              Already approved? Sign in with X ID &amp; Password
             </button>
           </div>
         </div>

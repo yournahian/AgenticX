@@ -61,10 +61,19 @@ function pingKeepAlive() {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'atomx-generate-reply' && info.selectionText) {
     try {
+      const stored = await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}));
+      const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
       const response = await fetch(`${DEFAULT_BACKEND_URL}/api/generate-reply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tweetText: info.selectionText, style: 'Natural & Concise' })
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-handle': uHandle
+        },
+        body: JSON.stringify({ 
+          tweetText: info.selectionText, 
+          style: 'Natural & Concise',
+          userHandle: uHandle
+        })
       });
       if (response.ok) {
         const data = await response.json();
@@ -170,10 +179,28 @@ async function handleAiReplyGeneration(request, sendResponse) {
     const style        = request.style || storedLocal?.selectedTone || 'Bullish (5-10 words)';
     const stylePrompt  = request.stylePrompt || storedLocal?.selectedTonePrompt || null;
 
+    const userStored = await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}));
+    const userHandle = userStored?.verifiedXHandle || userStored?.currentUser?.handle || userStored?.user?.handle || '@user';
+    const userEmail  = userStored?.currentUser?.email || userStored?.user?.email || '';
+    const userId     = userStored?.currentUser?.id || userStored?.user?.id || null;
+
     const res = await fetch(`${backendUrl}/api/generate-reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tweetText, tweetAuthor, tweetAuthorName, style, stylePrompt })
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-user-handle': userHandle,
+        'x-user-id': userId ? String(userId) : '1'
+      },
+      body: JSON.stringify({ 
+        tweetText, 
+        tweetAuthor, 
+        tweetAuthorName, 
+        style, 
+        stylePrompt,
+        userHandle,
+        userEmail,
+        userId
+      })
     });
 
     if (res.ok) {

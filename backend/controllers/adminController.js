@@ -612,9 +612,9 @@ exports.saveToneStyles = async (req, res) => {
 const multiProviderService = require('../services/multiProviderService');
 
 // Live AI API Telemetry Logs for Admin Dashboard
-exports.getApiLogs = (req, res) => {
+exports.getApiLogs = async (req, res) => {
   try {
-    const logs = multiProviderService.getApiLogs();
+    const logs = await multiProviderService.getApiLogs();
     res.json({ logs });
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve API telemetry logs: ' + err.message });

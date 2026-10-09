@@ -4334,13 +4334,7 @@ function renderAdminTransactions(container) {
   const activeFilter = AtomXState.transactionsFilter || 'All';
   const searchQuery = (AtomXState.transactionsSearchQuery || '').toLowerCase().trim();
 
-  let allTx = (AtomXState.adminTransactions && AtomXState.adminTransactions.length > 0)
-    ? AtomXState.adminTransactions
-    : [
-        { id: 'tx_seed_1', date: 'Oct 08, 2026, 02:15 PM', user: 'Evan Jawad', handle: '@evanjawadx', email: 'evan@atomx.io', type: 'Plan Purchase', item: 'Growth Plan', credits: 10000, amount: '$12.00', method: 'Stripe Card', status: 'COMPLETED' },
-        { id: 'tx_seed_2', date: 'Oct 07, 2026, 11:30 AM', user: 'Alex Rivera', handle: '@alex_eth', email: 'alex@defi.io', type: 'Plan Purchase', item: 'Pro Plan', credits: 25000, amount: '$29.00', method: 'Crypto USDT', status: 'COMPLETED' },
-        { id: 'tx_seed_3', date: 'Oct 06, 2026, 04:45 PM', user: 'Sarah Chen', handle: '@sarahc_ai', email: 'sarah@alphatech.ai', type: 'Credit Top-Up', item: '10,000 Credits Pack', credits: 10000, amount: '$10.00', method: 'Stripe Card', status: 'COMPLETED' }
-      ];
+  let allTx = Array.isArray(AtomXState.adminTransactions) ? AtomXState.adminTransactions : [];
 
   // Revenue & transaction metrics
   const totalRev = allTx.reduce((sum, t) => sum + (parseFloat(String(t.amount || '$0').replace(/[^0-9.]/g, '')) || 0), 0);

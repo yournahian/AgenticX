@@ -1076,6 +1076,7 @@ function initListeners() {
   // 1-to-1 Verified Account & In-Extension Request Access Flow
   document.getElementById('extSubmitRequestBtn')?.addEventListener('click', handleExtSubmitRequest);
   document.getElementById('extCheckStatusBtn')?.addEventListener('click', () => handleExtCheckStatus(true));
+  document.getElementById('extCheckApprovalStatusPromptBtn')?.addEventListener('click', handleExtPromptCheckApprovalStatus);
   document.getElementById('extEditRequestBtn')?.addEventListener('click', () => showAccessSubView('request'));
   document.getElementById('extGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extGoToRequestLink')?.addEventListener('click', () => showAccessSubView('request'));
@@ -4427,6 +4428,51 @@ async function handleExtSubmitRequest() {
 }
 
 /**
+ * Prompt Returning User to Check Approval Status & Set Password
+ */
+async function handleExtPromptCheckApprovalStatus() {
+  const inputHandle = document.getElementById('extReqHandleInput')?.value.trim();
+  const inputEmail = document.getElementById('extReqEmailInput')?.value.trim();
+
+  let targetHandle = state.pendingRequest?.handle || inputHandle || '';
+  let targetEmail = state.pendingRequest?.email || inputEmail || '';
+
+  if (!targetHandle && !targetEmail) {
+    const entered = prompt('Please enter your Twitter / X Handle (e.g. @yourhandle) or Email:');
+    if (!entered || !entered.trim()) return;
+    const clean = entered.trim();
+    if (clean.includes('@') && clean.includes('.')) {
+      targetEmail = clean;
+    } else {
+      targetHandle = clean.startsWith('@') ? clean : `@${clean}`;
+    }
+  }
+
+  // Prepopulate state.pendingRequest so the user status is remembered locally
+  if (!state.pendingRequest) {
+    state.pendingRequest = {
+      handle: targetHandle || '@user',
+      email: targetEmail || '',
+      status: 'PENDING',
+      requestedAt: Date.now()
+    };
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      await chrome.storage.local.set({ pendingRequest: state.pendingRequest });
+    }
+  }
+
+  const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
+  const pHandleText = document.getElementById('extPendingHandleText');
+  const pEmailText = document.getElementById('extPendingEmailText');
+  if (pHandleDisplay) pHandleDisplay.textContent = targetHandle || state.pendingRequest.handle;
+  if (pHandleText) pHandleText.textContent = targetHandle || state.pendingRequest.handle;
+  if (pEmailText) pEmailText.textContent = targetEmail || state.pendingRequest.email || '--';
+
+  showAccessSubView('pending');
+  await handleExtCheckStatus(true);
+}
+
+/**
  * Check Admin Approval Status (Manual or Background)
  */
 async function handleExtCheckStatus(isManual = false) {
@@ -4467,6 +4513,11 @@ async function handleExtCheckStatus(isManual = false) {
       }
     } else if (data.status === 'REJECTED') {
       alert(`⚠️ Request Notice:\n${data.reason || 'Your access request was declined by the administrator.'}`);
+    } else if (data.status === 'NOT_FOUND') {
+      if (isManual) {
+        alert(`❌ No Request Found:\n\nNo request found for "${targetHandle || targetEmail}".\nPlease fill out the form below to submit a new request.`);
+        showAccessSubView('request');
+      }
     } else {
       if (isManual) {
         alert(`⏳ Still Pending:\n\nYour request for ${targetHandle} is currently awaiting admin approval in the dashboard.\nPlease check back shortly.`);
@@ -4848,14 +4899,24 @@ async function handleGenerateReply() {
   let replyText = '';
   try {
     const backendUrl = await getBackendUrl();
+    const curHandle = state.verifiedXHandle || state.user?.handle || '@user';
+    const curEmail = state.user?.email || '';
+    const curUserId = state.user?.id || null;
     const response = await fetch(`${backendUrl}/api/generate-reply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-user-handle': curHandle,
+        'x-user-id': curUserId ? String(curUserId) : '1'
+      },
       body: JSON.stringify({
         tweetText: tweetInput,
         tweetAuthor: author,
         style: tone,
-        stylePrompt: state.selectedTonePrompt
+        stylePrompt: state.selectedTonePrompt,
+        userHandle: curHandle,
+        userEmail: curEmail,
+        userId: curUserId
       })
     });
 
@@ -5073,16 +5134,26 @@ async function handleAutoReplyEngage() {
   try {
     const backendUrl = await getBackendUrl();
     let replyText = '';
+    const curHandle = state.verifiedXHandle || state.user?.handle || '@user';
+    const curEmail = state.user?.email || '';
+    const curUserId = state.user?.id || null;
 
     if (actions.comment) {
       const resp = await fetch(`${backendUrl}/api/generate-reply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-handle': curHandle,
+          'x-user-id': curUserId ? String(curUserId) : '1'
+        },
         body: JSON.stringify({
           tweetText: rawText || (targetUrl || 'https://x.com'),
           tweetAuthor: author,
           style: state.selectedTone,
-          stylePrompt: state.selectedTonePrompt
+          stylePrompt: state.selectedTonePrompt,
+          userHandle: curHandle,
+          userEmail: curEmail,
+          userId: curUserId
         })
       });
 

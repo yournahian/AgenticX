@@ -2094,15 +2094,29 @@ async function engageAndFollowProfile(options = {}) {
         // Direct fetch fallback if background worker failed
         if (!commentToPost) {
           try {
+            const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
+              ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}))
+              : {};
+            const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
+            const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
+            const uId = stored?.currentUser?.id || stored?.user?.id || null;
+
             const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-user-handle': uHandle,
+                'x-user-id': uId ? String(uId) : '1'
+              },
               body: JSON.stringify({
                 tweetText,
                 tweetAuthor: authorHandle,
                 tweetAuthorName: authorName,
                 style,
-                stylePrompt
+                stylePrompt,
+                userHandle: uHandle,
+                userEmail: uEmail,
+                userId: uId
               })
             });
             if (directRes.ok) {
@@ -2740,14 +2754,28 @@ async function executeReciprocalProfileEngagement(params = {}) {
 
     if (!replyText) {
       try {
+        const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
+          ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}))
+          : {};
+        const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
+        const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
+        const uId = stored?.currentUser?.id || stored?.user?.id || null;
+
         const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-user-handle': uHandle,
+            'x-user-id': uId ? String(uId) : '1'
+          },
           body: JSON.stringify({
             tweetText: tweetText || 'Great post!',
             tweetAuthor: `@${targetHandle}`,
             style,
-            stylePrompt
+            stylePrompt,
+            userHandle: uHandle,
+            userEmail: uEmail,
+            userId: uId
           })
         }).then(r => r.json()).catch(() => null);
         if (directRes?.reply) replyText = directRes.reply.trim();

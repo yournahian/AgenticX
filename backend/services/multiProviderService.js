@@ -745,7 +745,7 @@ try {
   } catch (e) {}
 })();
 
-function addApiLog(entry) {
+async function addApiLog(entry) {
   const logItem = {
     id: Date.now() + '_' + Math.random().toString(36).substr(2, 4),
     timestamp: new Date().toLocaleTimeString(),
@@ -779,17 +779,55 @@ function addApiLog(entry) {
   try {
     const supabase = require('../config/supabase');
     if (supabase) {
-      supabase.from('plans').upsert({
+      await supabase.from('plans').upsert({
         id: 'system_telemetry_logs',
         name: 'System Telemetry Logs',
         features: recentApiLogs.slice(0, 50)
-      }).then(() => {}).catch(() => {});
+      });
     }
   } catch (e) {}
 }
 
-function getApiLogs() {
-  return recentApiLogs;
+async function getApiLogs() {
+  if (recentApiLogs && recentApiLogs.length > 0) {
+    return recentApiLogs;
+  }
+
+  // 1. Check /tmp
+  if (fs.existsSync(tmpLogsPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(tmpLogsPath, 'utf8'));
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        recentApiLogs = parsed;
+        return recentApiLogs;
+      }
+    } catch (e) {}
+  }
+
+  // 2. Fetch reliably from Supabase
+  try {
+    const supabase = require('../config/supabase');
+    if (supabase) {
+      const { data } = await supabase.from('plans').select('features').eq('id', 'system_telemetry_logs').maybeSingle();
+      if (data && Array.isArray(data.features) && data.features.length > 0) {
+        recentApiLogs = data.features;
+        return recentApiLogs;
+      }
+    }
+  } catch (e) {}
+
+  // 3. Fallback to local file
+  if (fs.existsSync(LOGS_FILE)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        recentApiLogs = parsed;
+        return recentApiLogs;
+      }
+    } catch (e) {}
+  }
+
+  return recentApiLogs || [];
 }
 
 async function testAllProviderKeys() {
