@@ -2275,9 +2275,14 @@ async function initAudienceBuilderSystem() {
   // 2. Fetch live curated lists from Backend API in background and refresh dropdowns
   try {
     const backendUrl = await getBackendUrl();
-    const res = await fetch(`${backendUrl}/api/curated-lists`);
-    if (res.ok) {
-      const data = await res.json();
+    let res = await fetch(`${backendUrl}/api/curated-lists`, { cache: 'no-cache' }).catch(() => null);
+    if (!res || !res.ok) {
+      if (backendUrl !== DEFAULT_BACKEND_URL) {
+        res = await fetch(`${DEFAULT_BACKEND_URL}/api/curated-lists`, { cache: 'no-cache' }).catch(() => null);
+      }
+    }
+    if (res && res.ok) {
+      const data = await res.json().catch(() => null);
       if (data && data.lists && Object.keys(data.lists).length > 0) {
         state.curatedLists = data.lists;
         if (typeof chrome !== 'undefined' && chrome.storage?.local) {
@@ -2290,7 +2295,7 @@ async function initAudienceBuilderSystem() {
       }
     }
   } catch (e) {
-    console.warn('[ATOMX] Could not sync curated lists from backend, using cache/fallback', e);
+    // Graceful fallback to cached / local curated lists without noisy error logs
   }
 
   // 3. Restore persisted counters, settings & queue state
@@ -5888,10 +5893,14 @@ function sleep(ms) {
 async function getBackendUrl() {
   let url = DEFAULT_BACKEND_URL;
   if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-    const res = await chrome.storage.sync.get(['backendUrl']);
-    if (res.backendUrl) url = res.backendUrl;
+    try {
+      const res = await chrome.storage.sync.get(['backendUrl']);
+      if (res.backendUrl && !res.backendUrl.includes('localhost') && !res.backendUrl.includes('127.0.0.1')) {
+        url = res.backendUrl;
+      }
+    } catch(e) {}
   }
-  return (url || '').replace(/\/+$/, '');
+  return (url || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
 }
 
 // Live 15-second status watchdog while extension popup is active: locks immediately if admin suspends user
