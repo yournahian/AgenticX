@@ -216,24 +216,44 @@ exports.createTransaction = async (req, res) => {
 const plansPath = path.join(__dirname, '../data/plans.json');
 const tmpPlansPath = path.join('/tmp', 'plans.json');
 let inMemoryPlans = null;
+let inMemoryFoundingOffer = null;
 
 exports.getPlans = async (req, res) => {
   try {
     if (inMemoryPlans) {
-      return res.json({ plans: inMemoryPlans });
+      return res.json({ plans: inMemoryPlans, foundingOffer: inMemoryFoundingOffer });
+    }
+    // Try Supabase first
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('plans').select('features').eq('id', 'system_admin_plans').maybeSingle();
+        if (!error && data && data.features) {
+          const loadedPlans = Array.isArray(data.features.plans) ? data.features.plans : (Array.isArray(data.features) ? data.features : null);
+          const loadedOffer = data.features.foundingOffer || null;
+          if (loadedPlans) {
+            inMemoryPlans = loadedPlans;
+            inMemoryFoundingOffer = loadedOffer;
+            return res.json({ plans: loadedPlans, foundingOffer: loadedOffer });
+          }
+        }
+      } catch (e) {}
     }
     if (fs.existsSync(tmpPlansPath)) {
       try {
-        const data = JSON.parse(fs.readFileSync(tmpPlansPath, 'utf8'));
+        const raw = JSON.parse(fs.readFileSync(tmpPlansPath, 'utf8'));
+        const data = Array.isArray(raw) ? raw : (raw.plans || []);
         inMemoryPlans = data;
-        return res.json({ plans: data });
+        inMemoryFoundingOffer = raw.foundingOffer || null;
+        return res.json({ plans: data, foundingOffer: inMemoryFoundingOffer });
       } catch (e) {}
     }
     if (fs.existsSync(plansPath)) {
       try {
-        const data = JSON.parse(fs.readFileSync(plansPath, 'utf8'));
+        const raw = JSON.parse(fs.readFileSync(plansPath, 'utf8'));
+        const data = Array.isArray(raw) ? raw : (raw.plans || []);
         inMemoryPlans = data;
-        return res.json({ plans: data });
+        inMemoryFoundingOffer = raw.foundingOffer || null;
+        return res.json({ plans: data, foundingOffer: inMemoryFoundingOffer });
       } catch (e) {}
     }
     // Fallback to db or default plans
@@ -243,7 +263,7 @@ exports.getPlans = async (req, res) => {
       { id: 'pro', name: 'PRO', credits: 25000, price: 29, popular: false, offerBadge: 'BEST VALUE', features: ['25,000 AI replies', 'Premium AI models', 'Advanced agents', 'Priority generation', 'Advanced analytics'] }
     ];
     inMemoryPlans = defaultPlans;
-    res.json({ plans: defaultPlans });
+    res.json({ plans: defaultPlans, foundingOffer: inMemoryFoundingOffer });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -251,20 +271,38 @@ exports.getPlans = async (req, res) => {
 
 exports.savePlans = async (req, res) => {
   try {
-    const { plans } = req.body;
+    const { plans, foundingOffer } = req.body;
     if (!Array.isArray(plans)) {
       return res.status(400).json({ error: 'Plans array is required' });
     }
     inMemoryPlans = plans;
+    if (foundingOffer) inMemoryFoundingOffer = foundingOffer;
+
+    const payload = { plans, foundingOffer: inMemoryFoundingOffer };
+
+    // 1. Supabase persistence
+    if (supabase) {
+      try {
+        await supabase.from('plans').upsert({
+          id: 'system_admin_plans',
+          name: 'System Admin Plans Config',
+          features: payload
+        });
+      } catch (dbErr) {
+        console.warn('Could not upsert plans in Supabase:', dbErr.message);
+      }
+    }
+
+    // 2. File fallback
     try {
       fs.mkdirSync(path.dirname(plansPath), { recursive: true });
-      fs.writeFileSync(plansPath, JSON.stringify(plans, null, 2), 'utf8');
+      fs.writeFileSync(plansPath, JSON.stringify(payload, null, 2), 'utf8');
     } catch (fsErr) {
       try {
-        fs.writeFileSync(tmpPlansPath, JSON.stringify(plans, null, 2), 'utf8');
+        fs.writeFileSync(tmpPlansPath, JSON.stringify(payload, null, 2), 'utf8');
       } catch (tmpErr) {}
     }
-    res.json({ message: 'Plans and pricing offers updated successfully!', plans });
+    res.json({ message: 'Plans and pricing offers updated successfully!', plans, foundingOffer: inMemoryFoundingOffer });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save plans: ' + err.message });
   }
@@ -284,6 +322,21 @@ exports.getStats = async (req, res) => {
     const users = await db.getAllUsers();
     const requests = await db.getAccessRequests();
     const ledger = await db.getAllLedger();
+    const transactions = await db.getTransactions();
+
+    // Calculate real MRR from active paid user plan tiers
+    const mrrTotal = users.filter(u => u.status === 'ACTIVE' && u.plan_tier && !u.plan_tier.toLowerCase().includes('free')).reduce((sum, u) => {
+      const tier = (u.plan_tier || '').toLowerCase();
+      if (tier.includes('enterprise')) return sum + 99;
+      if (tier.includes('pro')) return sum + 29;
+      if (tier.includes('growth')) return sum + 12;
+      return sum + 12;
+    }, 0);
+
+    const totalRevenue = transactions.reduce((sum, t) => {
+      const val = parseFloat(String(t.amount || '$0').replace(/[^0-9.]/g, '')) || 0;
+      return sum + val;
+    }, 0);
 
     res.json({
       totalUsers: users.length,
@@ -291,8 +344,9 @@ exports.getStats = async (req, res) => {
       suspendedUsers: users.filter(u => u.status === 'SUSPENDED').length,
       pendingRequests: requests.filter(r => r.status === 'PENDING').length,
       totalCreditsCirculating: users.reduce((acc, u) => acc + (u.credits || 0), 0),
-      totalAIGenerations: ledger.filter(l => l.action === 'AI Reply').length,
-      mrr: '$0'
+      totalAIGenerations: ledger.filter(l => (l.action || '').toLowerCase().includes('reply')).length,
+      mrr: `$${mrrTotal}`,
+      revenue: `$${totalRevenue.toFixed(0)}`
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -716,7 +770,66 @@ exports.wipeAllUsers = async (req, res) => {
 exports.getReferrals = async (req, res) => {
   try {
     const referralService = require('../services/referralService');
-    const referrals = referralService.getAllReferrals();
+    let referrals = referralService.getAllReferrals();
+
+    // If no explicit referral records, dynamically construct from users and accessRequests with referral attribution
+    if (!referrals || referrals.length === 0) {
+      const users = await db.getAllUsers();
+      const requests = await db.getAccessRequests();
+      const derived = [];
+
+      // Check registered users
+      users.forEach(u => {
+        const refBy = u.referred_by || (u.use_case && u.use_case.match(/REF:(@?[\w_]+)/i) ? u.use_case.match(/REF:(@?[\w_]+)/i)[1] : null);
+        if (refBy && refBy !== 'Direct / —' && refBy !== 'Direct') {
+          const cleanRef = refBy.startsWith('@') ? refBy : `@${refBy}`;
+          derived.push({
+            id: `ref_u_${u.id}`,
+            referrer_handle: cleanRef,
+            referee_handle: u.handle || `@${u.email.split('@')[0]}`,
+            referee_name: u.full_name || u.name || 'User',
+            referee_email: u.email,
+            status: u.status === 'ACTIVE' ? 'APPROVED' : 'PENDING',
+            referrer_reward: 150,
+            referee_reward: 150,
+            created_at: u.created_at || new Date().toISOString(),
+            approved_at: u.status === 'ACTIVE' ? (u.created_at || new Date().toISOString()) : null,
+            first_purchase_status: u.plan_tier && !u.plan_tier.toLowerCase().includes('free') ? 'PAID' : 'NONE',
+            first_purchase_amount: u.plan_tier && u.plan_tier.toLowerCase().includes('pro') ? 29 : (u.plan_tier && u.plan_tier.toLowerCase().includes('growth') ? 12 : 0),
+            purchase_reward_credits: u.plan_tier && !u.plan_tier.toLowerCase().includes('free') ? 1200 : 0
+          });
+        }
+      });
+
+      // Check pending requests
+      requests.forEach(r => {
+        const refBy = r.referred_by || (r.use_case && r.use_case.match(/REF:(@?[\w_]+)/i) ? r.use_case.match(/REF:(@?[\w_]+)/i)[1] : null);
+        if (refBy && refBy !== 'Direct / —' && refBy !== 'Direct') {
+          const cleanRef = refBy.startsWith('@') ? refBy : `@${refBy}`;
+          if (!derived.some(d => d.referee_handle === r.handle || d.referee_email === r.email)) {
+            derived.push({
+              id: `ref_r_${r.id}`,
+              referrer_handle: cleanRef,
+              referee_handle: r.handle || `@${r.email.split('@')[0]}`,
+              referee_name: r.full_name || r.name || 'Applicant',
+              referee_email: r.email,
+              status: 'PENDING',
+              referrer_reward: 150,
+              referee_reward: 150,
+              created_at: r.created_at || new Date().toISOString(),
+              approved_at: null,
+              first_purchase_status: 'NONE',
+              first_purchase_amount: 0,
+              purchase_reward_credits: 0
+            });
+          }
+        }
+      });
+
+      if (derived.length > 0) {
+        referrals = derived;
+      }
+    }
 
     const totalReferrals = referrals.length;
     const approvedReferrals = referrals.filter(r => r.status === 'APPROVED').length;
@@ -741,10 +854,12 @@ exports.getReferrals = async (req, res) => {
 };
 
 // Special Promotional Offers (FOUNDING 100 / FIRST LAUNCH)
-exports.getOffer = (req, res) => {
+exports.getOffer = async (req, res) => {
   try {
     const offerService = require('../services/offerService');
-    const offer = offerService.getCurrentOffer();
+    const users = await db.getAllUsers();
+    const paidCount = users.filter(u => u.plan_tier && !u.plan_tier.toLowerCase().includes('free')).length;
+    const offer = offerService.getCurrentOffer(paidCount);
     res.json(offer);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch promotional offer: ' + err.message });

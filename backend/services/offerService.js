@@ -1,16 +1,22 @@
 /**
- * ATOMX ENGAGE — PROMOTIONAL OFFERS SERVICE
+ * ATOMX ENGAGE — PROMOTIONAL OFFERS SERVICE (CLOUD & LOCAL PERSISTENT)
  * Handles "FIRST LAUNCH OFFER" / "FOUNDING 100" with countdown timers and admin controls
  */
 
 const fs = require('fs');
 const path = require('path');
+const supabase = require('../config/supabase');
 
 const OFFERS_FILE = path.join(__dirname, '../data/specialOffers.json');
+const TMP_OFFERS_FILE = path.join('/tmp', 'specialOffers.json');
+
+let inMemoryOffer = null;
 
 function ensureDataDir() {
-  const dir = path.dirname(OFFERS_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  try {
+    const dir = path.dirname(OFFERS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {}
 }
 
 function getDefaultOffer() {
@@ -40,25 +46,65 @@ function getDefaultOffer() {
 }
 
 function loadOffer() {
-  ensureDataDir();
+  if (inMemoryOffer) return inMemoryOffer;
+
   try {
-    if (fs.existsSync(OFFERS_FILE)) {
-      const raw = fs.readFileSync(OFFERS_FILE, 'utf8');
-      return JSON.parse(raw);
+    if (fs.existsSync(TMP_OFFERS_FILE)) {
+      inMemoryOffer = JSON.parse(fs.readFileSync(TMP_OFFERS_FILE, 'utf8'));
+      return inMemoryOffer;
     }
   } catch (e) {}
+
+  try {
+    if (fs.existsSync(OFFERS_FILE)) {
+      inMemoryOffer = JSON.parse(fs.readFileSync(OFFERS_FILE, 'utf8'));
+      return inMemoryOffer;
+    }
+  } catch (e) {}
+
   const def = getDefaultOffer();
+  inMemoryOffer = def;
   saveOffer(def);
   return def;
 }
 
 function saveOffer(offer) {
-  ensureDataDir();
-  fs.writeFileSync(OFFERS_FILE, JSON.stringify(offer, null, 2), 'utf8');
+  inMemoryOffer = offer;
+
+  // 1. Supabase persistence
+  if (supabase) {
+    try {
+      supabase.from('plans').upsert({
+        id: 'system_special_offer',
+        name: 'Special Offer Config',
+        features: offer
+      }).then(() => {}).catch(() => {});
+    } catch (e) {}
+  }
+
+  // 2. Safe file writes
+  try {
+    fs.writeFileSync(TMP_OFFERS_FILE, JSON.stringify(offer, null, 2), 'utf8');
+  } catch (e) {}
+
+  try {
+    ensureDataDir();
+    fs.writeFileSync(OFFERS_FILE, JSON.stringify(offer, null, 2), 'utf8');
+  } catch (e) {}
+}
+
+// Preload from Supabase
+if (supabase) {
+  supabase.from('plans').select('features').eq('id', 'system_special_offer').maybeSingle()
+    .then(({ data, error }) => {
+      if (!error && data && data.features) {
+        inMemoryOffer = data.features;
+      }
+    }).catch(() => {});
 }
 
 module.exports = {
-  getCurrentOffer() {
+  getCurrentOffer(realClaimedCount = null) {
     const offer = loadOffer();
     const now = Date.now();
     const expiryTime = new Date(offer.expiresAt).getTime();
@@ -66,6 +112,7 @@ module.exports = {
 
     return {
       ...offer,
+      claimedUsers: realClaimedCount !== null ? realClaimedCount : (offer.claimedUsers || 0),
       isExpired,
       secondsRemaining: Math.max(0, Math.floor((expiryTime - now) / 1000))
     };
