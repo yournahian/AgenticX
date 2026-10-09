@@ -82,8 +82,8 @@
         <span class="tab-text">Agents</span>
       </button>
       <button class="tab-btn" data-tab="reply">
-        <span class="tab-icon">💬</span>
-        <span class="tab-text">Reply</span>
+        <span class="tab-icon">🎭</span>
+        <span class="tab-text">Tone & Style</span>
       </button>
       <button class="tab-btn" data-tab="safety">
         <span class="tab-icon">🛡️</span>
@@ -327,13 +327,10 @@
                 </div>
               </div>
 
-              <!-- Tone & Style Selector for Telegram Agent -->
-              <div style="margin: 6px 0; padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 11px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 4px;">
-                  <span style="font-weight: 700; color: var(--text-primary);">AI Comment Style:</span>
-                  <span id="tgActiveToneName" style="color: var(--blue-primary); font-weight: 700;">Bullish (5-10 words)</span>
-                </div>
-                <div id="tgTonePillsRow" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;"></div>
+              <!-- Tone & Style for Telegram Agent (Global Voice) -->
+              <div style="margin: 6px 0; padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 11px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight: 700; color: var(--text-primary);">AI Comment Style:</span>
+                <span id="tgActiveToneName" style="color: var(--blue-primary); font-weight: 700;">Global Voice Active</span>
               </div>
 
               <!-- Link Parser & Filter Live Feedback Card -->
@@ -529,29 +526,35 @@
                 <strong>Airdrop & Reputation Engine:</strong> Interacts with verified high-weight ecosystem accounts to maximize your Sorsa ranking multiplier for airdrop tiers and paid promotions.
               </div>
 
-              <!-- Tier Selection -->
+              <!-- Tier / Source Selection -->
               <div>
                 <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
-                  <span>Target Ecosystem Tier</span>
+                  <span>Target Ecosystem Tier / Custom List</span>
                   <span class="badge-mini popular" style="font-size:9px;">3X MULTIPLIER</span>
                 </label>
                 <select id="sorsaTierSelect" class="ext-select">
                   <option value="sorsaTier1" selected>⭐ Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
                   <option value="sorsaTier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
+                  <option value="custom">➕ Add Your Own Custom Twitter List URL</option>
                 </select>
+                <div id="customSorsaListUrlBox" style="display:none; margin-top:6px;">
+                  <input type="text" id="customSorsaListUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...)">
+                </div>
                 <div style="font-size:10.5px; color:var(--text-muted); margin-top:4px;">
                   Includes: @cz_binance, @brian_armstrong, @aeyakovenko, @vitalikbuterin, @ethereum
                 </div>
               </div>
 
-              <!-- Action & Tone Selectors -->
+              <!-- Pacing, Deduplication & Accounts Controls -->
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
-                  <label class="opt-label">Engagement Tone</label>
-                  <select id="sorsaToneSelect" class="ext-select">
-                    <option value="technical" selected>Technical Alpha</option>
-                    <option value="professional">Professional Operator</option>
-                    <option value="bullish">Bullish & Supportive</option>
+                  <label class="opt-label">Deduplication / Cool-Off</label>
+                  <select id="sorsaCooloffSelect" class="ext-select">
+                    <option value="24" selected>24 Hours (Skip engaged)</option>
+                    <option value="12">12 Hours</option>
+                    <option value="48">48 Hours</option>
+                    <option value="168">7 Days</option>
+                    <option value="99999">Always Skip (Permanent)</option>
                   </select>
                 </div>
                 <div>
@@ -562,6 +565,11 @@
                     <option value="15">15 Accounts (Max)</option>
                   </select>
                 </div>
+              </div>
+
+              <div style="padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:700; color:var(--text-primary);">AI Comment Style:</span>
+                <span id="sorsaActiveToneLabel" style="color:var(--blue-primary); font-weight:700;">Global Voice Active</span>
               </div>
 
               <!-- Action Checkboxes -->
@@ -624,36 +632,32 @@
                 <strong>100% Autonomous Organic Growth:</strong> Zero manual links needed. The bot identifies busy discussion threads in your niche, extracts engaged commenters, and engages to maximize follow-backs.
               </div>
 
-              <!-- Niche & Strategy Controls -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Target Community Niche</label>
-                  <select id="followerNicheSelect" class="ext-select">
-                    <option value="crypto" selected>🌐 Crypto & Web3 Discussions</option>
-                    <option value="ai">🤖 AI Agents & Tech</option>
-                    <option value="founders">🚀 Startups & Founders</option>
-                    <option value="solana">⚡ Solana Ecosystem</option>
-                    <option value="followerList1">⭐ Viral Community Discussion Hubs (Curated)</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="opt-label">Comment Strategy</label>
-                  <select id="followerStratSelect" class="ext-select">
-                    <option selected>High-Resonance Insights</option>
-                    <option>Discussion Starter</option>
-                    <option>Early Mover Advantage</option>
-                  </select>
+              <!-- Niche / List Source Selection -->
+              <div>
+                <label class="opt-label">Target Niche Feed or Twitter List</label>
+                <select id="followerNicheSelect" class="ext-select">
+                  <option value="crypto" selected>🌐 Crypto & Web3 Discussions (Live Feed)</option>
+                  <option value="ai">🤖 AI Agents & Tech (Live Feed)</option>
+                  <option value="founders">🚀 Startups & Founders (Live Feed)</option>
+                  <option value="solana">⚡ Solana Ecosystem (Live Feed)</option>
+                  <option value="followerList1">⭐ List 1: Web3 & Crypto Alpha Hunters (Curated List)</option>
+                  <option value="followerList2">⭐ List 2: Tech Founders & Angel VCs (Curated List)</option>
+                  <option value="custom">➕ Add Your Own Custom Twitter List or Search URL</option>
+                </select>
+                <div id="customFollowerUrlBox" style="display:none; margin-top:6px;">
+                  <input type="text" id="customFollowerUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...) or Search URL">
                 </div>
               </div>
 
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
-                  <label class="opt-label">Profiles to Collect</label>
+                  <label class="opt-label">Accounts to Target (N)</label>
                   <select id="followerDailyTargetSelect" class="ext-select">
-                    <option value="8" selected>8 Profiles (Safe Pacing)</option>
-                    <option value="15">15 Profiles</option>
-                    <option value="25">25 Profiles</option>
-                    <option value="50">50 Profiles (Bulk)</option>
+                    <option value="5">5 Accounts</option>
+                    <option value="8" selected>8 Accounts (Safe Pacing)</option>
+                    <option value="15">15 Accounts</option>
+                    <option value="25">25 Accounts</option>
+                    <option value="50">50 Accounts (Bulk)</option>
                   </select>
                 </div>
                 <div>
@@ -664,6 +668,12 @@
                     <option value="25">25s (Ultra Safe)</option>
                   </select>
                 </div>
+              </div>
+
+              <!-- Global AI Tone indicator -->
+              <div style="padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:700; color:var(--text-primary);">AI Comment Style:</span>
+                <span id="followerActiveToneLabel" style="color:var(--blue-primary); font-weight:700;">Global Voice Active</span>
               </div>
 
               <!-- Live Progress Card for Followers Increase -->
@@ -872,41 +882,42 @@
                 </div>
               </div>
 
-              <!-- Score Threshold & Target Limit -->
+              <!-- Score Threshold & Custom Target Limit -->
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
                   <label class="opt-label">Score Threshold</label>
                   <input type="number" id="unfollowScoreThresholdInput" class="ext-input" value="30" min="5" max="100" placeholder="e.g. 30">
                 </div>
                 <div>
-                  <label class="opt-label">Target Limit (Max 2000)</label>
-                  <select id="unfollowMaxCount" class="ext-select">
-                    <option value="25" selected>25 Accounts</option>
-                    <option value="50">50 Accounts</option>
-                    <option value="100">100 Accounts</option>
-                    <option value="250">250 Accounts</option>
-                    <option value="500">500 Accounts</option>
-                    <option value="1000">1000 Accounts</option>
-                    <option value="2000">2000 Accounts (Max)</option>
-                  </select>
+                  <label class="opt-label">Target Limit (Accounts)</label>
+                  <input type="number" id="unfollowMaxCountInput" class="ext-input" value="25" min="1" max="2000" placeholder="e.g. 25 Accounts">
                 </div>
               </div>
 
-              <!-- Pacing & Delays -->
+              <!-- Custom Pacing & Batch Breaks -->
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
                   <label class="opt-label">Delay Per Unfollow</label>
-                  <select id="unfollowDelaySelect" class="ext-select">
-                    <option value="18" selected>15 - 20s (Default Safe)</option>
-                    <option value="14">12 - 15s (Faster)</option>
-                    <option value="25">20 - 25s (Ultra Conservative)</option>
-                  </select>
+                  <div style="display:flex; align-items:center; gap:4px;">
+                    <input type="number" id="unfollowCustomDelayInput" class="ext-input" value="15" min="3" max="120" placeholder="15">
+                    <span style="font-size:11px; color:var(--text-muted);">sec</span>
+                  </div>
                 </div>
                 <div>
-                  <label class="opt-label">Long Break Rule</label>
-                  <div style="font-size:10.5px; color:var(--text-muted); padding:8px; background:var(--bg-canvas); border-radius:6px; border:1px solid var(--border-subtle); line-height:1.3;">
-                    ☕ 2 min break every 16 unfollows
+                  <label class="opt-label">Batch Break Every</label>
+                  <div style="display:flex; align-items:center; gap:4px;">
+                    <input type="number" id="unfollowBatchCountInput" class="ext-input" value="15" min="2" max="100" placeholder="15">
+                    <span style="font-size:11px; color:var(--text-muted);">unfollows</span>
                   </div>
+                </div>
+              </div>
+
+              <div>
+                <label class="opt-label">Batch Break Duration</label>
+                <div style="display:flex; align-items:center; gap:6px; background:var(--bg-card); padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle); font-size:11px;">
+                  <span>☕ Pause for</span>
+                  <input type="number" id="unfollowBreakDurationInput" class="ext-input" value="60" min="5" max="600" style="width:65px; padding:3px 6px; font-size:11px; text-align:center;">
+                  <span>seconds after every batch</span>
                 </div>
               </div>
 
@@ -1229,14 +1240,10 @@
 
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
-                  <label class="opt-label">AI Reply Tone</label>
-                  <select id="reciprocatorToneSelect" class="ext-select">
-                    <option value="Natural & Concise" selected>Natural & Concise</option>
-                    <option value="Bullish">Bullish & Supportive</option>
-                    <option value="Founder Alpha">Founder / Operator Alpha</option>
-                    <option value="Friendly">Warm & Grateful</option>
-                    <option value="Engaging Question">Insightful Follow-up</option>
-                  </select>
+                  <label class="opt-label">Active AI Voice</label>
+                  <div style="padding:6px 8px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px; color:var(--blue-primary); font-weight:700;" id="reciprocatorActiveToneLabel">
+                    Global Voice Active
+                  </div>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:4px; margin-top:14px;">
                   <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
@@ -1317,32 +1324,24 @@
       <!-- TAB 2: AI REPLY (AUTOMATED + MULTI-LINK BATCH) -->
       <!-- ============================================== -->
       <section id="panel-reply" class="tab-panel">
-        <div class="card source-card" style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <!-- Header Info Card -->
+        <div class="card" style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
             <div style="display:flex; align-items:center; gap:6px;">
-              <span class="label" style="font-weight:700; font-size:12px;">Target Post(s)</span>
-              <span id="replyLinkCountChip" class="badge-mini" style="display:none; background:var(--blue-soft); color:var(--blue-primary); font-size:10px; font-weight:700;">1 Link</span>
+              <span style="font-size:16px;">🎭</span>
+              <span style="font-weight:700; font-size:13px; color:var(--text-primary);">Global Comment Tone & Style</span>
             </div>
-            <button class="detect-btn" id="detectActiveTweetBtn">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-              Detect on Page
-            </button>
+            <span class="badge-mini popular" style="font-size:9.5px; font-weight:700;">APPLIED TO ALL AGENTS</span>
           </div>
-          <div class="tweet-author-row" id="tweetAuthorRow" style="display:none;">
-            <span class="author-name" id="authorName">Creator</span>
-            <span class="author-handle" id="authorHandle">@handle</span>
-          </div>
-          <textarea id="targetTweetInput" class="ext-textarea" style="min-height:75px;" placeholder="Paste single tweet, tweet text, or MULTIPLE links/batch text (Telegram/X URLs)..."></textarea>
-          <div style="font-size:10px; color:var(--text-muted); margin-top:5px; display:flex; justify-content:space-between; align-items:center;">
-            <span>💡 Multiple links supported — auto filters & dedupes</span>
-            <span id="replyDetectedSummary" style="font-weight:600; color:var(--blue-primary);"></span>
+          <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+            The voice selected here is followed uniformly by all 10 autonomous agents (Telegram Raid, Audience Builder, Sorsa Booster, Followers Growth, Commenter Reciprocator, and Reply Back Loop).
           </div>
         </div>
 
-        <!-- Tone & Style (Global Active System) -->
+        <!-- Tone Selector Pills -->
         <div class="controls-row" style="margin-top:10px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <div class="control-label" style="margin-bottom:0; font-size:11px; font-weight:700;">Tone & Style (Applied Globally)</div>
+            <div class="control-label" style="margin-bottom:0; font-size:11px; font-weight:700;">Select Global Voice Preset</div>
             <button type="button" id="openCustomToneBtn" style="font-size:11px; color:var(--blue-primary); background:none; border:none; cursor:pointer; font-weight:700; padding:0;">+ Custom Style</button>
           </div>
           <div class="tone-pills" id="tonePills" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
@@ -1362,80 +1361,25 @@
           </div>
         </div>
 
-        <!-- Automation Action Checkboxes for Reply -->
-        <div class="card" style="padding:10px 12px; margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-          <div style="font-size:11px; font-weight:700; margin-bottom:6px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.3px;">Automated Actions (Humanized Pacing)</div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11px;">
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="replyActLike" checked>
-              <span>Auto-Like ❤️</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="replyActComment" checked>
-              <span>Human Comment 💬</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="replyActRepost">
-              <span>Auto-Repost 🔁</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="replyActFollow">
-              <span>Auto-Follow ➕</span>
-            </label>
+        <!-- Active Tone Prompt Editor & Live Inspector -->
+        <div class="card" style="margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span class="label" style="font-weight:700; font-size:11.5px; color:var(--text-primary);">Active System Prompt</span>
+            <span id="globalActiveToneBadge" class="badge-mini" style="background:var(--blue-soft); color:var(--blue-primary); font-size:10.5px; font-weight:700;">Bullish (5-10 words)</span>
+          </div>
+          <textarea id="globalActiveTonePromptArea" class="ext-textarea" style="min-height:115px; font-family:monospace; font-size:11px; line-height:1.4; padding:8px;" placeholder="Prompt instructions for this tone..."></textarea>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+            <span style="font-size:10px; color:var(--text-muted);">Prompt syncs across all agents in real time.</span>
+            <button type="button" id="saveGlobalTonePromptBtn" class="primary-btn mini-btn" style="margin-top:0; font-size:11px; padding:5px 12px;">💾 Save Tone Prompt</button>
           </div>
         </div>
 
-        <!-- 1-Click Autonomous Action Buttons -->
-        <div style="display:flex; gap:8px; margin-top:10px;">
-          <button id="autoReplyEngageBtn" class="primary-btn" style="flex:1.4; background:linear-gradient(135deg, var(--blue-primary), #1B3EB0); font-weight:700;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            <span id="autoReplyEngageBtnText">🚀 1-Click Auto Reply & Engage</span>
-          </button>
-          <button id="stopReplyAutomationBtn" class="action-btn" style="display:none; flex:0.7; background:#DC2626; color:#FFF; font-weight:700; border:none; border-radius:var(--radius-sm); cursor:pointer;">
-            ⏹️ Stop
-          </button>
-          <button id="generateBtn" class="secondary-btn" style="flex:1; margin-top:0; padding:10px 8px; font-size:12px; font-weight:600;">
-            <span id="generateBtnText">Preview Only</span>
-            <span class="cost-tag" style="background:rgba(49,87,230,0.12); color:var(--blue-primary); margin-left:2px;">1 C</span>
-          </button>
-        </div>
-
-        <!-- Reply Automation Live Console Output -->
-        <div class="agent-console-card" id="replyConsoleCard" style="display:none; margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-          <div class="console-header" style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-bottom:1px solid var(--border-subtle);">
-            <div style="display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600;">
-              <span class="live-dot"></span>
-              <span id="replyConsoleStatus">Automating Engagement...</span>
-            </div>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <span id="replyConsoleBatchProgress" style="font-size:10px; color:var(--blue-primary); font-weight:700;"></span>
-              <button id="stopReplyConsoleBtn" style="background:#DC2626; color:#FFF; border:none; border-radius:4px; font-size:10px; font-weight:700; padding:2px 8px; cursor:pointer;">⏹️ Stop</button>
-            </div>
+        <!-- Rules & Zero Fallback Notice -->
+        <div class="card" style="margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:10px 12px; font-size:11px; color:var(--text-secondary); line-height:1.4;">
+          <div style="font-weight:700; color:var(--text-primary); margin-bottom:4px; display:flex; align-items:center; gap:5px;">
+            <span>🛡️</span> Zero Generic Fallback Guarantee
           </div>
-          <div class="console-body" id="replyConsoleOutput" style="padding:8px 10px; font-size:11px; color:var(--text-secondary); max-height:80px; overflow-y:auto;">Ready to automate.</div>
-        </div>
-
-        <!-- Result Card (Preview / Manual Controls) -->
-        <div class="card result-card" id="resultCard" style="display:none; margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
-          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <div class="status-chip success" style="font-size:11px; font-weight:600; color:var(--status-success);">
-              <span class="dot"></span> 98% Resonance
-            </div>
-            <div class="char-count" id="charCount" style="font-size:11px; color:var(--text-muted);">142 chars</div>
-          </div>
-          <textarea id="replyOutput" class="ext-textarea result-textarea" style="min-height:60px; font-size:12px;"></textarea>
-          
-          <div class="action-buttons-row" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
-            <button id="insertTweetBtn" class="action-btn primary-action" style="flex:1;">
-              ✍️ Type into X
-            </button>
-            <button id="autoPostReplyBtn" class="action-btn" style="flex:1.4; background:var(--blue-primary); color:#FFF; font-weight:700;">
-              🚀 Post Comment
-            </button>
-            <button id="copyReplyBtn" class="action-btn secondary-action" style="flex:0.8;">
-              Copy
-            </button>
-          </div>
+          <div>If the AI API fails (e.g. key issue, rate limit, provider outage), the extension will <strong>never post canned generic replies</strong> (like "Great perspective" or "Spot on"). It will directly display the error and safely skip or pause without wasting credits.</div>
         </div>
       </section>
 

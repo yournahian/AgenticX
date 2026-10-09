@@ -1407,6 +1407,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  // Agent 4: Followers Increase — Scrape top engaging accounts from live niche/list feed
+  if (message.type === 'COLLECT_ENGAGING_NICHE_PROFILES') {
+    collectEngagingNicheProfiles(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, profiles: [] }));
+    return true;
+  }
 });
 
 // Wait for element helper with timeout
@@ -2727,6 +2735,62 @@ async function executeLiveRaidEngagement(params = {}) {
     commented,
     commentText
   };
+}
+
+// =========================================================================
+// AGENT 4: COLLECT ENGAGING NICHE PROFILES (DYNAMIC DISCOVERY)
+// =========================================================================
+async function collectEngagingNicheProfiles(params = {}) {
+  isWorkflowAborted = false;
+  const targetCount = Number(params.targetCount || 8);
+  const maxScrolls = Number(params.maxScrolls || 6);
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
+  const foundMap = new Map();
+
+  for (let s = 0; s < maxScrolls; s++) {
+    if (isWorkflowAborted) break;
+
+    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    for (const art of articles) {
+      const userEl = art.querySelector('div[data-testid="User-Name"]');
+      if (!userEl) continue;
+      const link = userEl.querySelector('a[href^="/"]');
+      if (!link) continue;
+      const handle = (link.getAttribute('href') || '').replace(/^\//, '').split('?')[0].split('/')[0].toLowerCase().trim();
+      if (!handle || ['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(handle)) continue;
+      if (handle === loggedInHandle) continue;
+
+      let score = 1;
+      const likeBtn = art.querySelector('button[data-testid="like"], div[data-testid="like"]');
+      const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+      if (likeBtn) {
+        const txt = (likeBtn.innerText || '').replace(/[^0-9]/g, '');
+        if (txt) score += parseInt(txt, 10);
+      }
+      if (replyBtn) {
+        const txt = (replyBtn.innerText || '').replace(/[^0-9]/g, '');
+        if (txt) score += (parseInt(txt, 10) * 2);
+      }
+
+      const existing = foundMap.get(handle) || 0;
+      foundMap.set(handle, Math.max(existing, score));
+    }
+
+    if (foundMap.size >= targetCount * 2) break;
+    window.scrollBy({ top: 850, behavior: 'smooth' });
+    await sleep(1000);
+  }
+
+  const sorted = Array.from(foundMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, targetCount)
+    .map(([handle]) => ({
+      cleanHandle: handle,
+      handle: `@${handle}`,
+      name: handle
+    }));
+
+  return { success: true, profiles: sorted, totalFound: sorted.length };
 }
 
 // =========================================================================

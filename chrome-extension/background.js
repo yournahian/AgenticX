@@ -737,6 +737,51 @@ async function processAgentWorkflowStep() {
     }
   }
 
+  // Followers Increase dynamic live scan phase
+  if (agentId === 'followers' && (!items || items.length === 0)) {
+    const feedUrl = options.feedUrl || 'https://x.com/search?q=(crypto OR web3) -filter:retweets -filter:replies&f=live';
+    const targetCount = options.targetCount || 8;
+    await syncAgentHud(workflow, `Opening niche feed to discover top engaging accounts...`, 'SCANNING', 10);
+    try {
+      const tab = await chrome.tabs.create({ url: feedUrl, active: false });
+      agentWorkflowWorkingTabId = tab.id;
+      await waitForTabLoad(tab.id, 15000);
+      await delay(3000);
+
+      const scanRes = await sendMessageToTab(tab.id, { type: 'COLLECT_ENGAGING_NICHE_PROFILES', targetCount }, 40000);
+      safeRemoveTab(tab.id);
+      agentWorkflowWorkingTabId = null;
+
+      const discoveredProfiles = Array.isArray(scanRes?.profiles) ? scanRes.profiles : [];
+      if (discoveredProfiles.length === 0) {
+        workflow.active = false;
+        await syncAgentHud(workflow, `No active accounts discovered in feed.`, 'DONE', 100);
+        await finishAgentWorkflow(workflow);
+        return;
+      }
+
+      const updatedWorkflow = {
+        ...workflow,
+        items: discoveredProfiles,
+        total: discoveredProfiles.length,
+        currentIndex: 0,
+        statusText: `Discovered ${discoveredProfiles.length} active niche accounts. Starting engagement...`
+      };
+      await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
+      await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 15);
+      setTimeout(() => processAgentWorkflowStep(), 1000);
+      return;
+    } catch (scanErr) {
+      console.warn('[ATOMX BG] Error discovering niche profiles:', scanErr);
+      if (agentWorkflowWorkingTabId) {
+        safeRemoveTab(agentWorkflowWorkingTabId);
+        agentWorkflowWorkingTabId = null;
+      }
+      await finishAgentWorkflow(workflow);
+      return;
+    }
+  }
+
   if (currentIndex >= total) {
     await finishAgentWorkflow(workflow);
     return;
@@ -776,7 +821,9 @@ async function processAgentWorkflowStep() {
         handle: targetHandle,
         likeRecent: options.likeRecent ?? true,
         commentRecent: options.commentRecent ?? true,
+        followUser: options.followUser ?? false,
         style: options.style || 'Supportive & Relatable',
+        stylePrompt: options.stylePrompt || null,
         backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
       };
       timeoutMs = 45000;
@@ -832,6 +879,14 @@ async function processAgentWorkflowStep() {
           const list = Array.isArray(r?.atomx_reciprocated_commenters) ? r.atomx_reciprocated_commenters : [];
           list.push(targetHandle);
           chrome.storage.local.set({ atomx_reciprocated_commenters: list }).catch(() => null);
+        });
+      }
+
+      if (agentId === 'sorsa' && targetHandle) {
+        chrome.storage.local.get(['atomx_sorsa_engaged_history'], (r) => {
+          const history = (r?.atomx_sorsa_engaged_history && typeof r.atomx_sorsa_engaged_history === 'object') ? r.atomx_sorsa_engaged_history : {};
+          history[targetHandle.toLowerCase()] = Date.now();
+          chrome.storage.local.set({ atomx_sorsa_engaged_history: history }).catch(() => null);
         });
       }
     }

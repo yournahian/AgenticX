@@ -872,6 +872,25 @@ function renderTonePills() {
   renderButtonsTo(container, false);
   renderButtonsTo(tgContainer, true);
 
+  // Update Global Tone UI in Tone & Style tab
+  const globalBadge = document.getElementById('globalActiveToneBadge');
+  const globalPromptArea = document.getElementById('globalActiveTonePromptArea');
+  if (globalBadge) globalBadge.textContent = state.selectedTone || 'Bullish (5-10 words)';
+  if (globalPromptArea && document.activeElement !== globalPromptArea) {
+    globalPromptArea.value = state.selectedTonePrompt || '';
+  }
+
+  // Update voice labels across all agent panels
+  const activeVoiceText = state.selectedTone || 'Bullish (5-10 words)';
+  const tgVoiceLabel = document.getElementById('tgActiveToneName');
+  const sorsaVoiceLabel = document.getElementById('sorsaActiveToneLabel');
+  const followerVoiceLabel = document.getElementById('followerActiveToneLabel');
+  const recipVoiceLabel = document.getElementById('reciprocatorActiveToneLabel');
+  if (tgVoiceLabel) tgVoiceLabel.textContent = activeVoiceText;
+  if (sorsaVoiceLabel) sorsaVoiceLabel.textContent = activeVoiceText;
+  if (followerVoiceLabel) followerVoiceLabel.textContent = activeVoiceText;
+  if (recipVoiceLabel) recipVoiceLabel.textContent = activeVoiceText;
+
   // Update limit display in drawer
   const limitEl = document.getElementById('customLimitCount');
   if (limitEl) limitEl.textContent = state.maxCustomTemplates;
@@ -947,6 +966,18 @@ function setupCustomToneDrawer() {
       if (nameInput) nameInput.value = '';
       if (promptInput) promptInput.value = '';
       if (drawer) drawer.style.display = 'none';
+    };
+  }
+
+  const savePromptBtn = document.getElementById('saveGlobalTonePromptBtn');
+  if (savePromptBtn) {
+    savePromptBtn.onclick = () => {
+      const area = document.getElementById('globalActiveTonePromptArea');
+      if (area) {
+        state.selectedTonePrompt = area.value.trim();
+        chrome.storage.local.set({ selectedTonePrompt: state.selectedTonePrompt });
+        showExtToast('Global Tone Prompt Saved!', '💾');
+      }
     };
   }
 }
@@ -1490,6 +1521,16 @@ function initAgentListeners() {
   });
 
   // Agent 3: Increase Sorsa Score
+  document.getElementById('sorsaTierSelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('customSorsaListUrlBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+
+  document.getElementById('followerNicheSelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('customFollowerUrlBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+
   document.getElementById('runSorsaBoosterBtn')?.addEventListener('click', () => {
     startSorsaScoreBoosterWorkflow();
   });
@@ -2145,7 +2186,8 @@ async function startCommenterReciprocatorWorkflow() {
 
   const maxCount = Number(document.getElementById('reciprocatorMaxCount')?.value || 10);
   const delaySec = Number(document.getElementById('reciprocatorDelaySelect')?.value || 15);
-  const tone = document.getElementById('reciprocatorToneSelect')?.value || 'Natural & Concise';
+  const tone = state.selectedTone || 'Bullish (5-10 words)';
+  const tonePrompt = state.selectedTonePrompt || '';
   const optLike = document.getElementById('reciprocatorOptLike')?.checked ?? true;
   const optFollow = document.getElementById('reciprocatorOptFollow')?.checked ?? false;
 
@@ -2200,7 +2242,9 @@ async function startCommenterReciprocatorWorkflow() {
       delaySec,
       likeRecent: optLike,
       commentRecent: true,
+      followUser: optFollow,
       style: tone,
+      stylePrompt: tonePrompt,
       backendUrl
     }
   });
@@ -2947,36 +2991,70 @@ async function startSorsaScoreBoosterWorkflow() {
   if (barEl) barEl.style.width = '0%';
   if (countdownEl) countdownEl.style.display = 'none';
 
-  const customTargets = (tierData?.targets && tierData.targets.length > 0)
-    ? tierData.targets
-    : (FALLBACK_CURATED_LISTS[tierKey]?.targets || FALLBACK_CURATED_LISTS.sorsaTier1.targets);
+  let rawCustomTargets = [];
+  if (selectedListKey === 'custom') {
+    const rawInput = document.getElementById('customSorsaListUrlInput')?.value.trim() || '';
+    if (!rawInput) {
+      alert('⚠️ Please enter a Twitter List URL or account handles for your custom Sorsa target list.');
+      return;
+    }
+    const extracted = rawInput.match(/@?([a-zA-Z0-9_]{1,15})/g);
+    if (extracted && extracted.length > 0) {
+      rawCustomTargets = extracted;
+    } else {
+      rawCustomTargets = FALLBACK_CURATED_LISTS.sorsaTier1.targets;
+    }
+  } else {
+    rawCustomTargets = (tierData?.targets && tierData.targets.length > 0)
+      ? tierData.targets
+      : (FALLBACK_CURATED_LISTS[tierKey]?.targets || FALLBACK_CURATED_LISTS.sorsaTier1.targets);
+  }
+
+  const cooloffHours = Number(document.getElementById('sorsaCooloffSelect')?.value || 24);
 
   try {
+    const storedHistory = await new Promise(resolve => {
+      chrome.storage.local.get(['atomx_sorsa_engaged_history'], res => {
+        resolve((res?.atomx_sorsa_engaged_history && typeof res.atomx_sorsa_engaged_history === 'object') ? res.atomx_sorsa_engaged_history : {});
+      });
+    });
+
     let collectedProfiles = [];
     const collectedHandles = new Set();
     const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
+    const now = Date.now();
+    const cooloffMs = cooloffHours * 3600 * 1000;
 
-    const cleanTargets = customTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
+    const cleanTargets = rawCustomTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
     for (const h of cleanTargets) {
       if (collectedProfiles.length >= targetCount) break;
       const lower = h.toLowerCase();
-      if (lower !== loggedInHandle && !collectedHandles.has(lower)) {
-        collectedHandles.add(lower);
-        collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
+      if (lower === loggedInHandle || collectedHandles.has(lower)) continue;
+
+      // Deduplication / 24h Cool-Off check: Skip if engaged recently
+      const lastEngaged = storedHistory[lower];
+      if (lastEngaged && (now - lastEngaged < cooloffMs)) {
+        continue;
       }
+
+      collectedHandles.add(lower);
+      collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
     }
 
     collectedCount = collectedProfiles.length;
     if (colEl) colEl.textContent = collectedCount;
 
     if (collectedCount === 0) {
-      alert('⚠️ Could not find active accounts for Sorsa Booster. Please try another tier.');
+      alert(`⚠️ All accounts in this list have already been engaged within your ${cooloffHours}h cool-off window!\n\nYou can reduce the cool-off window in the dropdown or use a different list.`);
+      if (startBtn) startBtn.style.display = 'block';
+      if (stopBtn) stopBtn.style.display = 'none';
+      if (progressCard) progressCard.style.display = 'none';
       return;
     }
 
     if (stateBadge) stateBadge.textContent = 'RUNNING';
     if (barEl) barEl.style.width = '10%';
-    if (statusText) statusText.textContent = `Starting Sorsa Score Boost for ${collectedCount} accounts in background...`;
+    if (statusText) statusText.textContent = `Starting Sorsa Score Boost for ${collectedCount} fresh accounts in background...`;
     if (queueIndicator) queueIndicator.textContent = `Account 1/${collectedCount}`;
 
     syncFloatingHud(null, {
@@ -2987,17 +3065,11 @@ async function startSorsaScoreBoosterWorkflow() {
       collected: collectedCount,
       skipped: 0,
       progressPercent: 5,
-      statusText: `Starting Sorsa Score Boost for ${collectedCount} accounts...`
+      statusText: `Starting Sorsa Score Boost for ${collectedCount} fresh accounts...`
     });
 
-    let customTonePrompt = null;
-    if (tone === 'technical') {
-      customTonePrompt = "Provide sharp, technical developer insight. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
-    } else if (tone === 'professional') {
-      customTonePrompt = "Professional operator insight and strategic value. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
-    } else {
-      customTonePrompt = "Bullish and supportive momentum. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
-    }
+    const activeTone = state.selectedTone || 'Bullish (5-10 words)';
+    const activePrompt = state.selectedTonePrompt || '';
 
     // Delegate immediately to background service worker — survives extension popup closing!
     const backendUrl = await getBackendUrl();
@@ -3011,8 +3083,8 @@ async function startSorsaScoreBoosterWorkflow() {
         likePosts,
         replyPosts,
         followPosts,
-        style: `Sorsa ${tone}`,
-        stylePrompt: customTonePrompt,
+        style: activeTone,
+        stylePrompt: activePrompt,
         backendUrl
       }
     });
@@ -3223,7 +3295,16 @@ async function startFollowersIncreaseWorkflow() {
   if (countdownEl) countdownEl.style.display = 'none';
 
   let targetUrl = '';
-  if (curatedFollower) {
+  if (niche === 'custom') {
+    targetUrl = document.getElementById('customFollowerUrlInput')?.value.trim() || '';
+    if (!targetUrl) {
+      alert('⚠️ Please enter a Twitter List URL or Search URL for your Custom Target Community.');
+      if (startBtn) startBtn.style.display = 'block';
+      if (stopBtn) stopBtn.style.display = 'none';
+      if (progressCard) progressCard.style.display = 'none';
+      return;
+    }
+  } else if (curatedFollower) {
     if (curatedFollower.listUrl) {
       targetUrl = curatedFollower.listUrl;
     } else {
@@ -3239,65 +3320,36 @@ async function startFollowersIncreaseWorkflow() {
     targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) -filter:retweets -filter:replies') + '&f=live';
   }
 
-  const NICHE_TARGET_MAP = {
-    crypto: ['@CryptoTownHall', '@web3comm', '@SolanaDaily', '@VitalikButerin', '@cz_binance', '@brian_armstrong', '@BanklessHQ', '@DefiLlama', '@WatcherGuru', '@tier10k', '@coinbase', '@binance', '@sassal0x', '@cobie'],
-    ai: ['@sama', '@ylecun', '@AndrewYNg', '@karpathy', '@OpenAI', '@AnthropicAI', '@GoogleDeepMind', '@demishassabis', '@geoffreyhinton', '@gdb', '@EMostaque', '@ilyasut'],
-    founders: ['@paulg', '@pmarca', '@sama', '@naval', '@bchesky', '@jason', '@levelsio', '@garrytan', '@shl', '@dharmesh', '@alexisohanian', '@rabois'],
-    solana: ['@solana', '@aeyakovenko', '@rajgokal', '@SolanaDaily', '@SuperteamDAO', '@JupiterExchange', '@RaydiumProtocol', '@phantom', '@helium', '@tensor_hq'],
-    followerList1: FALLBACK_CURATED_LISTS.followerList1.targets
-  };
-
   try {
-    let collectedProfiles = [];
-    const collectedHandles = new Set();
-    const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
-
-    const rawTargets = curatedFollower?.targets || NICHE_TARGET_MAP[niche] || NICHE_TARGET_MAP.crypto;
-    const cleanTargets = rawTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
-    for (const h of cleanTargets) {
-      if (collectedProfiles.length >= targetCount) break;
-      const lower = h.toLowerCase();
-      if (lower !== loggedInHandle && !collectedHandles.has(lower)) {
-        collectedHandles.add(lower);
-        collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
-      }
-    }
-
-    collectedCount = collectedProfiles.length;
-    if (colEl) colEl.textContent = collectedCount;
-
-    if (collectedCount === 0) {
-      alert('⚠️ No active repliers or accounts could be found for this niche.');
-      return;
-    }
-
-    if (stateBadge) stateBadge.textContent = 'RUNNING';
+    if (stateBadge) stateBadge.textContent = 'SCANNING';
     if (barEl) barEl.style.width = '10%';
-    if (statusText) statusText.textContent = `Starting Follower Growth for ${collectedCount} niche accounts in background...`;
-    if (queueIndicator) queueIndicator.textContent = `Profile 1/${collectedCount}`;
+    if (statusText) statusText.textContent = `Connecting to feed and analyzing most engaging posts in background...`;
+    if (queueIndicator) queueIndicator.textContent = `Scanning Niche Feed...`;
 
     syncFloatingHud(null, {
       title: 'Followers Growth',
-      stateBadge: 'ENGAGING',
-      indicator: `Profile 0/${collectedCount}`,
+      stateBadge: 'SCANNING',
+      indicator: `Analyzing Niche Feed`,
       done: 0,
-      collected: collectedCount,
+      collected: targetCount,
       skipped: 0,
       progressPercent: 5,
-      statusText: `Starting Follower Growth for ${collectedCount} accounts...`
+      statusText: `Discovering top engaging posts and accounts in ${niche} feed...`
     });
 
     const activeStyle = state.selectedTone || 'Bullish (5-10 words)';
-    const activePrompt = state.selectedTonePrompt || "Write a bullish, positive comment replying to the post. Strictly 5 to 10 words. No emojis, no quotes, no $, no dashes, no exclamation marks.";
+    const activePrompt = state.selectedTonePrompt || '';
 
-    // Delegate immediately to background service worker — survives extension popup closing!
+    // Delegate immediately to background service worker — discovers top engaging accounts dynamically!
     const backendUrl = await getBackendUrl();
     chrome.runtime.sendMessage({
       type: 'BG_START_AGENT_WORKFLOW',
       agentId: 'followers',
       title: 'Followers Growth',
-      items: collectedProfiles,
+      items: [],
       options: {
+        feedUrl: targetUrl,
+        targetCount,
         delaySec,
         likePosts: true,
         replyPosts: true,
@@ -3723,8 +3775,10 @@ async function startAutoUnfollowWorkflow() {
     return;
   }
 
-  const targetLimit = Number(document.getElementById('unfollowMaxCount')?.value || 25);
-  const delaySec = Number(document.getElementById('unfollowDelaySelect')?.value || 18);
+  const targetLimit = Number(document.getElementById('unfollowMaxCountInput')?.value || document.getElementById('unfollowMaxCount')?.value || 25);
+  const delaySec = Number(document.getElementById('unfollowCustomDelayInput')?.value || document.getElementById('unfollowDelaySelect')?.value || 15);
+  const batchCount = Number(document.getElementById('unfollowBatchCountInput')?.value || 15);
+  const breakDuration = Number(document.getElementById('unfollowBreakDurationInput')?.value || 60);
   const scoreThreshold = Number(document.getElementById('unfollowScoreThresholdInput')?.value || 30);
   const rawWhitelist = document.getElementById('unfollowWhitelistInput')?.value || '';
   const whitelistList = rawWhitelist.split(/[,\n]/).map(w => w.trim()).filter(Boolean);
@@ -3829,29 +3883,29 @@ async function startAutoUnfollowWorkflow() {
           break;
         }
 
-        // RULE: Long Break vs Normal Pacing Break
-        // Every 16 unfollows -> 2 minute long break (120 seconds)
-        if (unfollowedCount % 16 === 0) {
-          if (stateBadge) stateBadge.textContent = 'LONG_BREAK';
+        // RULE: Custom Batch Break vs Normal Pacing Break
+        if (batchCount > 0 && unfollowedCount % batchCount === 0) {
+          if (stateBadge) stateBadge.textContent = 'BATCH_BREAK';
           if (countdownEl) countdownEl.style.display = 'block';
-          for (let s = 120; s > 0; s--) {
+          for (let s = breakDuration; s > 0; s--) {
             if (state.isAborted) break;
             const min = Math.floor(s / 60);
             const sec = s % 60;
             const secStr = sec < 10 ? '0' + sec : sec;
-            if (statusText) statusText.textContent = `☕ Safety Long Break: Pausing 2 min after ${unfollowedCount} unfollows...`;
-            if (countdownEl) countdownEl.textContent = `☕ Long break: ${min}m ${secStr}s remaining...`;
+            const timeStr = min > 0 ? `${min}m ${secStr}s` : `${sec}s`;
+            if (statusText) statusText.textContent = `☕ Safety Batch Break: Pausing ${timeStr} after ${unfollowedCount} unfollows...`;
+            if (countdownEl) countdownEl.textContent = `☕ Break: ${timeStr} remaining...`;
             await sleep(1000);
           }
           if (countdownEl) countdownEl.style.display = 'none';
         } else {
-          // Normal pacing delay (e.g. 15-20s)
+          // Custom pacing delay
           if (stateBadge) stateBadge.textContent = 'WAITING';
           if (countdownEl) countdownEl.style.display = 'block';
           for (let s = delaySec; s > 0; s--) {
             if (state.isAborted) break;
-            if (statusText) statusText.textContent = `Pacing safety delay before next account...`;
-            if (countdownEl) countdownEl.textContent = `⏱️ Next in ${s}s...`;
+            if (statusText) statusText.textContent = `Pacing safety delay (${s}s) before next account...`;
+            if (countdownEl) countdownEl.textContent = `⏱️ Pause: ${s}s remaining...`;
             await sleep(1000);
           }
           if (countdownEl) countdownEl.style.display = 'none';
