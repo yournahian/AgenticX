@@ -1767,10 +1767,14 @@ function initAgentListeners() {
     const txt = document.getElementById('defaulterExpectedUsers');
     if (!txt) return;
     const handles = parseDefaulterHandles(txt.value);
-    txt.value = handles.map(h => '@' + h).join(', ');
+    if (handles.length === 0) {
+      showExtToast('No valid @handles or post links found', '⚠️');
+      return;
+    }
+    txt.value = handles.map(h => '@' + h).join('\n');
     const countBadge = document.getElementById('defaulterExpectedCountBadge');
     if (countBadge) countBadge.textContent = `${handles.length} Members`;
-    showExtToast(`Cleaned & Extracted ${handles.length} @handles`, '🧹');
+    showExtToast(`Cleaned & Extracted ${handles.length} @handles!`, '🧹');
   });
 
   document.getElementById('defaulterExpectedUsers')?.addEventListener('input', (e) => {
@@ -1863,15 +1867,60 @@ function renderCreatorChips() {
 // AGENT 11: FIND DEFAULTERS AUDIT WORKFLOW
 // =========================================================================
 function parseDefaulterHandles(raw) {
-  if (!raw) return [];
-  const matches = raw.match(/@?[A-Za-z0-9_]{1,15}/g) || [];
+  if (!raw || typeof raw !== 'string') return [];
   const clean = new Set();
-  matches.forEach(m => {
-    const h = m.replace(/^@/, '').toLowerCase().trim();
-    if (h && h.length >= 2 && !['http', 'https', 'com', 'org', 'status'].includes(h)) {
-      clean.add(h);
+  const RESERVED_WORDS = new Set([
+    'http', 'https', 'x', 'com', 'org', 'net', 'io', 'app', 'twitter',
+    'status', 'statuses', 'home', 'explore', 'notifications', 'messages',
+    'i', 'compose', 'settings', 'search', 'hashtag', 'intent', 'post',
+    'posts', 'tweet', 'tweets', 'link', 'links', 'telegram', 't', 'me',
+    'joinchat', 'photo', 'video', 'analytics', 'following', 'followers', 'verified'
+  ]);
+
+  // 1. Extract usernames from Twitter/X URLs (e.g., https://x.com/username/status/12345 or https://x.com/username)
+  const urlRegex = /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([A-Za-z0-9_]{1,15})(?:\/[^\s\n\r]*)?/gi;
+  let match;
+  while ((match = urlRegex.exec(raw)) !== null) {
+    const handle = match[1].toLowerCase().trim();
+    if (handle && !RESERVED_WORDS.has(handle) && !/^\d+$/.test(handle)) {
+      clean.add(handle);
     }
-  });
+  }
+
+  // Remove URLs from raw text before checking the rest so status IDs and URL parts don't get matched
+  const textWithoutUrls = raw.replace(/(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/[^\s\n\r]*/gi, ' ');
+
+  // 2. Extract explicit @handles (e.g. @catqpx)
+  const atRegex = /@([A-Za-z0-9_]{1,15})/g;
+  while ((match = atRegex.exec(textWithoutUrls)) !== null) {
+    const handle = match[1].toLowerCase().trim();
+    if (handle && !RESERVED_WORDS.has(handle) && !/^\d+$/.test(handle)) {
+      clean.add(handle);
+    }
+  }
+
+  // 3. Extract numbered list items (e.g. "170. catqpx" or "170) catqpx")
+  const lines = textWithoutUrls.split(/[\r\n]+/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const listMatch = trimmed.match(/^\d+[\.\)\-:\s]+@?([A-Za-z0-9_]{1,15})\b/);
+    if (listMatch) {
+      const handle = listMatch[1].toLowerCase().trim();
+      if (handle && !RESERVED_WORDS.has(handle) && !/^\d+$/.test(handle)) {
+        clean.add(handle);
+      }
+    } else {
+      const singleMatch = trimmed.match(/^@?([A-Za-z0-9_]{1,15})$/);
+      if (singleMatch) {
+        const handle = singleMatch[1].toLowerCase().trim();
+        if (handle && !RESERVED_WORDS.has(handle) && !/^\d+$/.test(handle)) {
+          clean.add(handle);
+        }
+      }
+    }
+  }
+
   return Array.from(clean);
 }
 
@@ -4537,6 +4586,20 @@ async function handleExtSubmitRequest() {
     btn.textContent = 'Submitting Request...';
   }
 
+async function safeParseApiResponse(res) {
+  const text = await res.text().catch(() => '');
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    if (!res.ok) {
+      throw new Error(`Server temporarily unavailable (${res.status}). Please try again in a moment.`);
+    }
+    throw new Error('Invalid response received from server.');
+  }
+  return data;
+}
+
   try {
     const backendUrl = await getBackendUrl();
     const res = await fetch(`${backendUrl}/api/auth/request-access`, {
@@ -4553,7 +4616,7 @@ async function handleExtSubmitRequest() {
       })
     });
 
-    const data = await res.json();
+    const data = await safeParseApiResponse(res);
     if (!res.ok && res.status !== 201) {
       if (data.alreadyApproved || (data.error && data.error.includes('already registered'))) {
         alert(`✓ Account Already Approved:\n\n${handle} is already approved!\nPlease sign in directly with your password.`);
@@ -4923,7 +4986,7 @@ async function handleExtSetPassword() {
       })
     });
 
-    const data = await res.json();
+    const data = await safeParseApiResponse(res);
     if (!res.ok) {
       if (data.alreadyHasPassword) {
         alert(data.error);
@@ -5008,7 +5071,7 @@ async function handleExtSubmitForgotPwd() {
       })
     });
 
-    const data = await res.json();
+    const data = await safeParseApiResponse(res);
     if (!res.ok) {
       throw new Error(data.error || 'Could not submit password reset request');
     }
@@ -5226,7 +5289,7 @@ async function handleExtLogin() {
       body: JSON.stringify({ identifier, password })
     });
 
-    const data = await res.json();
+    const data = await safeParseApiResponse(res);
     if (!res.ok) {
       throw new Error(data.error || data.message || 'Invalid credentials. Please request access if not registered.');
     }

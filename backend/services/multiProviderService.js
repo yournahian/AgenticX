@@ -1128,9 +1128,6 @@ async function getApiLogs() {
   return recentApiLogs || [];
 }
 
-  return recentApiLogs || [];
-}
-
 async function testAllProviderKeys() {
   const results = {};
   const providers = ['groq', 'openrouter', 'openai', 'anthropic', 'gemini'];
