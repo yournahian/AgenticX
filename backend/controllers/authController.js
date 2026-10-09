@@ -336,15 +336,19 @@ exports.requestReview = async (req, res) => {
 
 exports.requestPasswordReset = async (req, res) => {
   try {
-    const { identifier, handle, email } = req.body;
-    const loginKey = (identifier || handle || email || '').trim();
+    const { identifier, handle, email, telegram } = req.body;
+    const loginKey = (handle || email || identifier || '').trim();
     if (!loginKey) {
-      return res.status(400).json({ error: 'Please enter your X ID or email' });
+      return res.status(400).json({ error: 'Please enter your Twitter / X ID or registered email' });
     }
-    const result = await db.requestPasswordReset(loginKey);
+    const cleanHandle = (handle || identifier || '').trim();
+    const cleanEmail = (email || '').trim();
+    const cleanTelegram = (telegram || '').trim();
+
+    const result = await db.requestPasswordReset(loginKey, cleanTelegram, cleanEmail, cleanHandle);
     res.json({
       success: true,
-      message: '✓ Password reset notification sent to Administrator! Once admin sets your temporary password, enter it in Current Password below.',
+      message: `✓ Password reset request sent to Admin! Admin will review your account and message your temporary login password to Telegram (${cleanTelegram || 'your account'}).`,
       user: result.user
     });
   } catch (err) {
@@ -366,6 +370,30 @@ exports.resetPassword = async (req, res) => {
     res.json({
       success: true,
       message: '✓ Password reset successfully! You can now log in with your new password.',
+      handle: updatedUser.handle
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.changePassword = async (req, res) => {
+  try {
+    const { handle, email, identifier, currentPassword, newPassword } = req.body;
+    const loginKey = (handle || email || identifier || '').trim();
+    if (!loginKey) {
+      return res.status(400).json({ error: 'Account handle or email is required' });
+    }
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Current / Temporary password is required' });
+    }
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ error: 'New password must have at least 4 characters' });
+    }
+    const updatedUser = await db.resetUserPassword(loginKey, newPassword, currentPassword);
+    res.json({
+      success: true,
+      message: '✓ Password updated successfully! Your account is now secured with your new password.',
       handle: updatedUser.handle
     });
   } catch (err) {

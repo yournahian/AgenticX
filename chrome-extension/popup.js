@@ -1091,6 +1091,11 @@ function initListeners() {
   document.getElementById('extGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extGoToRequestLink')?.addEventListener('click', () => showAccessSubView('request'));
   document.getElementById('extGoToResetPwdLink')?.addEventListener('click', () => showAccessSubView('reset'));
+  document.getElementById('extBackToLoginFromResetBtn')?.addEventListener('click', () => showAccessSubView('login'));
+  document.getElementById('extForgotSuccessBackLoginBtn')?.addEventListener('click', () => showAccessSubView('login'));
+  document.getElementById('extSubmitForgotPwdBtn')?.addEventListener('click', handleExtSubmitForgotPwd);
+  document.getElementById('extToggleChangePasswordBox')?.addEventListener('click', toggleChangePasswordBox);
+  document.getElementById('extLoggedInSubmitChangePassBtn')?.addEventListener('click', handleExtLoggedInChangePassword);
   document.getElementById('extResetPasswordSubmitBtn')?.addEventListener('click', handleExtResetPassword);
   document.getElementById('extNotifyAdminForgotPwdBtn')?.addEventListener('click', handleExtNotifyAdminForgotPwd);
   document.getElementById('extRequestReviewBtn')?.addEventListener('click', handleExtRequestReview);
@@ -4192,6 +4197,13 @@ function showAccessSubView(viewName) {
   Object.entries(views).forEach(([k, el]) => {
     if (el) el.style.display = (k === viewName) ? 'block' : 'none';
   });
+
+  if (viewName === 'reset') {
+    const fc = document.getElementById('extForgotFormContainer');
+    const sb = document.getElementById('extForgotSuccessBox');
+    if (fc) fc.style.display = 'block';
+    if (sb) sb.style.display = 'none';
+  }
 }
 
 /**
@@ -4816,42 +4828,152 @@ async function handleExtSetPassword() {
   }
 }
 
-async function handleExtNotifyAdminForgotPwd() {
-  const ident = document.getElementById('extResetIdentifierInput')?.value.trim();
-  const btn = document.getElementById('extNotifyAdminForgotPwdBtn');
-  const successMsg = document.getElementById('extForgotPwdNotifySuccess');
+async function handleExtSubmitForgotPwd() {
+  const handle = (document.getElementById('extForgotHandleInput')?.value || '').trim();
+  const email = (document.getElementById('extForgotEmailInput')?.value || '').trim();
+  const telegram = (document.getElementById('extForgotTelegramInput')?.value || '').trim();
+  const btn = document.getElementById('extSubmitForgotPwdBtn');
+  const successBox = document.getElementById('extForgotSuccessBox');
+  const formContainer = document.getElementById('extForgotFormContainer');
+  const successText = document.getElementById('extForgotSuccessText');
 
-  if (!ident) {
-    alert('Please enter your Twitter / X ID or email address above first.');
+  if (!handle && !email) {
+    alert('Please enter your Twitter / X ID or registered email.');
+    return;
+  }
+  if (!telegram) {
+    alert('Please enter your Telegram Username / ID so the admin can send you the temporary password.');
     return;
   }
 
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Sending Notification...';
+    btn.textContent = 'Submitting Request...';
   }
 
   try {
     const backendUrl = await getBackendUrl();
+    const cleanHandle = handle.startsWith('@') ? handle : (handle ? `@${handle}` : '');
+    const cleanTg = telegram.startsWith('@') ? telegram : `@${telegram}`;
+
     const res = await fetch(`${backendUrl}/api/auth/request-password-reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: ident })
+      body: JSON.stringify({
+        handle: cleanHandle,
+        email,
+        telegram: cleanTg
+      })
     });
+
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Could not send notification');
+      throw new Error(data.error || 'Could not submit password reset request');
     }
-    if (successMsg) successMsg.style.display = 'block';
-    alert(data.message || '✓ Admin notified! Contact administrator to receive your temporary password.');
+
+    if (formContainer) formContainer.style.display = 'none';
+    if (successBox) successBox.style.display = 'block';
+    if (successText) {
+      successText.textContent = `The admin will review your account and message your temporary login password to your Telegram (${cleanTg}). Once received, please return to Sign In to log in.`;
+    }
+
+    // Prefill the login input for convenience
+    const loginInput = document.getElementById('extLoginHandleInput');
+    if (loginInput && cleanHandle) {
+      loginInput.value = cleanHandle;
+    }
+
+    alert(`✓ Request Submitted to Administrator!\n\nThe admin will review your account and message your temporary password to Telegram (${cleanTg}).`);
   } catch (e) {
-    alert(`❌ Notification error: ${e.message}`);
+    alert(`❌ Request Error: ${e.message}`);
   } finally {
     if (btn) {
       btn.disabled = false;
       btn.textContent = '📢 Request Admin Password Reset';
     }
   }
+}
+
+function toggleChangePasswordBox() {
+  const form = document.getElementById('extChangePasswordForm');
+  const arrow = document.getElementById('extChangePasswordArrow');
+  if (!form) return;
+  if (form.style.display === 'none' || !form.style.display) {
+    form.style.display = 'block';
+    if (arrow) arrow.textContent = '▲';
+  } else {
+    form.style.display = 'none';
+    if (arrow) arrow.textContent = '▼';
+  }
+}
+
+async function handleExtLoggedInChangePassword() {
+  const currentPass = (document.getElementById('extLoggedInCurrentPassInput')?.value || '').trim();
+  const newPass = (document.getElementById('extLoggedInNewPassInput')?.value || '').trim();
+  const confirmPass = (document.getElementById('extLoggedInConfirmPassInput')?.value || '').trim();
+  const btn = document.getElementById('extLoggedInSubmitChangePassBtn');
+
+  if (!currentPass) {
+    alert('Please enter your current / temporary password assigned by admin.');
+    return;
+  }
+  if (!newPass || newPass.length < 6) {
+    alert('New password must be at least 6 characters.');
+    return;
+  }
+  if (newPass !== confirmPass) {
+    alert('New passwords do not match. Please re-enter.');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Updating Password...';
+  }
+
+  try {
+    const backendUrl = await getBackendUrl();
+    const handle = state.user?.handle || state.verifiedXHandle || '';
+    const email = state.user?.email || '';
+
+    const res = await fetch(`${backendUrl}/api/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        handle,
+        email,
+        currentPassword: currentPass,
+        newPassword: newPass
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not update password');
+    }
+
+    alert('✓ Password updated successfully!\nYour account is now secured with your new password.');
+    
+    // Clear inputs and collapse
+    const c1 = document.getElementById('extLoggedInCurrentPassInput');
+    const c2 = document.getElementById('extLoggedInNewPassInput');
+    const c3 = document.getElementById('extLoggedInConfirmPassInput');
+    if (c1) c1.value = '';
+    if (c2) c2.value = '';
+    if (c3) c3.value = '';
+    toggleChangePasswordBox();
+  } catch (err) {
+    alert(`❌ Password Update Error: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save New Password';
+    }
+  }
+}
+
+async function handleExtNotifyAdminForgotPwd() {
+  await handleExtSubmitForgotPwd();
 }
 
 async function handleExtResetPassword() {

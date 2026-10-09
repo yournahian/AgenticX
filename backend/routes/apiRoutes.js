@@ -37,6 +37,7 @@ router.get('/auth/check-status', authController.checkAccessStatus);
 router.post('/auth/set-password', authController.setPassword);
 router.post('/auth/request-password-reset', authController.requestPasswordReset);
 router.post('/auth/reset-password', authController.resetPassword);
+router.post('/auth/change-password', authController.changePassword);
 router.post('/auth/request-review', authController.requestReview);
 router.get('/auth/me', authController.getCurrentUser);
 

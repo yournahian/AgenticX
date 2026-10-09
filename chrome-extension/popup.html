@@ -1616,6 +1616,44 @@
             <button type="button" class="secondary-btn mini-btn" id="extLogoutBtn" style="flex:1; margin-top:0; color:#EF4444; border-color:rgba(239,68,68,0.3);" title="Log out from this extension">Log Out</button>
           </div>
           <button type="button" class="secondary-btn mini-btn" id="extForceResetBtn" style="width:100%; margin-top:8px; font-size:10px; color:var(--text-secondary); border-style:dashed; opacity:0.8;" title="Clear local cache and log out">🧹 Clear Extension Cache</button>
+
+          <!-- In-App Change Password for Logged-In User -->
+          <div style="margin-top:14px; border-top:1px solid var(--border-subtle); padding-top:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" id="extToggleChangePasswordBox">
+              <span style="font-size:12px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                <span>🔑</span>
+                <span>Change Password</span>
+              </span>
+              <span id="extChangePasswordArrow" style="font-size:11px; color:var(--text-muted);">▼</span>
+            </div>
+            <div id="extChangePasswordForm" style="display:none; margin-top:10px; background:var(--bg-canvas); padding:10px; border-radius:6px; border:1px solid var(--border-subtle);">
+              <div style="font-size:10.5px; color:var(--text-secondary); margin-bottom:8px;">
+                Change your temporary admin password to a personal password.
+              </div>
+              <div style="margin-bottom:8px;">
+                <label class="opt-label" style="font-size:10.5px; color:var(--text-secondary); margin-bottom:3px;">Current / Temporary Password</label>
+                <div style="position:relative; display:flex; align-items:center;">
+                  <input type="password" id="extLoggedInCurrentPassInput" class="ext-input" style="padding-right:32px; font-size:11.5px;" placeholder="Password assigned by admin">
+                  <button type="button" class="pwd-eye-toggle-btn" data-target="extLoggedInCurrentPassInput" style="position:absolute; right:6px; background:none; border:none; cursor:pointer; font-size:12px;" title="Show/Hide">👁️</button>
+                </div>
+              </div>
+              <div style="margin-bottom:8px;">
+                <label class="opt-label" style="font-size:10.5px; color:var(--text-secondary); margin-bottom:3px;">New Password (min 6 chars)</label>
+                <div style="position:relative; display:flex; align-items:center;">
+                  <input type="password" id="extLoggedInNewPassInput" class="ext-input" style="padding-right:32px; font-size:11.5px;" placeholder="New secure password">
+                  <button type="button" class="pwd-eye-toggle-btn" data-target="extLoggedInNewPassInput" style="position:absolute; right:6px; background:none; border:none; cursor:pointer; font-size:12px;" title="Show/Hide">👁️</button>
+                </div>
+              </div>
+              <div style="margin-bottom:10px;">
+                <label class="opt-label" style="font-size:10.5px; color:var(--text-secondary); margin-bottom:3px;">Confirm New Password</label>
+                <div style="position:relative; display:flex; align-items:center;">
+                  <input type="password" id="extLoggedInConfirmPassInput" class="ext-input" style="padding-right:32px; font-size:11.5px;" placeholder="Confirm new password">
+                  <button type="button" class="pwd-eye-toggle-btn" data-target="extLoggedInConfirmPassInput" style="position:absolute; right:6px; background:none; border:none; cursor:pointer; font-size:12px;" title="Show/Hide">👁️</button>
+                </div>
+              </div>
+              <button type="button" class="primary-btn mini-btn" id="extLoggedInSubmitChangePassBtn" style="width:100%; font-size:11.5px; margin-top:0;">Save New Password</button>
+            </div>
+          </div>
         </div>
 
         <!-- VIEW 2: In-Extension Request Access Form (First-Time User Default) -->
@@ -1858,62 +1896,51 @@
           </div>
         </div>
 
-        <!-- VIEW 6: Reset Password View -->
+        <!-- VIEW 6: Request Admin Password Reset View -->
         <div id="extResetPasswordView" class="card" style="display:none; padding:16px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
           <div style="text-align:center; margin-bottom:12px;">
             <div style="font-size:24px; margin-bottom:4px;">🔑</div>
-            <div style="font-weight:700; font-size:14px; color:var(--text-primary);">Reset Account Password</div>
+            <div style="font-weight:700; font-size:14px; color:var(--text-primary);">Request Password Reset</div>
             <p style="font-size:11px; color:var(--text-secondary); margin-top:4px; line-height:1.4;">
-              Enter your verified Twitter / X handle or email and choose a new password.
+              Enter your verified Twitter / X handle, registered email, and Telegram handle. The administrator will send a temporary login password directly to your Telegram.
             </p>
           </div>
 
-          <div style="margin-bottom:12px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:6px; padding:10px;">
-            <div style="font-size:11px; color:var(--text-secondary); margin-bottom:6px; line-height:1.4;">
-              Forgot your password? Notify the administrator to assign you a temporary password:
+          <div id="extForgotFormContainer">
+            <div style="margin-bottom:8px;">
+              <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Twitter / X ID</label>
+              <input type="text" id="extForgotHandleInput" class="ext-input" placeholder="e.g. @mythopair">
             </div>
-            <button type="button" class="mini-btn" id="extNotifyAdminForgotPwdBtn" style="width:100%; font-size:11px; padding:6px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:#f59e0b; font-weight:700; cursor:pointer; border-radius:4px;">
+
+            <div style="margin-bottom:8px;">
+              <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Registered Email</label>
+              <input type="email" id="extForgotEmailInput" class="ext-input" placeholder="e.g. user@email.com">
+            </div>
+
+            <div style="margin-bottom:12px;">
+              <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Telegram Username / ID</label>
+              <input type="text" id="extForgotTelegramInput" class="ext-input" placeholder="e.g. @username (where admin sends password)">
+              <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">The administrator will send your temporary password to this Telegram account.</div>
+            </div>
+
+            <button type="button" class="primary-btn mini-btn" id="extSubmitForgotPwdBtn" style="width:100%; margin-top:0; background:linear-gradient(135deg, #F59E0B, #D97706); border-color:#D97706;">
               📢 Request Admin Password Reset
             </button>
-            <div id="extForgotPwdNotifySuccess" style="display:none; font-size:11px; color:#10B981; font-weight:600; margin-top:6px; text-align:center;">
-              ✓ Admin notified! Once admin provides your temporary password, enter it below.
-            </div>
           </div>
 
-          <div style="margin-bottom:8px;">
-            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Twitter / X ID or Registered Email</label>
-            <input type="text" id="extResetIdentifierInput" class="ext-input" placeholder="e.g. @mythopair or user@email.com">
+          <!-- SUCCESS STATE NOTIFICATION BOX -->
+          <div id="extForgotSuccessBox" style="display:none; margin-top:10px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:6px; padding:12px; text-align:center;">
+            <div style="font-size:22px; margin-bottom:4px;">✓</div>
+            <div style="font-weight:700; font-size:13px; color:var(--status-success);">Request Submitted to Administrator!</div>
+            <p id="extForgotSuccessText" style="font-size:11px; color:var(--text-secondary); margin-top:4px; line-height:1.4;">
+              The admin will review your account and message your temporary login password to your Telegram. Once received, return to Sign In to log in.
+            </p>
+            <button type="button" class="primary-btn mini-btn" id="extForgotSuccessBackLoginBtn" style="width:100%; margin-top:8px;">
+              Go to Sign In
+            </button>
           </div>
 
-          <div style="margin-bottom:8px;">
-            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Current / Admin-Assigned Password</label>
-            <div style="position:relative; display:flex; align-items:center;">
-              <input type="password" id="extResetCurrentPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="Temporary password assigned by admin">
-              <button type="button" class="pwd-eye-toggle-btn" data-target="extResetCurrentPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
-            </div>
-          </div>
-
-          <div style="margin-bottom:8px;">
-            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">New Password</label>
-            <div style="position:relative; display:flex; align-items:center;">
-              <input type="password" id="extResetNewPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="New password (min 6 characters)">
-              <button type="button" class="pwd-eye-toggle-btn" data-target="extResetNewPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
-            </div>
-          </div>
-
-          <div style="margin-bottom:12px;">
-            <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Confirm New Password</label>
-            <div style="position:relative; display:flex; align-items:center;">
-              <input type="password" id="extResetConfirmPasswordInput" class="ext-input" style="padding-right:34px;" placeholder="Confirm new password">
-              <button type="button" class="pwd-eye-toggle-btn" data-target="extResetConfirmPasswordInput" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:13px; color:var(--text-muted); padding:2px;" title="Show/Hide Password">👁️</button>
-            </div>
-          </div>
-
-          <button type="button" class="primary-btn mini-btn" id="extResetPasswordSubmitBtn" style="width:100%; margin-top:0;">
-            Save New Password & Sign In
-          </button>
-
-          <div style="margin-top:12px; text-align:center;">
+          <div style="margin-top:14px; text-align:center;">
             <button type="button" id="extBackToLoginFromResetBtn" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
               Back to Sign In
             </button>

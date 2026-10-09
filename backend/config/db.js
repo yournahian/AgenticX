@@ -383,19 +383,38 @@ module.exports = {
     return { success: true };
   },
 
-  async requestPasswordReset(identifier) {
+  async requestPasswordReset(identifier, telegram, email, handle) {
     if (!supabase) return { success: true };
-    const user = await resolveUser(identifier);
-    if (!user) {
-      throw new Error('Account not found with this handle or email. Please verify and try again.');
+    let user = await resolveUser(identifier);
+    if (!user && handle) {
+      user = await resolveUser(handle);
     }
+    if (!user && email) {
+      user = await resolveUser(email);
+    }
+    if (!user) {
+      throw new Error('Account not found with this Twitter / X ID or email. Please verify your details.');
+    }
+
+    if (telegram) {
+      const cleanTg = telegram.startsWith('@') ? telegram : `@${telegram}`;
+      try {
+        await supabase.from('users').update({ telegram: cleanTg }).eq('id', user.id);
+      } catch (tgErr) {
+        console.warn('Could not update user telegram:', tgErr.message);
+      }
+    }
+
+    const tgInfo = telegram ? ` | TG: ${telegram}` : (user.telegram ? ` | TG: ${user.telegram}` : '');
+    const emailInfo = email ? ` | Email: ${email}` : (user.email ? ` | Email: ${user.email}` : '');
+
     await supabase.from('credits_ledger').insert({
       user_id: user.id,
       amount: 0,
       balance_after: user.credits || 0,
       action: 'Forgot Password',
       admin_source: 'Extension Request',
-      reason: `Password reset requested by user for ${user.handle}`
+      reason: `Password reset requested for ${user.handle}${emailInfo}${tgInfo}`
     });
     return { success: true, user };
   },
