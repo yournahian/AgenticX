@@ -5152,7 +5152,7 @@ async function handleExtLoggedInChangePassword() {
       })
     });
 
-    const data = await res.json();
+    const data = await safeParseApiResponse(res);
     if (!res.ok) {
       throw new Error(data.error || 'Could not update password');
     }
@@ -5217,7 +5217,7 @@ async function handleExtResetPassword() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier: ident, currentPassword: currentPass, newPassword: p1 })
     });
-    const data = await res.json();
+    const data = await safeParseApiResponse(res);
     if (!res.ok) {
       throw new Error(data.error || 'Could not reset password');
     }
@@ -5251,7 +5251,7 @@ async function handleExtRequestReview() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ handle, email, reason: 'Suspended user requesting review from extension' })
     });
-    const d = await res.json();
+    const d = await safeParseApiResponse(res);
     alert('✓ Review Request Submitted!\n\nYour appeal has been delivered to the administrator.\nPlease await review.');
     if (btn) btn.textContent = '✓ Appeal Submitted to Admin';
   } catch (err) {
