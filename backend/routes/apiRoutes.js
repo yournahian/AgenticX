@@ -76,6 +76,8 @@ router.post('/admin/delete-user', adminController.deleteUser);
 router.get('/admin/password-requests', adminController.getPasswordRequests);
 router.get('/admin/plans', adminController.getPlans);
 router.post('/admin/save-plans', adminController.savePlans);
+router.get('/admin/transactions', adminController.getTransactions);
+router.post('/admin/transactions', adminController.createTransaction);
 router.get('/admin/ledger', adminController.getGlobalLedger);
 router.post('/admin/clean-all-data', adminController.wipeAllUsers);
 router.post('/admin/wipe-all-users', adminController.wipeAllUsers);

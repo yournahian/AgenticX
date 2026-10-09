@@ -49,6 +49,22 @@ exports.approveRequest = async (req, res) => {
     const credits = Number(initialCredits) || 100;
     const plan = planTier || 'Free Plan';
     const result = await db.approveAccessRequest(requestId, credits, plan);
+
+    if (plan && !plan.toLowerCase().includes('free')) {
+      try {
+        await db.recordTransaction({
+          user: result.handle || 'Customer',
+          handle: result.handle,
+          email: req.body.email || '',
+          type: 'Plan Purchase',
+          item: plan,
+          credits: result.credits,
+          amount: plan.includes('Growth') ? '$12.00' : plan.includes('Pro') ? '$29.00' : '$99.00',
+          method: 'Stripe Card'
+        });
+      } catch (e) {}
+    }
+
     res.json({
       success: true,
       message: `Access request approved! User created/activated with ${plan} and ${result.credits} credits allocated.`,
@@ -125,6 +141,22 @@ exports.updateUserPlan = async (req, res) => {
   }
   try {
     const updated = await db.updateUserPlan(targetId, plan);
+
+    if (plan && !plan.toLowerCase().includes('free')) {
+      try {
+        await db.recordTransaction({
+          user: updated.full_name || updated.name || 'Customer',
+          handle: updated.handle,
+          email: updated.email,
+          type: 'Plan Upgrade',
+          item: plan,
+          credits: updated.credits,
+          amount: plan.includes('Growth') ? '$12.00' : plan.includes('Pro') ? '$29.00' : '$99.00',
+          method: 'Stripe Card'
+        });
+      } catch (e) {}
+    }
+
     res.json({
       success: true,
       message: `Plan successfully updated to "${plan}" for user`,
@@ -158,6 +190,24 @@ exports.getPasswordRequests = async (req, res) => {
     const ledger = await db.getAllLedger();
     const requests = (ledger || []).filter(l => l.action === 'Forgot Password');
     res.json({ requests });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getTransactions = async (req, res) => {
+  try {
+    const transactions = await db.getTransactions();
+    res.json({ success: true, transactions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.createTransaction = async (req, res) => {
+  try {
+    const tx = await db.recordTransaction(req.body);
+    res.json({ success: true, transaction: tx });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

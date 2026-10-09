@@ -91,7 +91,10 @@ exports.generateReply = async (req, res) => {
       tweetAuthorName,
       style,
       stylePrompt: stylePrompt || customPrompt || prompt || null,
-      length
+      length,
+      user: user.handle || '@user',
+      userName: user.full_name || '',
+      userEmail: user.email || ''
     });
 
     // 3. Atomically deduct 1 Credit and write to Credits Ledger

@@ -429,8 +429,12 @@ async function generateWithProvider({
   tweetAuthorName = '',
   style = 'Natural & Concise',
   stylePrompt = null,
-  length = 'medium'
+  length = 'medium',
+  user = '@user',
+  userName = '',
+  userEmail = ''
 }) {
+  const userHandle = user || '@user';
   const prov = (provider || 'openai').toLowerCase();
   const apiKey = getProviderKey(prov);
   const selectedModel = model || (DEFAULT_MODELS[prov]?.[0]?.id || 'gpt-4o-mini');
@@ -520,6 +524,9 @@ async function generateWithProvider({
             addApiLog({
               provider: prov.toUpperCase(),
               model: data.model || selectedModel,
+              user: userHandle,
+              userName,
+              userEmail,
               status: 'SUCCESS',
               statusCode: 200,
               targetSnippet: tweetText,
@@ -540,6 +547,9 @@ async function generateWithProvider({
           addApiLog({
             provider: prov.toUpperCase(),
             model: selectedModel,
+            user: userHandle,
+            userName,
+            userEmail,
             status: 'FAILED',
             statusCode: response.status,
             targetSnippet: tweetText,
@@ -554,6 +564,9 @@ async function generateWithProvider({
       addApiLog({
         provider: prov.toUpperCase(),
         model: selectedModel,
+        user: userHandle,
+        userName,
+        userEmail,
         status: 'NETWORK_ERROR',
         statusCode: 500,
         targetSnippet: tweetText,
@@ -616,6 +629,9 @@ async function generateWithProvider({
           addApiLog({
             provider: `${fb.provider.toUpperCase()} (Failover)`,
             model: fb.model,
+            user: userHandle,
+            userName,
+            userEmail,
             status: 'SUCCESS',
             statusCode: 200,
             targetSnippet: tweetText,
@@ -635,6 +651,9 @@ async function generateWithProvider({
         addApiLog({
           provider: `${fb.provider.toUpperCase()} (Failover)`,
           model: fb.model,
+          user: userHandle,
+          userName,
+          userEmail,
           status: 'FAILED',
           statusCode: fbRes.status,
           targetSnippet: tweetText,
@@ -653,6 +672,9 @@ async function generateWithProvider({
   addApiLog({
     provider: 'FALLBACK_SYNTHESIS',
     model: 'emergency-synthesized',
+    user: userHandle,
+    userName,
+    userEmail,
     status: 'FALLBACK',
     statusCode: 200,
     targetSnippet: tweetText,
@@ -699,13 +721,29 @@ function createSynthesizedReply(tweet, author, style, styleInstruction = '') {
 
 // Telemetry & API Key Health Testing Engine
 const LOGS_FILE = path.join(__dirname, '../data/apiTelemetryLogs.json');
+const tmpLogsPath = path.join('/tmp', 'apiTelemetryLogs.json');
 let recentApiLogs = [];
 
 try {
-  if (fs.existsSync(LOGS_FILE)) {
+  if (fs.existsSync(tmpLogsPath)) {
+    recentApiLogs = JSON.parse(fs.readFileSync(tmpLogsPath, 'utf8'));
+  } else if (fs.existsSync(LOGS_FILE)) {
     recentApiLogs = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
   }
 } catch (e) { recentApiLogs = []; }
+
+// Asynchronously load cloud-persisted telemetry logs if empty
+(async () => {
+  try {
+    const supabase = require('../config/supabase');
+    if (supabase) {
+      const { data } = await supabase.from('plans').select('features').eq('id', 'system_telemetry_logs').maybeSingle();
+      if (data && Array.isArray(data.features) && data.features.length > 0) {
+        recentApiLogs = data.features;
+      }
+    }
+  } catch (e) {}
+})();
 
 function addApiLog(entry) {
   const logItem = {
@@ -714,6 +752,9 @@ function addApiLog(entry) {
     date: new Date().toLocaleDateString(),
     provider: entry.provider || 'unknown',
     model: entry.model || 'unknown',
+    user: entry.user || entry.userHandle || '@user',
+    userName: entry.userName || '',
+    userEmail: entry.userEmail || '',
     status: entry.status || 'SUCCESS',
     statusCode: entry.statusCode || 200,
     targetSnippet: (entry.targetSnippet || '').slice(0, 100),
@@ -724,11 +765,26 @@ function addApiLog(entry) {
   };
 
   recentApiLogs.unshift(logItem);
-  if (recentApiLogs.length > 50) recentApiLogs = recentApiLogs.slice(0, 50);
+  if (recentApiLogs.length > 100) recentApiLogs = recentApiLogs.slice(0, 100);
 
   try {
     fs.mkdirSync(path.dirname(LOGS_FILE), { recursive: true });
     fs.writeFileSync(LOGS_FILE, JSON.stringify(recentApiLogs, null, 2), 'utf8');
+  } catch (e) {}
+  try {
+    fs.writeFileSync(tmpLogsPath, JSON.stringify(recentApiLogs, null, 2), 'utf8');
+  } catch (e) {}
+
+  // Cloud persistence to Supabase so logs never disappear on Vercel
+  try {
+    const supabase = require('../config/supabase');
+    if (supabase) {
+      supabase.from('plans').upsert({
+        id: 'system_telemetry_logs',
+        name: 'System Telemetry Logs',
+        features: recentApiLogs.slice(0, 50)
+      }).then(() => {}).catch(() => {});
+    }
   } catch (e) {}
 }
 
