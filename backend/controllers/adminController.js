@@ -605,8 +605,27 @@ let lastToneFetchTime = 0;
 const TONE_CACHE_TTL = 3000; // 3 seconds TTL so updates propagate across instances
 
 exports.getToneStylesCached = () => inMemoryToneStyles;
+exports.getToneStylesDirect = async () => {
+  if (inMemoryToneStyles && inMemoryToneStyles.defaultTones && (Date.now() - lastToneFetchTime < TONE_CACHE_TTL)) {
+    return inMemoryToneStyles;
+  }
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.from('plans').select('features').eq('id', 'system_tone_styles').maybeSingle();
+      if (!error && data && data.features && Array.isArray(data.features.defaultTones)) {
+        inMemoryToneStyles = data.features;
+        lastToneFetchTime = Date.now();
+        return inMemoryToneStyles;
+      }
+    } catch (e) {}
+  }
+  return inMemoryToneStyles;
+};
 
 exports.getToneStyles = async (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   try {
     const now = Date.now();
     if (inMemoryToneStyles && inMemoryToneStyles.defaultTones && (now - lastToneFetchTime < TONE_CACHE_TTL)) {

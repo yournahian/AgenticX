@@ -535,7 +535,7 @@ function sanitizeReplyOutput(rawReply, styleInstruction = '', authorHandle = '',
 /**
  * Resolve style instruction prioritizing user prompt above everything
  */
-function resolveStyleInstruction(style, stylePrompt) {
+async function resolveStyleInstruction(style, stylePrompt) {
   if (stylePrompt && stylePrompt.trim().length > 0) {
     return stylePrompt.trim();
   }
@@ -554,7 +554,9 @@ function resolveStyleInstruction(style, stylePrompt) {
     let toneData = null;
     try {
       const adminController = require('../controllers/adminController');
-      if (adminController.getToneStylesCached) {
+      if (adminController.getToneStylesDirect) {
+        toneData = await adminController.getToneStylesDirect();
+      } else if (adminController.getToneStylesCached) {
         toneData = adminController.getToneStylesCached();
       }
     } catch(e) {}
@@ -639,7 +641,7 @@ async function generateWithProvider({
   const apiKey = getProviderKey(prov);
   const selectedModel = model || (DEFAULT_MODELS[prov]?.[0]?.id || 'gpt-4o-mini');
 
-  const styleInstruction = resolveStyleInstruction(style, stylePrompt);
+  const styleInstruction = await resolveStyleInstruction(style, stylePrompt);
   const maxTokens = length === 'short' ? 45 : length === 'long' ? 140 : 80;
 
   // Real API execution if key exists

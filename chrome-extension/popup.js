@@ -723,9 +723,20 @@ function switchExtTab(tabKey) {
 // ==============================================================
 // DYNAMIC TONE & STYLE SYSTEM WITH CUSTOM USER PROMPTS
 // ==============================================================
+// Tone & Style Dynamic Pill Rendering & Cloud Synchronization
+// ==============================================================
+function getCleanToneLabel(name, isMini = false) {
+  if (!name) return 'Tone';
+  // Remove parenthetical notes like "(5-10 words)", "(Crypto Twitter)", etc.
+  const clean = name.replace(/\s*\(.*?\)\s*/g, ' ').trim();
+  if (isMini) return clean.split(' ')[0] || clean;
+  return clean || name;
+}
+
 async function initToneSystem() {
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    const stored = await chrome.storage.local.get(['customTones', 'selectedTone', 'selectedTonePrompt', 'selectedToneId']).catch(() => ({}));
+    const stored = await chrome.storage.local.get(['defaultTones', 'customTones', 'selectedTone', 'selectedTonePrompt', 'selectedToneId']).catch(() => ({}));
+    if (Array.isArray(stored?.defaultTones) && stored.defaultTones.length > 0) state.defaultTones = stored.defaultTones;
     if (Array.isArray(stored?.customTones)) state.customTones = stored.customTones;
     if (stored?.selectedTone) state.selectedTone = stored.selectedTone;
     if (stored?.selectedTonePrompt) state.selectedTonePrompt = stored.selectedTonePrompt;
@@ -736,14 +747,16 @@ async function initToneSystem() {
   renderTonePills();
   setupCustomToneDrawer();
 
-  // Non-blocking network sync
+  // Instant network sync with cache-busting
   syncToneStylesFromServer();
 }
 
 async function syncToneStylesFromServer() {
   try {
     const backendUrl = await getBackendUrl();
-    const res = await fetch(`${backendUrl}/api/tone-styles`).catch(() => null);
+    const res = await fetch(`${backendUrl}/api/tone-styles?_t=${Date.now()}`, {
+      cache: 'no-store'
+    }).catch(() => null);
     if (res && res.ok) {
       const data = await res.json();
       if (typeof data.maxCustomTemplatesPerUser === 'number') {
@@ -751,21 +764,25 @@ async function syncToneStylesFromServer() {
       }
       if (Array.isArray(data.defaultTones) && data.defaultTones.length > 0) {
         state.defaultTones = data.defaultTones;
-        const matching = state.defaultTones.find(t =>
+        let matching = state.defaultTones.find(t =>
           (state.selectedToneId && t.id === state.selectedToneId) ||
           (state.selectedTone && t.name === state.selectedTone)
         );
+        if (!matching && state.defaultTones.length > 0) {
+          matching = state.defaultTones[0];
+        }
         if (matching) {
           state.selectedToneId = matching.id;
           state.selectedTone = matching.name;
           state.selectedTonePrompt = matching.prompt;
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            chrome.storage.local.set({
-              selectedToneId: matching.id,
-              selectedTone: matching.name,
-              selectedTonePrompt: matching.prompt
-            });
-          }
+        }
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({
+            defaultTones: state.defaultTones,
+            selectedToneId: state.selectedToneId,
+            selectedTone: state.selectedTone,
+            selectedTonePrompt: state.selectedTonePrompt
+          });
         }
         renderTonePills();
       }
@@ -794,8 +811,8 @@ function renderTonePills() {
       if (isMini) btn.style.fontSize = '10px';
       btn.dataset.id = t.id;
       btn.dataset.tone = t.name;
-      btn.textContent = isMini ? t.name.split(' ')[0] : t.name.split(' ')[0];
-      btn.title = `${t.name}: ${t.prompt}`;
+      btn.textContent = getCleanToneLabel(t.name, isMini);
+      btn.title = `${t.name}\n\nSystem Prompt:\n${t.prompt}`;
       btn.onclick = () => selectTone(t.id, t.name, t.prompt);
       targetEl.appendChild(btn);
     });
@@ -851,15 +868,21 @@ function renderTonePills() {
 }
 
 function selectTone(id, name, prompt) {
+  let livePrompt = prompt;
+  const sysTone = (state.defaultTones || []).find(t => t.id === id || t.name === name);
+  if (sysTone && sysTone.prompt) livePrompt = sysTone.prompt;
+  const custTone = (state.customTones || []).find(t => t.id === id || t.name === name);
+  if (custTone && custTone.prompt) livePrompt = custTone.prompt;
+
   state.selectedToneId = id;
   state.selectedTone = name;
-  state.selectedTonePrompt = prompt || '';
+  state.selectedTonePrompt = livePrompt || '';
 
   if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     chrome.storage.local.set({
       selectedToneId: id,
       selectedTone: name,
-      selectedTonePrompt: prompt || ''
+      selectedTonePrompt: state.selectedTonePrompt
     });
   }
   renderTonePills();
