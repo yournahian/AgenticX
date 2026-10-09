@@ -71,6 +71,8 @@ const DEFAULT_MODELS = {
     { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet (Latest)', context: '200k' },
     { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', context: '200k' },
     { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Ultra Fast)', context: '200k' },
+    { id: 'claude-opus-5', name: 'Claude Opus 5 (Artbloom Gateway)', context: '200k' },
+    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5 (Artbloom Gateway)', context: '200k' },
     { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus (Deep Reasoning)', context: '200k' },
     { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', context: '200k' }
   ]
@@ -293,18 +295,26 @@ async function fetchLiveModels(provider, customApiKey = null, customBaseUrl = nu
         const isProxy = !baseUrl.includes('anthropic.com');
 
         if (isProxy) {
-          // If using Artbloom or OpenAI-compatible proxy, fetch /models with Bearer token
+          // If using Artbloom or OpenAI-compatible proxy, fetch /v1/models or /models with Bearer token
           try {
-            const res = await fetch(`${baseUrl}/models`, {
-              headers: { 'Authorization': `Bearer ${apiKey}` }
+            let res = await fetch(`${baseUrl}/v1/models`, {
+              headers: { 'Authorization': `Bearer ${apiKey}`, 'x-api-key': apiKey }
             });
+            if (!res.ok) {
+              res = await fetch(`${baseUrl}/models`, {
+                headers: { 'Authorization': `Bearer ${apiKey}`, 'x-api-key': apiKey }
+              });
+            }
             if (res.ok) {
-              const data = await res.json();
-              const models = (data.data || [])
-                .filter(m => !m.id.includes('embedding') && !m.id.includes('whisper') && !m.id.includes('tts'))
-                .map(m => ({ id: m.id, name: m.id, context: '200k' }));
-              if (models.length > 0) {
-                return { provider: 'anthropic', isLive: true, count: models.length, models };
+              const contentType = res.headers.get('content-type') || '';
+              if (contentType.includes('application/json')) {
+                const data = await res.json();
+                const models = (data.data || [])
+                  .filter(m => !m.id.includes('embedding') && !m.id.includes('whisper') && !m.id.includes('tts'))
+                  .map(m => ({ id: m.id, name: m.id, context: 'Active' }));
+                if (models.length > 0) {
+                  return { provider: 'anthropic', isLive: true, count: models.length, models };
+                }
               }
             }
           } catch (e) {}
@@ -1116,17 +1126,35 @@ async function testAllProviderKeys() {
         testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
         testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
       } else if (p === 'anthropic') {
-        testEndpoint = `${getAnthropicBaseUrl()}/v1/messages`;
+        const bUrl = getAnthropicBaseUrl().replace(/\/+$/, '');
+        const isProxy = !bUrl.includes('anthropic.com');
+        testEndpoint = `${bUrl}/v1/messages`;
         testHeaders = {
           'Content-Type': 'application/json',
           'x-api-key': key,
+          'Authorization': `Bearer ${key}`,
           'anthropic-version': '2023-06-01'
         };
-        testBody = {
-          model: 'claude-3-5-haiku-20241022',
-          messages: [{ role: 'user', content: 'hello' }],
-          max_tokens: 5
-        };
+        const candidates = isProxy ? ['claude-opus-5', 'claude-opus-5-5', 'claude-3-5-haiku-20241022'] : ['claude-3-5-haiku-20241022'];
+        let successRes = null;
+        for (const cModel of candidates) {
+          const res = await fetch(testEndpoint, {
+            method: 'POST',
+            headers: testHeaders,
+            body: JSON.stringify({ model: cModel, messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 })
+          });
+          if (res.ok) {
+            successRes = res;
+            break;
+          }
+        }
+        const latencyMs = Date.now() - t0;
+        if (successRes) {
+          results[p] = { configured: true, status: 'HEALTHY', statusCode: 200, latencyMs, message: `Active & Working (${latencyMs}ms)` };
+        } else {
+          results[p] = { configured: true, status: 'ERROR', statusCode: 400, latencyMs, message: `Could not verify Anthropic/proxy key` };
+        }
+        continue;
       } else if (p === 'gemini') {
         testEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
         testHeaders = { 'Content-Type': 'application/json' };
@@ -1180,17 +1208,55 @@ async function testSingleProviderKey(provider, overrideKey, overrideBaseUrl) {
       testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
     } else if (p === 'anthropic') {
       const bUrl = (overrideBaseUrl && overrideBaseUrl.trim()) ? overrideBaseUrl.trim().replace(/\/+$/, '') : getAnthropicBaseUrl();
+      const isProxy = !bUrl.includes('anthropic.com');
       testEndpoint = `${bUrl}/v1/messages`;
       testHeaders = {
         'Content-Type': 'application/json',
         'x-api-key': key,
+        'Authorization': `Bearer ${key}`,
         'anthropic-version': '2023-06-01'
       };
-      testBody = {
-        model: 'claude-3-5-haiku-20241022',
-        messages: [{ role: 'user', content: 'hello' }],
-        max_tokens: 5
-      };
+
+      let candidateModels = ['claude-3-5-haiku-20241022', 'claude-opus-5', 'claude-opus-5-5', 'claude-3-5-sonnet-20241022'];
+      if (isProxy) {
+        candidateModels = ['claude-opus-5', 'claude-opus-5-5', 'claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'];
+        try {
+          const modRes = await fetch(`${bUrl}/v1/models`, {
+            headers: { 'Authorization': `Bearer ${key}`, 'x-api-key': key }
+          });
+          if (modRes.ok) {
+            const modData = await modRes.json();
+            const validList = (modData.data || []).map(m => m.id).filter(Boolean);
+            if (validList.length > 0) {
+              candidateModels = [...validList, ...candidateModels];
+            }
+          }
+        } catch (e) {}
+      }
+
+      let lastRes = null;
+      let lastErrText = '';
+      for (const mId of candidateModels.slice(0, 4)) {
+        const res = await fetch(testEndpoint, {
+          method: 'POST',
+          headers: testHeaders,
+          body: JSON.stringify({
+            model: mId,
+            messages: [{ role: 'user', content: 'hello' }],
+            max_tokens: 5
+          })
+        });
+        if (res.ok) {
+          const latencyMs = Date.now() - t0;
+          return { configured: true, status: 'HEALTHY', statusCode: res.status, latencyMs, message: `Connected & Verified with ${mId}! (${latencyMs}ms)` };
+        }
+        lastRes = res;
+        lastErrText = await res.text();
+        if (res.status !== 404) break;
+      }
+
+      const latencyMs = Date.now() - t0;
+      return { configured: true, status: 'ERROR', statusCode: lastRes ? lastRes.status : 500, latencyMs, message: `HTTP ${lastRes ? lastRes.status : 500}: ${lastErrText.slice(0, 150)}` };
     } else if (p === 'gemini') {
       testEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
       testHeaders = { 'Content-Type': 'application/json' };

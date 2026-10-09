@@ -330,10 +330,12 @@ function getFallbackModelsForProvider(prov) {
       ];
     case 'anthropic':
       return [
-        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Latest)', context: '200k' },
+        { id: 'claude-opus-5', name: 'Claude Opus 5 (Artbloom Gateway)', context: '200k' },
+        { id: 'claude-opus-5-5', name: 'Claude Opus 5.5 (Artbloom Gateway)', context: '200k' },
+        { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet (Latest)', context: '200k' },
+        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', context: '200k' },
         { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Fast)', context: '200k' },
         { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus (Deep Reasoning)', context: '200k' },
-        { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', context: '200k' },
         { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', context: '200k' }
       ];
     case 'openai':
