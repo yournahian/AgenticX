@@ -978,9 +978,9 @@ exports.saveProviderConfig = async (req, res) => {
 // Test Single Provider Key Connection
 exports.testSingleKey = async (req, res) => {
   try {
-    const { provider, apiKey, baseUrl } = req.body;
+    const { provider, apiKey, baseUrl, model } = req.body;
     if (!provider) return res.status(400).json({ error: 'provider is required' });
-    const result = await multiProviderService.testSingleProviderKey(provider, apiKey, baseUrl);
+    const result = await multiProviderService.testSingleProviderKey(provider, apiKey, baseUrl, model);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: 'Failed to test key: ' + err.message });

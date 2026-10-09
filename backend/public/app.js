@@ -3221,9 +3221,11 @@ async function testModalProviderConnection(providerId) {
   const resultDiv = document.getElementById('modalTestResult');
   const keyInput = document.getElementById('modalApiKeyInput');
   const baseUrlInput = document.getElementById('modalBaseUrlInput');
+  const modelSelect = document.getElementById('modalModelSelect');
 
   const apiKey = (keyInput?.value || '').trim();
   const baseUrl = (baseUrlInput?.value || '').trim();
+  const model = (modelSelect?.value || '').trim();
 
   if (btn) {
     btn.disabled = true;
@@ -3244,7 +3246,8 @@ async function testModalProviderConnection(providerId) {
       body: JSON.stringify({
         provider: providerId,
         apiKey: apiKey || 'KEEP_EXISTING',
-        baseUrl
+        baseUrl,
+        model
       })
     });
 
@@ -3254,7 +3257,7 @@ async function testModalProviderConnection(providerId) {
         resultDiv.style.background = 'rgba(16,185,129,0.12)';
         resultDiv.style.color = 'var(--status-success)';
         resultDiv.style.border = '1px solid rgba(16,185,129,0.3)';
-        resultDiv.innerHTML = `<strong>✓ Connection Verified!</strong> (${data.latencyMs}ms)<br>Provider authorization and endpoint handshake successful.`;
+        resultDiv.innerHTML = `<strong>✓ Connection Verified!</strong> (${data.latencyMs}ms)<br>${data.message || 'Provider authorization and endpoint handshake successful.'}`;
       } else {
         resultDiv.style.background = 'rgba(239,68,68,0.12)';
         resultDiv.style.color = 'var(--status-error)';

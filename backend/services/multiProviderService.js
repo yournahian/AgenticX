@@ -532,6 +532,27 @@ function sanitizeReplyOutput(rawReply, styleInstruction = '', authorHandle = '',
   return reply;
 }
 
+function getActiveConfiguredModel(prov) {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const p = (prov || '').toLowerCase();
+    const tmpKeys = path.join('/tmp', 'apiKeys.json');
+    if (fs.existsSync(tmpKeys)) {
+      const d = JSON.parse(fs.readFileSync(tmpKeys, 'utf8'));
+      if (d.providerModels && d.providerModels[p]) return d.providerModels[p];
+      if (d.activeProvider === p && d.activeModel) return d.activeModel;
+    }
+    const localKeys = path.join(__dirname, '../data/apiKeys.json');
+    if (fs.existsSync(localKeys)) {
+      const d = JSON.parse(fs.readFileSync(localKeys, 'utf8'));
+      if (d.providerModels && d.providerModels[p]) return d.providerModels[p];
+      if (d.activeProvider === p && d.activeModel) return d.activeModel;
+    }
+  } catch (e) {}
+  return DEFAULT_MODELS[prov]?.[0]?.id || null;
+}
+
 /**
  * Resolve style instruction prioritizing user prompt above everything
  */
@@ -1124,9 +1145,34 @@ async function testAllProviderKeys() {
         testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'HTTP-Referer': 'https://atomx.io' };
         testBody = { model: 'meta-llama/llama-3.3-70b-instruct', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
       } else if (p === 'openai') {
-        testEndpoint = `${getOpenAIBaseUrl()}/chat/completions`;
+        const bUrl = getOpenAIBaseUrl().replace(/\/+$/, '');
+        const isProxy = !bUrl.includes('api.openai.com');
+        testEndpoint = `${bUrl}/chat/completions`;
         testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
-        testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+        const activeModel = getActiveConfiguredModel('openai') || 'gpt-4o-mini';
+        const candidates = isProxy ? [activeModel, 'glm-5.3', 'glm-5.3-flash', 'claude-opus-5', 'grok-4.7', 'gpt-4o', 'gpt-4o-mini'] : [activeModel, 'gpt-4o-mini', 'gpt-4o'];
+        const uniqueCandidates = [...new Set(candidates)];
+        let successRes = null;
+        for (const cModel of uniqueCandidates) {
+          try {
+            const res = await fetch(testEndpoint, {
+              method: 'POST',
+              headers: testHeaders,
+              body: JSON.stringify({ model: cModel, messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 })
+            });
+            if (res.ok) {
+              successRes = res;
+              break;
+            }
+          } catch(e) {}
+        }
+        const latencyMs = Date.now() - t0;
+        if (successRes) {
+          results[p] = { configured: true, status: 'HEALTHY', statusCode: 200, latencyMs, message: `Active & Working (${latencyMs}ms)` };
+        } else {
+          results[p] = { configured: true, status: 'ERROR', statusCode: 400, latencyMs, message: `Could not verify OpenAI/proxy key` };
+        }
+        continue;
       } else if (p === 'anthropic') {
         const bUrl = getAnthropicBaseUrl().replace(/\/+$/, '');
         const isProxy = !bUrl.includes('anthropic.com');
@@ -1183,7 +1229,7 @@ async function testAllProviderKeys() {
   return results;
 }
 
-async function testSingleProviderKey(provider, overrideKey, overrideBaseUrl) {
+async function testSingleProviderKey(provider, overrideKey, overrideBaseUrl, overrideModel) {
   const p = (provider || '').toLowerCase().trim();
   const key = (overrideKey && overrideKey !== 'KEEP_EXISTING') ? overrideKey.trim() : getProviderKey(p);
   if (!key || key.length < 5) {
@@ -1196,18 +1242,93 @@ async function testSingleProviderKey(provider, overrideKey, overrideBaseUrl) {
     let testBody = null;
 
     if (p === 'groq') {
+      const modelToUse = (overrideModel && overrideModel.trim()) || 'llama-3.3-70b-versatile';
       testEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
       testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
-      testBody = { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+      testBody = { model: modelToUse, messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
     } else if (p === 'openrouter') {
+      const modelToUse = (overrideModel && overrideModel.trim()) || 'meta-llama/llama-3.3-70b-instruct';
       testEndpoint = 'https://openrouter.ai/api/v1/chat/completions';
       testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'HTTP-Referer': 'https://atomx.io' };
-      testBody = { model: 'meta-llama/llama-3.3-70b-instruct', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+      testBody = { model: modelToUse, messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
     } else if (p === 'openai') {
       const bUrl = (overrideBaseUrl && overrideBaseUrl.trim()) ? overrideBaseUrl.trim().replace(/\/+$/, '') : getOpenAIBaseUrl();
+      const isProxy = !bUrl.includes('api.openai.com');
       testEndpoint = `${bUrl}/chat/completions`;
       testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
-      testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+
+      let candidateModels = [];
+      if (overrideModel && overrideModel.trim()) {
+        candidateModels.push(overrideModel.trim());
+      }
+      const curActive = getActiveConfiguredModel('openai');
+      if (curActive && curActive.trim()) {
+        candidateModels.push(curActive.trim());
+      }
+      if (isProxy) {
+        candidateModels.push('glm-5.3', 'glm-5.3-flash', 'claude-opus-5', 'claude-opus-5-5', 'grok-4.7', 'gpt-4o', 'gpt-4o-mini');
+        if (!overrideModel && !curActive) {
+          try {
+            const modRes = await fetch(`${bUrl}/models`, {
+              headers: { 'Authorization': `Bearer ${key}` },
+              signal: AbortSignal.timeout(3000)
+            });
+            if (modRes.ok) {
+              const modData = await modRes.json();
+              const validList = (modData.data || []).map(m => m.id).filter(Boolean);
+              if (validList.length > 0) {
+                candidateModels = [...validList, ...candidateModels];
+              }
+            }
+          } catch (e) {}
+        }
+      } else {
+        candidateModels.push('gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo');
+      }
+
+      candidateModels = [...new Set(candidateModels)];
+
+      let lastRes = null;
+      let lastErrText = '';
+      for (const mId of candidateModels.slice(0, 5)) {
+        try {
+          const res = await fetch(testEndpoint, {
+            method: 'POST',
+            headers: testHeaders,
+            body: JSON.stringify({
+              model: mId,
+              messages: [{ role: 'user', content: 'hello' }],
+              max_tokens: 5
+            }),
+            signal: AbortSignal.timeout(6000)
+          });
+          if (res.ok) {
+            const latencyMs = Date.now() - t0;
+            return {
+              configured: true,
+              status: 'HEALTHY',
+              statusCode: res.status,
+              latencyMs,
+              model: mId,
+              message: `Connected & Verified with ${mId}! (${latencyMs}ms)`
+            };
+          }
+          lastRes = res;
+          lastErrText = await res.text();
+          if (res.status !== 404) break;
+        } catch (callErr) {
+          lastErrText = callErr.message;
+        }
+      }
+
+      const latencyMs = Date.now() - t0;
+      return {
+        configured: true,
+        status: 'ERROR',
+        statusCode: lastRes ? lastRes.status : 500,
+        latencyMs,
+        message: `HTTP ${lastRes ? lastRes.status : 500}: ${lastErrText.slice(0, 150)}`
+      };
     } else if (p === 'anthropic') {
       const bUrl = (overrideBaseUrl && overrideBaseUrl.trim()) ? overrideBaseUrl.trim().replace(/\/+$/, '') : getAnthropicBaseUrl();
       const isProxy = !bUrl.includes('anthropic.com');
