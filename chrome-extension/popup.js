@@ -1083,7 +1083,11 @@ function initListeners() {
     if (e.key === 'Enter') handleExtDoLookup();
   });
   document.getElementById('extLookupGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
-  document.getElementById('extEditRequestBtn')?.addEventListener('click', () => showAccessSubView('request'));
+  document.getElementById('extPendingCheckAnotherBtn')?.addEventListener('click', handleExtCheckAnotherId);
+  document.getElementById('extEditRequestBtn')?.addEventListener('click', handleExtSubmitNewAfterReject);
+  document.getElementById('extRejectedSubmitNewBtn')?.addEventListener('click', handleExtSubmitNewAfterReject);
+  document.getElementById('extRejectedCheckAnotherBtn')?.addEventListener('click', handleExtCheckAnotherId);
+  document.getElementById('extRejectedGoLoginBtn')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extGoToRequestLink')?.addEventListener('click', () => showAccessSubView('request'));
   document.getElementById('extGoToResetPwdLink')?.addEventListener('click', () => showAccessSubView('reset'));
@@ -4178,6 +4182,7 @@ function showAccessSubView(viewName) {
     'request': document.getElementById('extRequestAccessView'),
     'lookup': document.getElementById('extCheckStatusLookupView'),
     'pending': document.getElementById('extPendingApprovalView'),
+    'rejected': document.getElementById('extRejectedView'),
     'setPassword': document.getElementById('extSetPasswordView'),
     'login': document.getElementById('extLoggedOutCard'),
     'reset': document.getElementById('extResetPasswordView'),
@@ -4232,16 +4237,22 @@ async function checkAccountVerificationLock() {
     document.getElementById('panel-access')?.classList.add('active');
 
     if (state.pendingRequest) {
-      const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
-      const pHandleText = document.getElementById('extPendingHandleText');
-      const pEmailText = document.getElementById('extPendingEmailText');
-      const pTelegramText = document.getElementById('extPendingTelegramText');
-      if (pHandleDisplay) pHandleDisplay.textContent = state.pendingRequest.handle;
-      if (pHandleText) pHandleText.textContent = state.pendingRequest.handle;
-      if (pEmailText) pEmailText.textContent = state.pendingRequest.email || '--';
-      if (pTelegramText) pTelegramText.textContent = state.pendingRequest.telegram || '--';
-      showAccessSubView('pending');
-      handleExtCheckStatus(false);
+      if (state.pendingRequest.status === 'REJECTED') {
+        const rejDisp = document.getElementById('extRejectedHandleDisplay');
+        if (rejDisp) rejDisp.textContent = state.pendingRequest.handle;
+        showAccessSubView('rejected');
+      } else {
+        const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
+        const pHandleText = document.getElementById('extPendingHandleText');
+        const pEmailText = document.getElementById('extPendingEmailText');
+        const pTelegramText = document.getElementById('extPendingTelegramText');
+        if (pHandleDisplay) pHandleDisplay.textContent = state.pendingRequest.handle;
+        if (pHandleText) pHandleText.textContent = state.pendingRequest.handle;
+        if (pEmailText) pEmailText.textContent = state.pendingRequest.email || '--';
+        if (pTelegramText) pTelegramText.textContent = state.pendingRequest.telegram || '--';
+        showAccessSubView('pending');
+        handleExtCheckStatus(false);
+      }
     } else {
       showAccessSubView('request');
     }
@@ -4549,13 +4560,15 @@ async function handleExtDoLookup() {
       if (loginInput) loginInput.value = data.handle || handle;
       showAccessSubView('login');
     } else if (data.status === 'REJECTED') {
-      if (alertEl) {
-        alertEl.style.display = 'block';
-        alertEl.style.background = 'rgba(239,68,68,0.12)';
-        alertEl.style.color = 'var(--status-error)';
-        alertEl.style.border = '1px solid rgba(239,68,68,0.3)';
-        alertEl.textContent = data.reason || 'Your access request was declined by the administrator.';
+      if (state.pendingRequest) {
+        state.pendingRequest.status = 'REJECTED';
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({ pendingRequest: state.pendingRequest });
+        }
       }
+      const rejDisp = document.getElementById('extRejectedHandleDisplay');
+      if (rejDisp) rejDisp.textContent = data.handle || handle;
+      showAccessSubView('rejected');
     } else {
       if (alertEl) {
         alertEl.style.display = 'block';
@@ -4578,6 +4591,40 @@ async function handleExtDoLookup() {
       btn.disabled = false;
       btn.textContent = '⚡ Check Status & Proceed';
     }
+  }
+}
+
+/**
+ * Clear rejected/pending state and return to clean request form for another ID
+ */
+async function handleExtSubmitNewAfterReject() {
+  state.pendingRequest = null;
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    await chrome.storage.local.remove(['pendingRequest']);
+  }
+  const hInput = document.getElementById('extReqHandleInput');
+  const eInput = document.getElementById('extReqEmailInput');
+  const nInput = document.getElementById('extReqFullNameInput');
+  const tInput = document.getElementById('extReqTelegramInput');
+  if (hInput) hInput.value = '';
+  if (eInput) eInput.value = '';
+  if (nInput) nInput.value = '';
+  if (tInput) tInput.value = '';
+  showAccessSubView('request');
+  setTimeout(() => hInput?.focus(), 80);
+}
+
+/**
+ * Switch to in-extension lookup to check status for another ID / Email
+ */
+function handleExtCheckAnotherId() {
+  showAccessSubView('lookup');
+  const lookupInput = document.getElementById('extLookupHandleInput');
+  const alertEl = document.getElementById('extLookupStatusAlert');
+  if (alertEl) alertEl.style.display = 'none';
+  if (lookupInput) {
+    lookupInput.value = '';
+    setTimeout(() => lookupInput.focus(), 60);
   }
 }
 
@@ -4621,7 +4668,15 @@ async function handleExtCheckStatus(isManual = false) {
         }
       }
     } else if (data.status === 'REJECTED') {
-      alert(`⚠️ Request Notice:\n${data.reason || 'Your access request was declined by the administrator.'}`);
+      if (state.pendingRequest) {
+        state.pendingRequest.status = 'REJECTED';
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({ pendingRequest: state.pendingRequest });
+        }
+      }
+      const rejDisp = document.getElementById('extRejectedHandleDisplay');
+      if (rejDisp) rejDisp.textContent = data.handle || targetHandle;
+      showAccessSubView('rejected');
     } else if (data.status === 'NOT_FOUND') {
       if (isManual) {
         alert(`❌ No Request Found:\n\nNo request found for "${targetHandle || targetEmail}".\nPlease fill out the form below to submit a new request.`);

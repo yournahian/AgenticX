@@ -1744,9 +1744,44 @@
             ⚡ Check Approval Status Now
           </button>
 
-          <button type="button" id="extEditRequestBtn" style="background:none; border:none; color:var(--text-muted); font-size:11px; cursor:pointer; text-decoration:underline;">
-            Submit a different ID or Edit Request
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+            <button type="button" id="extPendingCheckAnotherBtn" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
+              🔍 Check Status for a Different ID / Email
+            </button>
+            <button type="button" id="extEditRequestBtn" style="background:none; border:none; color:var(--text-muted); font-size:11px; cursor:pointer; text-decoration:underline;">
+              ✏️ Submit a New Request with Different ID
+            </button>
+          </div>
+        </div>
+
+        <!-- VIEW 3.5: Request Declined / Rejected View -->
+        <div id="extRejectedView" class="card" style="display:none; padding:18px 14px; background:var(--bg-card); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius-md); text-align:center;">
+          <div style="font-size:32px; margin-bottom:6px;">🚫</div>
+          <div style="font-weight:800; font-size:14px; color:var(--text-primary); margin-bottom:3px;">Access Request Declined</div>
+          <span class="badge-mini popular" style="background:rgba(239,68,68,0.15); color:var(--status-error); margin-bottom:12px; display:inline-block;">DECLINED BY ADMIN</span>
+
+          <p style="font-size:11.5px; color:var(--text-secondary); line-height:1.5; margin-bottom:12px;">
+            The request for <strong id="extRejectedHandleDisplay" style="color:var(--status-error); font-family:monospace;">@user</strong> was declined by the administrator.
+          </p>
+
+          <div style="background:var(--bg-canvas); padding:10px 12px; border-radius:6px; border:1px solid rgba(239,68,68,0.2); font-size:11px; text-align:left; margin-bottom:14px; color:var(--text-secondary);">
+            <div style="font-weight:700; color:var(--text-primary); margin-bottom:3px;">Next Steps:</div>
+            • You can submit a new request using a different verified Twitter / X handle.<br>
+            • Or contact support/admin if you believe this was an error.
+          </div>
+
+          <button type="button" class="primary-btn mini-btn" id="extRejectedSubmitNewBtn" style="width:100%; margin-top:0; margin-bottom:8px;">
+            🔄 Submit Request with Another ID
           </button>
+
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+            <button type="button" id="extRejectedCheckAnotherBtn" style="background:none; border:none; color:var(--blue-primary); font-size:11px; cursor:pointer; text-decoration:underline;">
+              🔍 Check Status for a Different ID / Email
+            </button>
+            <button type="button" id="extRejectedGoLoginBtn" style="background:none; border:none; color:var(--text-muted); font-size:11px; cursor:pointer; text-decoration:underline;">
+              Already have another approved account? Sign In
+            </button>
+          </div>
         </div>
 
         <!-- VIEW 4: Approved! Set Password View -->
