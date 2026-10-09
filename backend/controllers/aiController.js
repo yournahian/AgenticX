@@ -90,13 +90,18 @@ exports.generateReply = async (req, res) => {
   try {
     const fs = require('fs');
     const path = require('path');
+    const os = require('os');
+    const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
     const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
-    if (fs.existsSync(aiSettingsPath)) {
-      const settings = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
-      if (settings.activeProvider) {
-        activeProv = settings.activeProvider;
-        activeModel = settings.activeModel || null;
-      }
+    let settings = null;
+    if (fs.existsSync(tmpAiSettingsPath)) {
+      settings = JSON.parse(fs.readFileSync(tmpAiSettingsPath, 'utf8'));
+    } else if (fs.existsSync(aiSettingsPath)) {
+      settings = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+    }
+    if (settings && settings.activeProvider) {
+      activeProv = settings.activeProvider;
+      activeModel = settings.activeModel || null;
     }
   } catch (e) {}
 

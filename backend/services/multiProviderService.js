@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const SYSTEM_PROMPT_TEMPLATE = `
 You are ATOMX ENGAGE, an elite AI content engagement strategist.
@@ -89,8 +90,15 @@ function getProviderKey(provider) {
   const keyName = envVarMap[norm];
   if (!keyName) return '';
 
-  // 1. Check keys saved via Admin Control Center in aiSettings.json
+  // 1. Check keys saved via Admin Control Center in aiSettings.json (/tmp or local)
   try {
+    const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
+    if (fs.existsSync(tmpAiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(tmpAiSettingsPath, 'utf8'));
+      if (data.apiKeys && data.apiKeys[norm] && data.apiKeys[norm].trim().length > 5) {
+        return data.apiKeys[norm].trim();
+      }
+    }
     const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
     if (fs.existsSync(aiSettingsPath)) {
       const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
@@ -128,8 +136,15 @@ function getProviderKey(provider) {
 
 // Custom / Proxy Base URL loader helper (supports Artbloom, Ollama, vLLM, custom gateways)
 function getOpenAIBaseUrl() {
-  // 1. Check aiSettings.json
+  // 1. Check aiSettings.json (/tmp or local)
   try {
+    const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
+    if (fs.existsSync(tmpAiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(tmpAiSettingsPath, 'utf8'));
+      if (data.openaiBaseUrl && data.openaiBaseUrl.trim()) {
+        return data.openaiBaseUrl.trim().replace(/\/+$/, '');
+      }
+    }
     const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
     if (fs.existsSync(aiSettingsPath)) {
       const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
@@ -159,6 +174,13 @@ function getOpenAIBaseUrl() {
 
 function getAnthropicBaseUrl() {
   try {
+    const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
+    if (fs.existsSync(tmpAiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(tmpAiSettingsPath, 'utf8'));
+      if (data.anthropicBaseUrl && data.anthropicBaseUrl.trim()) {
+        return data.anthropicBaseUrl.trim().replace(/\/+$/, '');
+      }
+    }
     const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
     if (fs.existsSync(aiSettingsPath)) {
       const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));

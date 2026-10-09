@@ -4,6 +4,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const db = require('../config/db');
 const supabase = require('../config/supabase');
 
@@ -458,11 +459,92 @@ exports.saveCuratedLists = async (req, res) => {
 };
 
 const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
+const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
+let inMemoryAiSettings = null;
 
-exports.getActiveModel = (req, res) => {
+async function getAiSettingsData() {
+  if (inMemoryAiSettings && (inMemoryAiSettings.activeProvider || inMemoryAiSettings.apiKeys)) {
+    return inMemoryAiSettings;
+  }
+
+  // 1. Try Supabase cloud database (persistent across all serverless lambda instances)
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('plans')
+        .select('features')
+        .eq('id', 'system_ai_settings')
+        .maybeSingle();
+
+      if (!error && data && data.features && typeof data.features === 'object') {
+        inMemoryAiSettings = data.features;
+        try {
+          fs.writeFileSync(tmpAiSettingsPath, JSON.stringify(inMemoryAiSettings, null, 2), 'utf8');
+        } catch (e) {}
+        return inMemoryAiSettings;
+      }
+    } catch (e) {
+      console.warn('Could not read aiSettings from Supabase:', e.message);
+    }
+  }
+
+  // 2. Try /tmp/aiSettings.json
+  try {
+    if (fs.existsSync(tmpAiSettingsPath)) {
+      inMemoryAiSettings = JSON.parse(fs.readFileSync(tmpAiSettingsPath, 'utf8'));
+      return inMemoryAiSettings;
+    }
+  } catch (e) {}
+
+  // 3. Try local file
   try {
     if (fs.existsSync(aiSettingsPath)) {
-      const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+      inMemoryAiSettings = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+      return inMemoryAiSettings;
+    }
+  } catch (e) {}
+
+  return {};
+}
+
+async function saveAiSettingsData(settingsData) {
+  inMemoryAiSettings = settingsData;
+
+  // 1. Save to Supabase cloud (persistent across all serverless lambda instances!)
+  if (supabase) {
+    try {
+      await supabase.from('plans').upsert({
+        id: 'system_ai_settings',
+        name: 'System AI Settings',
+        price_monthly: 0,
+        credits_monthly: 0,
+        is_popular: false,
+        is_active: false,
+        features: settingsData
+      });
+    } catch (e) {
+      console.warn('Could not persist aiSettings to Supabase:', e.message);
+    }
+  }
+
+  // 2. Safe write to /tmp/aiSettings.json (always writable on Vercel)
+  try {
+    fs.writeFileSync(tmpAiSettingsPath, JSON.stringify(settingsData, null, 2), 'utf8');
+  } catch (e) {}
+
+  // 3. Safe write to local file (if not read-only)
+  try {
+    fs.mkdirSync(path.dirname(aiSettingsPath), { recursive: true });
+    fs.writeFileSync(aiSettingsPath, JSON.stringify(settingsData, null, 2), 'utf8');
+  } catch (e) {
+    // Gracefully ignore EROFS on read-only serverless filesystems like Vercel
+  }
+}
+
+exports.getActiveModel = async (req, res) => {
+  try {
+    const data = await getAiSettingsData();
+    if (data.activeProvider && data.activeModel) {
       return res.json(data);
     }
     res.json({ activeProvider: 'groq', activeModel: 'llama-3.3-70b-versatile' });
@@ -471,21 +553,22 @@ exports.getActiveModel = (req, res) => {
   }
 };
 
-exports.saveActiveModel = (req, res) => {
+exports.saveActiveModel = async (req, res) => {
   try {
     const provider = req.body.provider || req.body.activeProvider;
     const model = req.body.model || req.body.activeModel;
     if (!provider || !model) {
       return res.status(400).json({ error: 'provider and model are required' });
     }
+    const current = await getAiSettingsData();
     const data = {
+      ...current,
       activeProvider: provider,
       activeModel: model,
       lastUpdated: new Date().toISOString(),
       updatedBy: 'Admin Control Center'
     };
-    fs.mkdirSync(path.dirname(aiSettingsPath), { recursive: true });
-    fs.writeFileSync(aiSettingsPath, JSON.stringify(data, null, 2), 'utf8');
+    await saveAiSettingsData(data);
     res.json({ message: `Active AI model set to ${provider.toUpperCase()}: ${model}`, settings: data });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save active AI model: ' + err.message });
@@ -664,13 +747,10 @@ function readEnvValue(keyName) {
 }
 
 // Get API Keys configuration status and masked keys for Admin Control Center
-exports.getApiKeys = (req, res) => {
+exports.getApiKeys = async (req, res) => {
   try {
-    let savedKeys = {};
-    if (fs.existsSync(aiSettingsPath)) {
-      const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
-      savedKeys = data.apiKeys || {};
-    }
+    const data = await getAiSettingsData();
+    const savedKeys = data.apiKeys || {};
 
     const providers = ['groq', 'openrouter', 'openai', 'anthropic', 'gemini'];
     const envVarMap = {
@@ -695,21 +775,8 @@ exports.getApiKeys = (req, res) => {
       };
     }
 
-    let openaiBaseUrl = '';
-    let anthropicBaseUrl = '';
-    if (fs.existsSync(aiSettingsPath)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
-        openaiBaseUrl = data.openaiBaseUrl || '';
-        anthropicBaseUrl = data.anthropicBaseUrl || '';
-      } catch (e) {}
-    }
-    if (!openaiBaseUrl) {
-      openaiBaseUrl = process.env.OPENAI_BASE_URL || readEnvValue('OPENAI_BASE_URL') || 'https://api.openai.com/v1';
-    }
-    if (!anthropicBaseUrl) {
-      anthropicBaseUrl = process.env.ANTHROPIC_BASE_URL || readEnvValue('ANTHROPIC_BASE_URL') || 'https://api.anthropic.com';
-    }
+    let openaiBaseUrl = data.openaiBaseUrl || process.env.OPENAI_BASE_URL || readEnvValue('OPENAI_BASE_URL') || 'https://api.openai.com/v1';
+    let anthropicBaseUrl = data.anthropicBaseUrl || process.env.ANTHROPIC_BASE_URL || readEnvValue('ANTHROPIC_BASE_URL') || 'https://api.anthropic.com';
 
     res.json({ keys: result, openaiBaseUrl, anthropicBaseUrl });
   } catch (err) {
@@ -717,8 +784,8 @@ exports.getApiKeys = (req, res) => {
   }
 };
 
-// Save and activate API Key from Admin Control Center (Syncs to aiSettings.json, process.env, and .env)
-exports.saveApiKey = (req, res) => {
+// Save and activate API Key from Admin Control Center (Syncs to Supabase, aiSettings.json, process.env, and .env)
+exports.saveApiKey = async (req, res) => {
   try {
     const { provider, apiKey, openaiBaseUrl, anthropicBaseUrl } = req.body;
     if (!provider || typeof apiKey !== 'string') {
@@ -741,12 +808,10 @@ exports.saveApiKey = (req, res) => {
 
     const cleanKey = apiKey.trim();
 
-    // 1. Update in aiSettings.json
-    let data = {};
-    if (fs.existsSync(aiSettingsPath)) {
-      data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
-    }
+    // 1. Fetch current settings from Supabase / cache
+    let data = await getAiSettingsData();
     if (!data.apiKeys) data.apiKeys = {};
+
     if (cleanKey && cleanKey !== 'KEEP_EXISTING') {
       data.apiKeys[prov] = cleanKey;
       process.env[envName] = cleanKey;
@@ -765,8 +830,9 @@ exports.saveApiKey = (req, res) => {
       updateEnvFile('ANTHROPIC_BASE_URL', cleanUrl);
     }
     data.lastUpdated = new Date().toISOString();
-    fs.mkdirSync(path.dirname(aiSettingsPath), { recursive: true });
-    fs.writeFileSync(aiSettingsPath, JSON.stringify(data, null, 2), 'utf8');
+
+    // 2. Persist safely across all environments (Supabase Cloud + /tmp + local if writable)
+    await saveAiSettingsData(data);
 
     const effectiveKey = (cleanKey && cleanKey !== 'KEEP_EXISTING') ? cleanKey : (data.apiKeys[prov] || '');
     const masked = effectiveKey.length > 8 ? effectiveKey.slice(0, 4) + '••••••••' + effectiveKey.slice(-4) : '••••••••';
@@ -774,7 +840,7 @@ exports.saveApiKey = (req, res) => {
       message: `✓ ${provider.toUpperCase()} API key saved successfully and activated immediately!`,
       provider: prov,
       maskedKey: masked,
-      hasKey: cleanKey.length > 5
+      hasKey: effectiveKey.length > 5
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save API key: ' + err.message });
