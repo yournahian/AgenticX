@@ -4405,6 +4405,21 @@ async function handleExtSubmitRequest() {
 
     const data = await res.json();
     if (!res.ok && res.status !== 201) {
+      if (data.alreadyApproved || (data.error && data.error.includes('already registered'))) {
+        alert(`✓ Account Already Approved:\n\n${handle} is already approved!\nPlease sign in directly with your password.`);
+        const loginInput = document.getElementById('extLoginHandleInput');
+        if (loginInput) loginInput.value = handle;
+        showAccessSubView('login');
+        const loginAlert = document.getElementById('extLoginAlert');
+        if (loginAlert) {
+          loginAlert.style.display = 'block';
+          loginAlert.style.background = 'rgba(16,185,129,0.12)';
+          loginAlert.style.color = 'var(--status-success)';
+          loginAlert.style.border = '1px solid rgba(16,185,129,0.3)';
+          loginAlert.textContent = `✓ Account ${handle} is already approved and registered! Please sign in with your password.`;
+        }
+        return;
+      }
       throw new Error(data.error || 'Failed to submit request');
     }
 
@@ -4533,11 +4548,24 @@ async function handleExtDoLookup() {
     const res = await fetch(`${backendUrl}/api/auth/check-status?${query.toString()}`);
     const data = await res.json();
 
-    if (data.status === 'APPROVED') {
+    if (data.status === 'APPROVED' && data.needsPasswordSetup) {
       const approvedHandle = data.handle || handle;
       const approvedDisp = document.getElementById('extApprovedHandleDisplay');
       if (approvedDisp) approvedDisp.textContent = approvedHandle;
       showAccessSubView('setPassword');
+    } else if (data.status === 'ACTIVE' || (data.status === 'APPROVED' && !data.needsPasswordSetup)) {
+      const approvedHandle = data.handle || handle;
+      const loginInput = document.getElementById('extLoginHandleInput');
+      if (loginInput) loginInput.value = approvedHandle;
+      showAccessSubView('login');
+      const loginAlert = document.getElementById('extLoginAlert');
+      if (loginAlert) {
+        loginAlert.style.display = 'block';
+        loginAlert.style.background = 'rgba(16,185,129,0.12)';
+        loginAlert.style.color = 'var(--status-success)';
+        loginAlert.style.border = '1px solid rgba(16,185,129,0.3)';
+        loginAlert.textContent = `✓ Account ${approvedHandle} is already approved and active! Please sign in with your password.`;
+      }
     } else if (data.status === 'PENDING') {
       state.pendingRequest = {
         handle: handle || data.handle || '@user',
@@ -4650,7 +4678,7 @@ async function handleExtCheckStatus(isManual = false) {
     const res = await fetch(`${backendUrl}/api/auth/check-status?${query.toString()}`);
     const data = await res.json();
 
-    if (data.status === 'APPROVED') {
+    if (data.status === 'APPROVED' || data.status === 'ACTIVE') {
       const approvedHandle = data.handle || targetHandle;
       if (data.needsPasswordSetup) {
         const approvedDisp = document.getElementById('extApprovedHandleDisplay');
@@ -4663,8 +4691,16 @@ async function handleExtCheckStatus(isManual = false) {
         const loginInput = document.getElementById('extLoginHandleInput');
         if (loginInput) loginInput.value = approvedHandle;
         showAccessSubView('login');
+        const loginAlert = document.getElementById('extLoginAlert');
+        if (loginAlert) {
+          loginAlert.style.display = 'block';
+          loginAlert.style.background = 'rgba(16,185,129,0.12)';
+          loginAlert.style.color = 'var(--status-success)';
+          loginAlert.style.border = '1px solid rgba(16,185,129,0.3)';
+          loginAlert.textContent = `✓ Account ${approvedHandle} is already approved and active! Please enter your password to sign in.`;
+        }
         if (isManual) {
-          alert(`🎉 Your account (${approvedHandle}) is active and approved!\nPlease enter your password to sign in.`);
+          alert(`✓ Account Already Approved:\n\n${approvedHandle} is already active and approved!\nPlease enter your password to sign in.`);
         }
       }
     } else if (data.status === 'REJECTED') {
@@ -4739,6 +4775,13 @@ async function handleExtSetPassword() {
 
     const data = await res.json();
     if (!res.ok) {
+      if (data.alreadyHasPassword) {
+        alert(data.error);
+        const loginInput = document.getElementById('extLoginHandleInput');
+        if (loginInput) loginInput.value = targetHandle || targetEmail;
+        showAccessSubView('login');
+        return;
+      }
       throw new Error(data.error || 'Could not set password');
     }
 

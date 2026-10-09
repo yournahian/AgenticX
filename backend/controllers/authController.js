@@ -106,7 +106,8 @@ exports.requestAccess = async (req, res) => {
     const existingHandleUser = await db.getUserByHandle(rawHandle);
     if (existingHandleUser) {
       return res.status(400).json({ 
-        error: `This Twitter / X handle (${formattedHandle}) is already registered to an account. Each X account can only be linked once.` 
+        error: `This Twitter / X handle (${formattedHandle}) is already registered and approved. Please sign in directly with your password.`,
+        alreadyApproved: true
       });
     }
 
@@ -117,8 +118,12 @@ exports.requestAccess = async (req, res) => {
       return h === rawHandle.toLowerCase() && (r.status === 'PENDING' || r.status === 'APPROVED');
     });
     if (duplicateReq) {
+      const isApproved = duplicateReq.status === 'APPROVED';
       return res.status(400).json({ 
-        error: `An access request for ${formattedHandle} has already been submitted (${duplicateReq.status}). Multiple accounts with the same X ID are strictly prohibited.` 
+        error: isApproved 
+          ? `The request for ${formattedHandle} has already been approved! Please sign in directly.` 
+          : `An access request for ${formattedHandle} has already been submitted (${duplicateReq.status}). Multiple accounts with the same X ID are strictly prohibited.`,
+        alreadyApproved: isApproved
       });
     }
 
@@ -169,7 +174,7 @@ exports.checkAccessStatus = async (req, res) => {
       const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : `@${rawHandle}`;
       const needsPasswordSetup = !user.password_hash || user.password_hash === 'approved_hash';
       return res.json({
-        status: user.status === 'ACTIVE' ? 'APPROVED' : user.status,
+        status: user.status === 'ACTIVE' ? (needsPasswordSetup ? 'APPROVED' : 'ACTIVE') : user.status,
         handle: userHandle,
         email: user.email,
         fullName: user.full_name,
@@ -188,6 +193,28 @@ exports.checkAccessStatus = async (req, res) => {
     });
 
     if (match) {
+      // Check if user already got created/activated in users table
+      let userFromReq = null;
+      if (match.email && db.getUserByEmail) {
+        userFromReq = await db.getUserByEmail(match.email);
+      }
+      if (!userFromReq && match.handle && db.getUserByHandle) {
+        userFromReq = await db.getUserByHandle(match.handle.replace(/^@/, ''));
+      }
+
+      if (userFromReq) {
+        const needsPasswordSetup = !userFromReq.password_hash || userFromReq.password_hash === 'approved_hash';
+        return res.json({
+          status: userFromReq.status === 'ACTIVE' ? (needsPasswordSetup ? 'APPROVED' : 'ACTIVE') : userFromReq.status,
+          handle: userFromReq.handle || match.handle,
+          email: userFromReq.email || match.email,
+          fullName: userFromReq.full_name || match.full_name,
+          needsPasswordSetup,
+          credits: userFromReq.credits,
+          plan: userFromReq.plan_tier
+        });
+      }
+
       return res.json({
         status: match.status, // 'PENDING', 'APPROVED', or 'REJECTED'
         handle: match.handle,
@@ -247,6 +274,15 @@ exports.setPassword = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({ error: 'Approved account not found. Please ensure your request has been submitted.' });
+    }
+
+    // If account already has a real password set, do NOT allow overwriting it via setPassword!
+    const hasRealPassword = user.password_hash && user.password_hash !== 'approved_hash';
+    if (hasRealPassword) {
+      return res.status(400).json({ 
+        error: 'This account is already approved and has a password set. Please sign in directly or use Forgot Password to reset.',
+        alreadyHasPassword: true
+      });
     }
 
     // Update password in database and set ACTIVE

@@ -1229,12 +1229,22 @@ async function handleRequestAccessSubmit(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fullName: name, email, handle, password: pass })
     });
+    const d = await res.json().catch(() => ({}));
     if (res.ok) {
       showToast(`✓ Request submitted for ${handle}! Waiting for admin approval.`);
+      navigateToScreen('03');
+    } else {
+      if (d.alreadyApproved || (d.error && d.error.includes('already registered'))) {
+        showToast(`✓ ${handle} is already approved! Please sign in with your password.`);
+        navigateToScreen('01');
+        return;
+      }
+      showToast(`⚠️ ${d.error || 'Failed to submit request'}`);
+      return;
     }
-  } catch (err) {}
-
-  navigateToScreen('03');
+  } catch (err) {
+    showToast(`❌ Network error: ${err.message}`);
+  }
 }
 
 // -------------------------------------------------------------
