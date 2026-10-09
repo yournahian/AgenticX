@@ -118,6 +118,37 @@ function getProviderKey(provider) {
   return '';
 }
 
+// Custom / Proxy Base URL loader helper (supports Artbloom, Ollama, vLLM, custom gateways)
+function getOpenAIBaseUrl() {
+  // 1. Check aiSettings.json
+  try {
+    const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
+    if (fs.existsSync(aiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+      if (data.openaiBaseUrl && data.openaiBaseUrl.trim()) {
+        return data.openaiBaseUrl.trim().replace(/\/+$/, '');
+      }
+    }
+  } catch (e) {}
+
+  // 2. Check process.env
+  if (process.env.OPENAI_BASE_URL && process.env.OPENAI_BASE_URL.trim()) {
+    return process.env.OPENAI_BASE_URL.trim().replace(/\/+$/, '');
+  }
+
+  // 3. Check backend/.env directly
+  try {
+    const envFile = path.join(__dirname, '..', '.env');
+    if (fs.existsSync(envFile)) {
+      const content = fs.readFileSync(envFile, 'utf8');
+      const match = content.match(/OPENAI_BASE_URL=([^\r\n\s]+)/);
+      if (match && match[1]) return match[1].trim().replace(/\/+$/, '');
+    }
+  } catch (e) {}
+
+  return 'https://api.openai.com/v1';
+}
+
 /**
  * Fetch live available models in real-time from the chosen provider API
  */
@@ -138,16 +169,22 @@ async function fetchLiveModels(provider, customApiKey = null) {
   try {
     switch (prov) {
       case 'openai': {
-        const res = await fetch('https://api.openai.com/v1/models', {
+        const baseUrl = getOpenAIBaseUrl();
+        const res = await fetch(`${baseUrl}/models`, {
           headers: { 'Authorization': `Bearer ${apiKey}` }
         });
         if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`);
         const data = await res.json();
-        // Filter chat-relevant models
-        const chatModels = (data.data || [])
-          .filter(m => m.id.includes('gpt') || m.id.includes('o1') || m.id.includes('chat'))
+        const allModels = data.data || [];
+        // Filter chat-relevant models (supports GPT, Claude, DeepSeek, Llama, Qwen via proxies like Artbloom)
+        let chatModels = allModels
+          .filter(m => m.id.includes('gpt') || m.id.includes('o1') || m.id.includes('chat') || m.id.includes('claude') || m.id.includes('deepseek') || m.id.includes('llama') || m.id.includes('qwen'))
           .sort((a, b) => (b.created || 0) - (a.created || 0))
           .map(m => ({ id: m.id, name: m.id, context: 'Active' }));
+
+        if (chatModels.length === 0 && allModels.length > 0) {
+          chatModels = allModels.map(m => ({ id: m.id, name: m.id, context: 'Active' }));
+        }
 
         return {
           provider: 'openai',
@@ -485,7 +522,7 @@ async function generateWithProvider({
         }
       } else {
         // OpenAI, Groq, and OpenRouter all use OpenAI-compatible Chat Completions
-        let endpoint = 'https://api.openai.com/v1/chat/completions';
+        let endpoint = `${getOpenAIBaseUrl()}/chat/completions`;
         let headers = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
@@ -854,7 +891,7 @@ async function testAllProviderKeys() {
         testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'HTTP-Referer': 'https://atomx.io' };
         testBody = { model: 'meta-llama/llama-3.3-70b-instruct', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
       } else if (p === 'openai') {
-        testEndpoint = 'https://api.openai.com/v1/chat/completions';
+        testEndpoint = `${getOpenAIBaseUrl()}/chat/completions`;
         testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
         testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
       } else if (p === 'gemini') {

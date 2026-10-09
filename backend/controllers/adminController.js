@@ -694,7 +694,18 @@ exports.getApiKeys = (req, res) => {
       };
     }
 
-    res.json({ keys: result });
+    let openaiBaseUrl = '';
+    if (fs.existsSync(aiSettingsPath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+        openaiBaseUrl = data.openaiBaseUrl || '';
+      } catch (e) {}
+    }
+    if (!openaiBaseUrl) {
+      openaiBaseUrl = process.env.OPENAI_BASE_URL || readEnvValue('OPENAI_BASE_URL') || 'https://api.openai.com/v1';
+    }
+
+    res.json({ keys: result, openaiBaseUrl });
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve API keys: ' + err.message });
   }
@@ -703,7 +714,7 @@ exports.getApiKeys = (req, res) => {
 // Save and activate API Key from Admin Control Center (Syncs to aiSettings.json, process.env, and .env)
 exports.saveApiKey = (req, res) => {
   try {
-    const { provider, apiKey } = req.body;
+    const { provider, apiKey, openaiBaseUrl } = req.body;
     if (!provider || typeof apiKey !== 'string') {
       return res.status(400).json({ error: 'provider and apiKey are required' });
     }
@@ -730,6 +741,12 @@ exports.saveApiKey = (req, res) => {
     }
     if (!data.apiKeys) data.apiKeys = {};
     data.apiKeys[prov] = cleanKey;
+    if (typeof openaiBaseUrl === 'string') {
+      const cleanUrl = openaiBaseUrl.trim().replace(/\/+$/, '');
+      data.openaiBaseUrl = cleanUrl;
+      process.env.OPENAI_BASE_URL = cleanUrl;
+      updateEnvFile('OPENAI_BASE_URL', cleanUrl);
+    }
     data.lastUpdated = new Date().toISOString();
     fs.mkdirSync(path.dirname(aiSettingsPath), { recursive: true });
     fs.writeFileSync(aiSettingsPath, JSON.stringify(data, null, 2), 'utf8');
