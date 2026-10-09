@@ -129,6 +129,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'TOGGLE_WORKFLOW_PAUSE') {
+    chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused'], (res) => {
+      const isPaused = (request.isPaused !== undefined) ? request.isPaused : !res?.atomx_workflow_paused;
+      chrome.storage.local.set({ atomx_workflow_paused: isPaused });
+      if (res?.atomx_tg_raid) {
+        chrome.storage.local.set({ atomx_tg_raid: { ...res.atomx_tg_raid, isPaused } });
+      }
+      sendResponse({ ok: true, isPaused });
+    });
+    return true;
+  }
+
+  if (request.type === 'SKIP_WORKFLOW_ITEM') {
+    chrome.storage.local.set({ atomx_skip_current: true });
+    chrome.storage.local.get(['atomx_tg_raid'], (res) => {
+      if (res?.atomx_tg_raid?.active) {
+        const raid = res.atomx_tg_raid;
+        const updatedRaid = {
+          ...raid,
+          currentIndex: raid.currentIndex + 1,
+          ignoredCount: raid.ignoredCount + 1
+        };
+        chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
+        chrome.alarms.create('atomx_tg_raid_step', { when: Date.now() + 300 });
+      }
+    });
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (request.type === 'BG_GET_TG_RAID_STATUS') {
     chrome.storage.local.get(['atomx_tg_raid'], (res) => sendResponse({ raid: res?.atomx_tg_raid || null }));
     return true;
@@ -288,9 +318,18 @@ async function processTgRaidStep() {
   );
 
   try {
-    // Open tweet tab
-    const tab = await chrome.tabs.create({ url: tweet.canonicalUrl, active: true });
-    tgRaidWorkingTabId = tab.id;
+    // Navigate in current tab instead of opening new tab
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    let tab = tabs && tabs[0];
+    let isNewTab = false;
+    if (tab && tab.id) {
+      await chrome.tabs.update(tab.id, { url: tweet.canonicalUrl });
+      tgRaidWorkingTabId = tab.id;
+    } else {
+      tab = await chrome.tabs.create({ url: tweet.canonicalUrl, active: true });
+      tgRaidWorkingTabId = tab.id;
+      isNewTab = true;
+    }
 
     // Wait for tab to fully load (max 12s)
     await waitForTabLoad(tab.id, 12000);
@@ -299,7 +338,7 @@ async function processTgRaidStep() {
     // Re-check abort after tab load
     const recheckStored = await chrome.storage.local.get(['atomx_tg_raid']).catch(() => ({}));
     if (!recheckStored?.atomx_tg_raid?.active) {
-      safeRemoveTab(tab.id);
+      if (isNewTab) safeRemoveTab(tab.id);
       tgRaidWorkingTabId = null;
       return;
     }
@@ -325,7 +364,7 @@ async function processTgRaidStep() {
     // Re-check abort after engagement
     const recheckStored2 = await chrome.storage.local.get(['atomx_tg_raid']).catch(() => ({}));
     if (!recheckStored2?.atomx_tg_raid?.active) {
-      safeRemoveTab(tab.id);
+      if (isNewTab) safeRemoveTab(tab.id);
       tgRaidWorkingTabId = null;
       return;
     }
@@ -360,10 +399,12 @@ async function processTgRaidStep() {
       }).catch(() => null);
     }
 
-    // Close tab after 1.5s
-    await delay(1500);
-    safeRemoveTab(tab.id);
-    tgRaidWorkingTabId = null;
+    // Only close tab if it was newly opened (never close user's current tab)
+    if (isNewTab) {
+      await delay(1500);
+      safeRemoveTab(tab.id);
+      tgRaidWorkingTabId = null;
+    }
 
     // Update raid state
     const updatedRaid = {
@@ -392,9 +433,8 @@ async function processTgRaidStep() {
 
   } catch (err) {
     console.warn(`[ATOMX BG] TG Raid error on ${tweet.canonicalUrl}:`, err);
-    // Clean up tab if open
     if (tgRaidWorkingTabId) {
-      safeRemoveTab(tgRaidWorkingTabId);
+      // Don't kill active tab on error, just clear tracking
       tgRaidWorkingTabId = null;
     }
     // Skip this tweet and move to next
@@ -407,8 +447,17 @@ async function processTgRaidStep() {
 async function schedulePacingCountdown(delaySec, raid, completedIndex, total) {
   // Update HUD each second during the pacing delay
   for (let sec = delaySec; sec > 0; sec--) {
-    const recheckStored = await chrome.storage.local.get(['atomx_tg_raid']).catch(() => ({}));
+    let recheckStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
     if (!recheckStored?.atomx_tg_raid?.active) return; // Aborted during pacing
+    if (recheckStored?.atomx_skip_current) return; // Skipped
+
+    // If workflow is paused, hold and wait here until resumed!
+    while (recheckStored?.atomx_workflow_paused || recheckStored?.atomx_tg_raid?.isPaused) {
+      await delay(400);
+      recheckStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused']).catch(() => ({}));
+      if (!recheckStored?.atomx_tg_raid?.active) return;
+      if (!recheckStored?.atomx_workflow_paused && !recheckStored?.atomx_tg_raid?.isPaused) break;
+    }
 
     await syncTgHud(
       recheckStored.atomx_tg_raid,

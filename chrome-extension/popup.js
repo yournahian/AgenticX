@@ -16,10 +16,22 @@ function safeRemoveTab(tabId) {
     }
   }
 }
+// Notify content scripts when popup is open vs closed (HUD should only appear when popup is closed)
+if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  chrome.storage.local.set({ atomx_popup_open: true }).catch(() => null);
+  window.addEventListener('unload', () => {
+    chrome.storage.local.set({ atomx_popup_open: false }).catch(() => null);
+  });
+  window.addEventListener('pagehide', () => {
+    chrome.storage.local.set({ atomx_popup_open: false }).catch(() => null);
+  });
+}
 
 let state = {
   credits: 0,
   isAborted: false,
+  isPaused: false,
+  skipCurrent: false,
   selectedTone: 'Bullish (5-10 words)',
   selectedTonePrompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no dashes, no preamble, no exclamation marks (!).',
   selectedToneId: 'bullish-short',
@@ -1290,6 +1302,8 @@ function initAgentListeners() {
     }
 
     const runBtn = document.getElementById('runTgEngageBtn');
+    const pauseBtn = document.getElementById('pauseTgEngageBtn');
+    const skipBtn = document.getElementById('skipTgEngageBtn');
     const stopBtn = document.getElementById('stopTgEngageBtn');
     const progressCard = document.getElementById('tgProgressCard');
     const tgStateBadge = document.getElementById('tgStateBadge');
@@ -1302,6 +1316,8 @@ function initAgentListeners() {
     const tgCountdown = document.getElementById('tgCountdownText');
 
     if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
+    if (pauseBtn) { pauseBtn.style.display = 'inline-block'; pauseBtn.textContent = '⏸️ Pause'; }
+    if (skipBtn) skipBtn.style.display = 'inline-block';
     if (stopBtn) stopBtn.style.display = 'inline-block';
     if (progressCard) progressCard.style.display = 'block';
     if (tgStateBadge) tgStateBadge.textContent = 'ENGAGING';
@@ -1315,6 +1331,8 @@ function initAgentListeners() {
 
     // Mark workflow as running (for pagehide mini-hud auto-open)
     state.isWorkflowRunning = true;
+    state.isPaused = false;
+    state.skipCurrent = false;
 
     // Delegate to background service worker — continues even after popup closes
     chrome.runtime.sendMessage({
@@ -1333,6 +1351,8 @@ function initAgentListeners() {
         // Background relay failed — fall back to popup-based execution
         executeAutonomousRaidWorkflow(filtered.freshTweets, actions).finally(() => {
           if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+          if (pauseBtn) pauseBtn.style.display = 'none';
+          if (skipBtn) skipBtn.style.display = 'none';
           if (stopBtn) stopBtn.style.display = 'none';
           state.isWorkflowRunning = false;
         });
@@ -1340,16 +1360,44 @@ function initAgentListeners() {
     });
   });
 
+  // Pause / Resume button for Telegram Group Engage
+  document.getElementById('pauseTgEngageBtn')?.addEventListener('click', () => {
+    state.isPaused = !state.isPaused;
+    chrome.storage.local.set({ atomx_workflow_paused: state.isPaused }).catch(() => null);
+    chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: state.isPaused }).catch(() => null);
+    const pauseBtn = document.getElementById('pauseTgEngageBtn');
+    const tgStateBadge = document.getElementById('tgStateBadge');
+    const tgStatus = document.getElementById('tgLiveStatusText');
+    if (pauseBtn) {
+      pauseBtn.textContent = state.isPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.style.background = state.isPaused ? '#059669' : '#D97706';
+      pauseBtn.style.borderColor = state.isPaused ? '#059669' : '#D97706';
+    }
+    if (tgStateBadge) tgStateBadge.textContent = state.isPaused ? 'PAUSED' : 'ENGAGING';
+    if (tgStatus && state.isPaused) tgStatus.textContent = '⏸️ Workflow paused. Click Resume to continue.';
+    showExtToast(state.isPaused ? 'Workflow Paused' : 'Workflow Resumed', state.isPaused ? '⏸️' : '▶️');
+  });
+
+  // Skip button for Telegram Group Engage
+  document.getElementById('skipTgEngageBtn')?.addEventListener('click', () => {
+    state.skipCurrent = true;
+    chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
+    chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+    const tgStatus = document.getElementById('tgLiveStatusText');
+    if (tgStatus) tgStatus.textContent = '⏭️ Skipping current item...';
+    showExtToast('Skipping current link...', '⏭️');
+  });
+
   // Stop button for Telegram Group Engage
   document.getElementById('stopTgEngageBtn')?.addEventListener('click', () => {
     state.isAborted = true;
     state.isWorkflowRunning = false;
+    state.isPaused = false;
     // Tell background to abort
     chrome.runtime.sendMessage({ type: 'BG_ABORT_TG_RAID' }).catch(() => null);
     // Also abort any local running instance
     if (tgWorkingTabId) {
       chrome.tabs.sendMessage(tgWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-      safeRemoveTab(tgWorkingTabId);
       tgWorkingTabId = null;
     }
     syncFloatingHud(null, {
@@ -1359,11 +1407,15 @@ function initAgentListeners() {
       isStopped: true
     });
     const runBtn = document.getElementById('runTgEngageBtn');
+    const pauseBtn = document.getElementById('pauseTgEngageBtn');
+    const skipBtn = document.getElementById('skipTgEngageBtn');
     const stopBtn = document.getElementById('stopTgEngageBtn');
     const tgStateBadge = document.getElementById('tgStateBadge');
     const tgStatus = document.getElementById('tgLiveStatusText');
     const tgCountdown = document.getElementById('tgCountdownText');
     if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
     if (tgStateBadge) tgStateBadge.textContent = 'STOPPED';
     if (tgStatus) tgStatus.textContent = 'Workflow stopped by user.';
@@ -5644,9 +5696,13 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
   const tgBar        = document.getElementById('tgProgressBar');
   const tgStatus     = document.getElementById('tgLiveStatusText');
   const tgCountdown  = document.getElementById('tgCountdownText');
+  const pauseBtn     = document.getElementById('pauseTgEngageBtn');
+  const skipBtn      = document.getElementById('skipTgEngageBtn');
   const stopBtn      = document.getElementById('stopTgEngageBtn');
 
   if (progressCard) progressCard.style.display = 'block';
+  if (pauseBtn) { pauseBtn.style.display = 'inline-block'; pauseBtn.textContent = '⏸️ Pause'; }
+  if (skipBtn) skipBtn.style.display = 'inline-block';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (tgStateBadge) tgStateBadge.textContent = 'ENGAGING';
   if (tgQueueInd) tgQueueInd.textContent = `Tweet 0/${total}`;
@@ -5675,9 +5731,22 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
 
   try {
     for (let i = 0; i < total; i++) {
+      // Pause handling
+      while (state.isPaused && !state.isAborted) {
+        await sleep(300);
+      }
       if (state.isAborted) {
         logger('⏹️ Stopped', 'Autonomous workflow stopped by user.');
         break;
+      }
+
+      // Skip handling
+      if (state.skipCurrent) {
+        state.skipCurrent = false;
+        ignoredCount++;
+        if (tgSkipEl) tgSkipEl.textContent = String(ignoredCount);
+        logger(`Skipped [${i + 1}/${total}]`, `Skipped by user: ${tweets[i]?.canonicalUrl}`, `${i + 1}/${total}`);
+        continue;
       }
 
       const t = tweets[i];
@@ -5852,12 +5921,22 @@ async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
   } else if (tweetUrl && activeTab && activeTab.url && activeTab.url.includes(tweetUrl.split('?')[0])) {
     targetTabId = activeTab.id;
   } else if (tweetUrl) {
-    const newTab = await chrome.tabs.create({ url: tweetUrl, active: true });
-    targetTabId = newTab.id;
-    tgWorkingTabId = newTab.id; // Track globally for stop/abort support
-    shouldClose = true;
-    await waitForTabComplete(targetTabId);
-    await sleep(2500); // Wait for React hydration
+    if (activeTab && activeTab.id) {
+      // User request: DO NOT open in new tab! Navigate in CURRENT TAB!
+      await chrome.tabs.update(activeTab.id, { url: tweetUrl });
+      targetTabId = activeTab.id;
+      tgWorkingTabId = activeTab.id;
+      shouldClose = false;
+      await waitForTabComplete(targetTabId);
+      await sleep(2500); // Wait for React hydration
+    } else {
+      const newTab = await chrome.tabs.create({ url: tweetUrl, active: true });
+      targetTabId = newTab.id;
+      tgWorkingTabId = newTab.id;
+      shouldClose = false;
+      await waitForTabComplete(targetTabId);
+      await sleep(2500);
+    }
   } else {
     throw new Error('No valid tweet URL or active Twitter tab found.');
   }

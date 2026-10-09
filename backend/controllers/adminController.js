@@ -484,9 +484,12 @@ exports.saveCuratedLists = async (req, res) => {
 const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
 const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
 let inMemoryAiSettings = null;
+let lastAiSettingsFetch = 0;
+const AI_SETTINGS_CACHE_TTL = 3000;
 
 async function getAiSettingsData() {
-  if (inMemoryAiSettings && (inMemoryAiSettings.activeProvider || inMemoryAiSettings.apiKeys)) {
+  const now = Date.now();
+  if (inMemoryAiSettings && (inMemoryAiSettings.activeProvider || inMemoryAiSettings.apiKeys) && (now - lastAiSettingsFetch < AI_SETTINGS_CACHE_TTL)) {
     return inMemoryAiSettings;
   }
 
@@ -501,6 +504,7 @@ async function getAiSettingsData() {
 
       if (!error && data && data.features && typeof data.features === 'object') {
         inMemoryAiSettings = data.features;
+        lastAiSettingsFetch = now;
         try {
           fs.writeFileSync(tmpAiSettingsPath, JSON.stringify(inMemoryAiSettings, null, 2), 'utf8');
         } catch (e) {}
@@ -563,6 +567,7 @@ async function saveAiSettingsData(settingsData) {
     // Gracefully ignore EROFS on read-only serverless filesystems like Vercel
   }
 }
+exports.getAiSettingsData = getAiSettingsData;
 
 exports.getActiveModel = async (req, res) => {
   try {

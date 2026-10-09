@@ -1073,39 +1073,45 @@ async function addApiLog(entry) {
         credits_monthly: 0,
         is_popular: false,
         is_active: false,
-        features: recentApiLogs.slice(0, 50)
+        features: recentApiLogs.slice(0, 100)
       }, { onConflict: 'id' });
     }
   } catch (e) {}
 }
 
+let lastLogsFetchTime = 0;
+const LOGS_CACHE_TTL = 3000;
+
 async function getApiLogs() {
-  if (recentApiLogs && recentApiLogs.length > 0) {
+  const now = Date.now();
+  if (recentApiLogs && recentApiLogs.length > 0 && (now - lastLogsFetchTime < LOGS_CACHE_TTL)) {
     return recentApiLogs;
   }
 
-  // 1. Check /tmp
-  if (fs.existsSync(tmpLogsPath)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(tmpLogsPath, 'utf8'));
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        recentApiLogs = parsed;
-        return recentApiLogs;
-      }
-    } catch (e) {}
-  }
-
-  // 2. Fetch reliably from Supabase
+  // 1. Fetch reliably from Supabase cloud (cross-instance source of truth)
   try {
     const supabase = require('../config/supabase');
     if (supabase) {
       const { data } = await supabase.from('plans').select('features').eq('id', 'system_telemetry_logs').maybeSingle();
       if (data && Array.isArray(data.features) && data.features.length > 0) {
         recentApiLogs = data.features;
+        lastLogsFetchTime = now;
         return recentApiLogs;
       }
     }
   } catch (e) {}
+
+  // 2. Check /tmp
+  if (fs.existsSync(tmpLogsPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(tmpLogsPath, 'utf8'));
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        recentApiLogs = parsed;
+        lastLogsFetchTime = now;
+        return recentApiLogs;
+      }
+    } catch (e) {}
+  }
 
   // 3. Fallback to local file
   if (fs.existsSync(LOGS_FILE)) {
@@ -1113,10 +1119,14 @@ async function getApiLogs() {
       const parsed = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
       if (Array.isArray(parsed) && parsed.length > 0) {
         recentApiLogs = parsed;
+        lastLogsFetchTime = now;
         return recentApiLogs;
       }
     } catch (e) {}
   }
+
+  return recentApiLogs || [];
+}
 
   return recentApiLogs || [];
 }

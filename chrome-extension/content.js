@@ -872,6 +872,19 @@ function triggerRateLimitAbort(reason = 'Sorry, you are rate limited.') {
 // =========================================================================
 let floatingHudEl = null;
 let isHudDismissedLocally = false;
+let isPopupOpenLocally = false;
+let isHudWorkflowPaused = false;
+
+if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+  chrome.storage.local.get(['atomx_popup_open', 'atomx_hud_dismissed', 'atomx_workflow_paused']).then(res => {
+    isPopupOpenLocally = Boolean(res?.atomx_popup_open);
+    isHudDismissedLocally = Boolean(res?.atomx_hud_dismissed);
+    isHudWorkflowPaused = Boolean(res?.atomx_workflow_paused);
+    if (isPopupOpenLocally || isHudDismissedLocally) {
+      if (floatingHudEl) floatingHudEl.style.display = 'none';
+    }
+  }).catch(() => null);
+}
 
 function ensureFloatingHud() {
   if (floatingHudEl && document.body.contains(floatingHudEl)) return floatingHudEl;
@@ -947,17 +960,47 @@ function ensureFloatingHud() {
       <!-- Countdown text (shown during pacing delays) -->
       <div id="hud-countdown-text" style="font-size: 11px; color: #10B981; font-weight: 700; font-family: monospace; display: none;"></div>
 
-      <!-- Action Buttons -->
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        <button id="hud-stop-btn" style="width: 100%; padding: 7px 0; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; color: #F87171; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;">
-          ⏹️ STOP WORKFLOW
+      <!-- Action Controls: Pause/Resume, Skip, Stop -->
+      <div style="display: flex; gap: 6px; margin-top: 4px;">
+        <button id="hud-pause-btn" style="flex: 1; padding: 7px 0; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 8px; color: #FBBF24; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Pause or Resume current workflow">
+          ⏸️ Pause
         </button>
-        <button id="hud-dismiss-btn" style="width: 100%; padding: 6px 0; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; color: #94A3B8; font-size: 11px; font-weight: 600; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;">
-          ✕ Dismiss / Close Widget
+        <button id="hud-skip-action-btn" style="flex: 1; padding: 7px 0; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); border-radius: 8px; color: #60A5FA; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Skip current tweet/profile link immediately">
+          ⏭️ Skip
+        </button>
+        <button id="hud-stop-btn" style="flex: 1; padding: 7px 0; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 8px; color: #F87171; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Completely abort and stop workflow">
+          ⏹️ Stop
         </button>
       </div>
     </div>
   `;
+
+  // Pause / Resume listener
+  hud.querySelector('#hud-pause-btn')?.addEventListener('click', () => {
+    isHudWorkflowPaused = !isHudWorkflowPaused;
+    const pauseBtn = hud.querySelector('#hud-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.textContent = isHudWorkflowPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.style.color = isHudWorkflowPaused ? '#34D399' : '#FBBF24';
+      pauseBtn.style.background = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
+      pauseBtn.style.borderColor = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
+    }
+    const badge = hud.querySelector('#hud-badge');
+    if (badge) {
+      badge.textContent = isHudWorkflowPaused ? 'PAUSED' : 'RUNNING';
+      badge.style.color = isHudWorkflowPaused ? '#FBBF24' : '#10B981';
+    }
+    chrome.storage.local.set({ atomx_workflow_paused: isHudWorkflowPaused }).catch(() => null);
+    chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: isHudWorkflowPaused }).catch(() => null);
+  });
+
+  // Skip current item listener
+  hud.querySelector('#hud-skip-action-btn')?.addEventListener('click', () => {
+    chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
+    chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+    const statusEl = hud.querySelector('#hud-status-text');
+    if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
+  });
 
   // Attach stop listener
   hud.querySelector('#hud-stop-btn')?.addEventListener('click', () => {
@@ -973,7 +1016,8 @@ function ensureFloatingHud() {
         statusText: 'Workflow stopped by user.',
         isStopped: true,
         active: false
-      }
+      },
+      atomx_workflow_paused: false
     }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
   });
@@ -988,7 +1032,7 @@ function ensureFloatingHud() {
     if (minBtn) minBtn.textContent = isMinimized ? '+' : '−';
   });
 
-  // Dismiss / Close HUD handler
+  // Dismiss / Close HUD handler - Stays dismissed until a new workflow starts!
   const handleDismissHud = () => {
     isHudDismissedLocally = true;
     hud.style.display = 'none';
@@ -1038,16 +1082,22 @@ function ensureFloatingHud() {
 }
 
 function updateFloatingHud(data = {}) {
-  // If explicitly requested a new workflow, or active workflow running, clear dismiss flag
-  if (data.isNewWorkflow || data.active) {
+  // If explicitly requested a new workflow, clear dismiss flag
+  if (data.isNewWorkflow) {
     isHudDismissedLocally = false;
-    if (data.isNewWorkflow && typeof chrome !== 'undefined' && chrome.storage?.local) {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
     }
   }
 
-  // If user dismissed HUD on this page instance and it's not active/forced, hide it
-  if (isHudDismissedLocally && !data.forceShow && !data.isNewWorkflow && !data.active) {
+  // The HUD should ONLY be visible when the extension popup is closed!
+  if (isPopupOpenLocally && !data.forceShow) {
+    if (floatingHudEl) floatingHudEl.style.display = 'none';
+    return;
+  }
+
+  // If user dismissed HUD on this page instance and it's not a brand new workflow, keep it hidden
+  if (isHudDismissedLocally && !data.isNewWorkflow && !data.forceShow) {
     if (floatingHudEl) floatingHudEl.style.display = 'none';
     return;
   }
@@ -1077,6 +1127,10 @@ function updateFloatingHud(data = {}) {
         el.style.background = 'rgba(100, 116, 139, 0.2)';
         el.style.color = '#94A3B8';
         el.style.border = '1px solid rgba(100, 116, 139, 0.4)';
+      } else if (data.stateBadge === 'PAUSED') {
+        el.style.background = 'rgba(245, 158, 11, 0.2)';
+        el.style.color = '#FBBF24';
+        el.style.border = '1px solid rgba(245, 158, 11, 0.5)';
       } else {
         el.style.background = 'rgba(16, 185, 129, 0.15)';
         el.style.color = '#10B981';
@@ -1138,45 +1192,78 @@ function hideFloatingHud() {
 
 // Automatically sync & hydrate on-page floating HUD from chrome.storage.local
 if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-  chrome.storage.local.get(['atomx_active_hud', 'atomx_hud_dismissed'], (res) => {
-    const isDismissed = Boolean(res?.atomx_hud_dismissed);
+  chrome.storage.local.get(['atomx_active_hud', 'atomx_hud_dismissed', 'atomx_popup_open'], (res) => {
+    isPopupOpenLocally = Boolean(res?.atomx_popup_open);
+    isHudDismissedLocally = Boolean(res?.atomx_hud_dismissed);
     const activeHud = res?.atomx_active_hud;
 
-    // If an automation is actively running, always show HUD even if previous run was dismissed
+    if (isPopupOpenLocally || isHudDismissedLocally) {
+      hideFloatingHud();
+      return;
+    }
+
     if (activeHud && activeHud.active) {
-      isHudDismissedLocally = false;
-      chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
       updateFloatingHud(activeHud);
     } else if (activeHud && (activeHud.isStopped || activeHud.stateBadge === 'DONE')) {
-      if (!isDismissed) {
-        updateFloatingHud(activeHud);
-      }
+      updateFloatingHud(activeHud);
     }
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
 
-    if (changes.atomx_hud_dismissed) {
+    if (changes.atomx_popup_open !== undefined) {
+      isPopupOpenLocally = Boolean(changes.atomx_popup_open.newValue);
+      if (isPopupOpenLocally) {
+        hideFloatingHud();
+      } else {
+        // Popup closed: show HUD if active and not dismissed
+        chrome.storage.local.get(['atomx_active_hud', 'atomx_hud_dismissed']).then(s => {
+          if (s?.atomx_active_hud?.active && !s?.atomx_hud_dismissed) {
+            updateFloatingHud(s.atomx_active_hud);
+          }
+        }).catch(() => null);
+      }
+    }
+
+    if (changes.atomx_hud_dismissed !== undefined) {
       isHudDismissedLocally = Boolean(changes.atomx_hud_dismissed.newValue);
       if (isHudDismissedLocally) {
         hideFloatingHud();
       }
     }
 
+    if (changes.atomx_workflow_paused !== undefined) {
+      isHudWorkflowPaused = Boolean(changes.atomx_workflow_paused.newValue);
+      const pauseBtn = floatingHudEl?.querySelector('#hud-pause-btn');
+      if (pauseBtn) {
+        pauseBtn.textContent = isHudWorkflowPaused ? '▶️ Resume' : '⏸️ Pause';
+        pauseBtn.style.color = isHudWorkflowPaused ? '#34D399' : '#FBBF24';
+        pauseBtn.style.background = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
+      }
+      const badge = floatingHudEl?.querySelector('#hud-badge');
+      if (badge && !isWorkflowAborted) {
+        badge.textContent = isHudWorkflowPaused ? 'PAUSED' : 'RUNNING';
+        badge.style.color = isHudWorkflowPaused ? '#FBBF24' : '#10B981';
+      }
+    }
+
     if (changes.atomx_active_hud) {
       const val = changes.atomx_active_hud.newValue;
 
-      if (val && val.active) {
-        // Active automation running: always display
+      if (val && val.isNewWorkflow) {
         isHudDismissedLocally = false;
+      }
+
+      if (isPopupOpenLocally || isHudDismissedLocally) {
+        hideFloatingHud();
+        return;
+      }
+
+      if (val && val.active) {
         updateFloatingHud(val);
       } else if (val && (val.isStopped || val.stateBadge === 'DONE')) {
-        if (!isHudDismissedLocally) {
-          updateFloatingHud(val);
-        } else {
-          hideFloatingHud();
-        }
+        updateFloatingHud(val);
       } else {
         hideFloatingHud();
       }

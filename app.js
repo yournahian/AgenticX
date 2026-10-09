@@ -2984,14 +2984,52 @@ function renderAdminProviderCardsHTML() {
           </div>
         </div>
 
-        <!-- BOTTOM BUTTON (HORIZONTALLY ALIGNED ACROSS ALL 5 CARDS) -->
-        <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'} btn-sm" style="width:100%; display:flex; align-items:center; justify-content:center; gap:6px; padding:7px 12px; font-weight:700; font-size:12px; margin-top:auto;" onclick="event.stopPropagation(); openAdminProviderModal('${p.id}')">
-          <span>⚙️</span>
-          <span>Configure &amp; Test</span>
-        </button>
+        <!-- BOTTOM BUTTONS: Quick Activate + Configure & Test -->
+        <div style="display:flex; gap:6px; margin-top:auto;">
+          ${isActive ? `
+            <span class="btn btn-sm" style="flex:1; background:rgba(16,185,129,0.15); color:#10B981; border:1px solid rgba(16,185,129,0.3); font-weight:800; font-size:11px; padding:7px 8px; display:flex; align-items:center; justify-content:center; gap:4px; cursor:default;">
+              ✓ Active
+            </span>
+          ` : `
+            <button type="button" class="btn btn-secondary btn-sm" style="flex:1; font-weight:700; font-size:11px; padding:7px 8px; border-color:var(--border-subtle);" onclick="event.stopPropagation(); setAdminProviderDirectlyActive('${p.id}')">
+              ● Set Active
+            </button>
+          `}
+          <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'} btn-sm" style="flex:1.2; display:flex; align-items:center; justify-content:center; gap:4px; padding:7px 10px; font-weight:700; font-size:11px;" onclick="event.stopPropagation(); openAdminProviderModal('${p.id}')">
+            <span>⚙️</span>
+            <span>Configure</span>
+          </button>
+        </div>
       </div>
     `;
   }).join('');
+}
+
+async function setAdminProviderDirectlyActive(providerId) {
+  const p = ADMIN_AI_PROVIDERS.find(x => x.id === providerId);
+  if (!p) return;
+  const model = (AtomXState.providerModels && AtomXState.providerModels[providerId]) || p.defaultModel;
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/active-model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: providerId, model })
+    });
+    if (res.ok) {
+      AtomXState.currentProvider = providerId;
+      AtomXState.activeSystemProvider = providerId;
+      AtomXState.currentModel = model;
+      AtomXState.activeSystemModel = model;
+      showToast(`✓ Active AI Provider switched to ${p.name}!`);
+      const contentArea = document.getElementById('mainContentArea');
+      if (contentArea) renderAdminAIEngine(contentArea);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast('❌ Failed to set active provider: ' + (err.error || 'Unknown error'));
+    }
+  } catch (e) {
+    showToast('❌ Error: ' + e.message);
+  }
 }
 
 function openAdminProviderModal(providerId) {
@@ -6672,13 +6710,13 @@ async function loadAdminServerData(preserveScroll = true) {
 
     if (modelRes && modelRes.ok) {
       const modelData = await modelRes.json();
-      AtomXState.activeSystemProvider = modelData.activeProvider || 'groq';
-      AtomXState.activeSystemModel = modelData.activeModel || 'llama-3.3-70b-versatile';
-      if (!AtomXState.currentProvider) {
-        AtomXState.currentProvider = modelData.activeProvider || 'groq';
+      if (modelData.activeProvider) {
+        AtomXState.activeSystemProvider = modelData.activeProvider;
+        AtomXState.currentProvider = modelData.activeProvider;
       }
-      if (!AtomXState.currentModel) {
-        AtomXState.currentModel = modelData.activeModel || 'llama-3.3-70b-versatile';
+      if (modelData.activeModel) {
+        AtomXState.activeSystemModel = modelData.activeModel;
+        AtomXState.currentModel = modelData.activeModel;
       }
       if (modelData.providerModels) {
         AtomXState.providerModels = modelData.providerModels;

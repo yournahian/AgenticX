@@ -53,19 +53,20 @@ exports.generateReply = async (req, res) => {
 
   // 1. Resolve user server-side reliably
   let user = null;
-  if (reqHandle) user = await db.getUserByHandle(reqHandle);
+  const cleanReqHandle = (reqHandle || '').replace(/^@/, '').trim();
+  if (cleanReqHandle && cleanReqHandle !== 'user') user = await db.getUserByHandle(cleanReqHandle);
   if (!user && reqEmail) user = await db.getUserByEmail(reqEmail);
-  if (!user && rawUserId) user = await db.getUserById(rawUserId);
+  if (!user && rawUserId && rawUserId !== '1' && rawUserId !== 'default_member') user = await db.getUserById(rawUserId);
 
   if (!user) {
     const allUsers = await db.getAllUsers();
-    user = (allUsers || []).find(u => (u.status || '').toUpperCase() === 'ACTIVE') || allUsers?.[0] || null;
+    user = (allUsers || []).find(u => (u.status || '').toUpperCase() === 'ACTIVE' && u.handle && u.handle !== '@user' && u.handle !== 'user') || allUsers?.[0] || null;
   }
 
   if (!user) {
     user = {
       id: 'default_member',
-      handle: reqHandle || '@user',
+      handle: (cleanReqHandle && cleanReqHandle !== 'user') ? `@${cleanReqHandle}` : '@member',
       full_name: 'Verified Member',
       email: reqEmail || 'member@atomx.io',
       status: 'ACTIVE',
@@ -89,20 +90,15 @@ exports.generateReply = async (req, res) => {
   let activeModel = model;
 
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const os = require('os');
-    const tmpAiSettingsPath = path.join(os.tmpdir(), 'aiSettings.json');
-    const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
-    let settings = null;
-    if (fs.existsSync(tmpAiSettingsPath)) {
-      settings = JSON.parse(fs.readFileSync(tmpAiSettingsPath, 'utf8'));
-    } else if (fs.existsSync(aiSettingsPath)) {
-      settings = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
-    }
+    const adminController = require('./adminController');
+    const settings = await adminController.getAiSettingsData();
     if (settings && settings.activeProvider) {
       activeProv = settings.activeProvider;
-      activeModel = settings.activeModel || null;
+      if (settings.providerModels && settings.providerModels[activeProv]) {
+        activeModel = settings.providerModels[activeProv];
+      } else if (settings.activeModel) {
+        activeModel = settings.activeModel;
+      }
     }
   } catch (e) {}
 
