@@ -19,9 +19,10 @@ exports.getProviders = (req, res) => {
 exports.getProviderModels = async (req, res) => {
   const provider = req.params.provider || 'openai';
   const customKey = req.query.key || null;
+  const customBaseUrl = req.query.baseUrl || null;
 
   try {
-    const result = await multiProviderService.fetchLiveModels(provider, customKey);
+    const result = await multiProviderService.fetchLiveModels(provider, customKey, customBaseUrl);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch models: ' + err.message });

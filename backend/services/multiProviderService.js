@@ -68,10 +68,10 @@ const DEFAULT_MODELS = {
     { id: 'google/gemini-flash-1.5', name: 'Gemini Flash 1.5 via OpenRouter', context: '1M' }
   ],
   anthropic: [
-    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Latest)', context: '200k' },
+    { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet (Latest)', context: '200k' },
+    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', context: '200k' },
     { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Ultra Fast)', context: '200k' },
     { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus (Deep Reasoning)', context: '200k' },
-    { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', context: '200k' },
     { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', context: '200k' }
   ]
 };
@@ -131,6 +131,23 @@ function getProviderKey(provider) {
     }
   } catch (e) {}
 
+  return '';
+}
+
+async function getProviderKeyAsync(provider) {
+  const norm = (provider || 'openai').toLowerCase();
+  const direct = getProviderKey(norm);
+  if (direct) return direct;
+
+  try {
+    const supabase = require('../config/supabase');
+    if (supabase) {
+      const { data } = await supabase.from('plans').select('features').eq('id', 'system_ai_settings').maybeSingle();
+      if (data && data.features && data.features.apiKeys && data.features.apiKeys[norm]) {
+        return data.features.apiKeys[norm].trim();
+      }
+    }
+  } catch (e) {}
   return '';
 }
 
@@ -208,17 +225,22 @@ function getAnthropicBaseUrl() {
 
 /**
  * Fetch live available models in real-time from the chosen provider API
+ * Strictly returns only active, working models for the provider
  */
-async function fetchLiveModels(provider, customApiKey = null) {
+async function fetchLiveModels(provider, customApiKey = null, customBaseUrl = null) {
   const prov = (provider || 'openai').toLowerCase();
-  const apiKey = customApiKey || getProviderKey(prov);
+  let apiKey = customApiKey || getProviderKey(prov);
+  if (!apiKey) {
+    apiKey = await getProviderKeyAsync(prov);
+  }
 
   // OpenRouter models endpoint is public and does not require an API key to list models
   if (!apiKey && prov !== 'openrouter') {
     return {
       provider: prov,
       isLive: false,
-      message: `No API key configured for ${prov.toUpperCase()}. Showing curated models.`,
+      message: `No API key configured for ${prov.toUpperCase()}. Showing certified active models.`,
+      count: (DEFAULT_MODELS[prov] || []).length,
       models: DEFAULT_MODELS[prov] || []
     };
   }
@@ -226,18 +248,33 @@ async function fetchLiveModels(provider, customApiKey = null) {
   try {
     switch (prov) {
       case 'openai': {
-        const baseUrl = getOpenAIBaseUrl();
+        const baseUrl = (customBaseUrl || getOpenAIBaseUrl()).replace(/\/+$/, '');
+        const isProxy = !baseUrl.includes('openai.com');
         const res = await fetch(`${baseUrl}/models`, {
           headers: { 'Authorization': `Bearer ${apiKey}` }
         });
         if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}`);
         const data = await res.json();
         const allModels = data.data || [];
-        // Filter chat-relevant models (supports GPT, Claude, DeepSeek, Llama, Qwen via proxies like Artbloom)
-        let chatModels = allModels
-          .filter(m => m.id.includes('gpt') || m.id.includes('o1') || m.id.includes('chat') || m.id.includes('claude') || m.id.includes('deepseek') || m.id.includes('llama') || m.id.includes('qwen'))
-          .sort((a, b) => (b.created || 0) - (a.created || 0))
-          .map(m => ({ id: m.id, name: m.id, context: 'Active' }));
+        
+        let chatModels = [];
+        if (isProxy) {
+          chatModels = allModels
+            .filter(m => !m.id.includes('embedding') && !m.id.includes('whisper') && !m.id.includes('tts') && !m.id.includes('dall-e'))
+            .map(m => ({ id: m.id, name: m.id, context: 'Active' }));
+        } else {
+          // Strictly active OpenAI models (exclude deprecated or non-chat models)
+          chatModels = allModels
+            .filter(m => (
+              m.id.startsWith('gpt-4o') ||
+              m.id.startsWith('o1') ||
+              m.id.startsWith('o3') ||
+              m.id.startsWith('gpt-4-turbo') ||
+              m.id.startsWith('gpt-3.5-turbo')
+            ) && !m.id.includes('realtime') && !m.id.includes('audio'))
+            .sort((a, b) => (b.created || 0) - (a.created || 0))
+            .map(m => ({ id: m.id, name: m.id, context: 'Active' }));
+        }
 
         if (chatModels.length === 0 && allModels.length > 0) {
           chatModels = allModels.map(m => ({ id: m.id, name: m.id, context: 'Active' }));
@@ -252,31 +289,50 @@ async function fetchLiveModels(provider, customApiKey = null) {
       }
 
       case 'anthropic': {
-        const baseUrl = getAnthropicBaseUrl();
-        try {
-          const res = await fetch(`${baseUrl}/v1/models`, {
-            headers: {
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01'
+        const baseUrl = (customBaseUrl || getAnthropicBaseUrl()).replace(/\/+$/, '');
+        const isProxy = !baseUrl.includes('anthropic.com');
+
+        if (isProxy) {
+          // If using Artbloom or OpenAI-compatible proxy, fetch /models with Bearer token
+          try {
+            const res = await fetch(`${baseUrl}/models`, {
+              headers: { 'Authorization': `Bearer ${apiKey}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const models = (data.data || [])
+                .filter(m => !m.id.includes('embedding') && !m.id.includes('whisper') && !m.id.includes('tts'))
+                .map(m => ({ id: m.id, name: m.id, context: '200k' }));
+              if (models.length > 0) {
+                return { provider: 'anthropic', isLive: true, count: models.length, models };
+              }
             }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const models = (data.data || []).map(m => ({
-              id: m.id,
-              name: m.display_name || m.id,
-              context: '200k'
-            }));
-            if (models.length > 0) {
-              return {
-                provider: 'anthropic',
-                isLive: true,
-                count: models.length,
-                models
-              };
+          } catch (e) {}
+        } else {
+          // Official Anthropic API
+          try {
+            const res = await fetch(`${baseUrl}/v1/models`, {
+              headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+              }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const models = (data.data || [])
+                .filter(m => m.id.startsWith('claude-'))
+                .map(m => ({
+                  id: m.id,
+                  name: m.display_name ? `${m.display_name} (${m.id})` : m.id,
+                  context: '200k'
+                }));
+              if (models.length > 0) {
+                return { provider: 'anthropic', isLive: true, count: models.length, models };
+              }
             }
-          }
-        } catch (e) {}
+          } catch (e) {}
+        }
+
         return {
           provider: 'anthropic',
           isLive: Boolean(apiKey),
@@ -286,17 +342,22 @@ async function fetchLiveModels(provider, customApiKey = null) {
       }
 
       case 'gemini': {
-        // Fetch from Google Generative Language models endpoint
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
         if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
         const data = await res.json();
+        // Strictly filter models that support generateContent and exclude deprecated / embedding models
         const geminiModels = (data.models || [])
-          .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
+          .filter(m => (
+            m.supportedGenerationMethods?.includes('generateContent') &&
+            !m.name.includes('embedding') &&
+            !m.name.includes('aqa') &&
+            !m.name.includes('bison')
+          ))
           .map(m => {
             const cleanId = m.name.replace('models/', '');
             return {
               id: cleanId,
-              name: m.displayName || cleanId,
+              name: m.displayName ? `${m.displayName} (${cleanId})` : cleanId,
               context: m.inputTokenLimit ? `${Math.round(m.inputTokenLimit / 1000)}k` : '1M'
             };
           });
@@ -315,8 +376,9 @@ async function fetchLiveModels(provider, customApiKey = null) {
         });
         if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
         const data = await res.json();
+        // Groq: strictly filter models where active === true and exclude audio/whisper/guard
         const liveGroqModels = (data.data || [])
-          .filter(m => m.active !== false)
+          .filter(m => m.active === true && !m.id.includes('whisper') && !m.id.includes('guard'))
           .map(m => ({
             id: m.id,
             name: `${m.name || m.id} (${m.owned_by || 'Groq'})`,

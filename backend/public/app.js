@@ -2938,40 +2938,46 @@ function renderAdminProviderCardsHTML() {
     
     let baseUrlNotice = '';
     if (p.id === 'anthropic' && AtomXState.adminAnthropicBaseUrl && !AtomXState.adminAnthropicBaseUrl.includes('anthropic.com')) {
-      baseUrlNotice = `<div style="font-size:10.5px; color:#d97706; margin-top:4px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Proxy: ${AtomXState.adminAnthropicBaseUrl}</div>`;
+      baseUrlNotice = `<div style="font-size:10.5px; color:#d97706; margin-top:3px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Proxy: ${AtomXState.adminAnthropicBaseUrl}</div>`;
     } else if (p.id === 'openai' && AtomXState.adminOpenaiBaseUrl && !AtomXState.adminOpenaiBaseUrl.includes('openai.com')) {
-      baseUrlNotice = `<div style="font-size:10.5px; color:var(--blue-primary); margin-top:4px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Proxy: ${AtomXState.adminOpenaiBaseUrl}</div>`;
+      baseUrlNotice = `<div style="font-size:10.5px; color:var(--blue-primary); margin-top:3px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Proxy: ${AtomXState.adminOpenaiBaseUrl}</div>`;
     }
 
     return `
-      <div class="atomx-card" style="cursor:pointer; position:relative; border:${isActive ? '2px solid var(--blue-primary)' : '1px solid var(--border-subtle)'}; background:${isActive ? 'rgba(59,130,246,0.04)' : 'var(--bg-card)'}; transition:all 0.2s ease; padding:16px; border-radius:var(--radius-md);" onclick="openAdminProviderModal('${p.id}')">
-        ${isActive ? `<div style="position:absolute; top:12px; right:12px;"><span class="badge badge-success" style="font-size:10px; font-weight:800; letter-spacing:0.4px;">● ACTIVE FOR SYSTEM</span></div>` : ''}
-        
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-          <div style="font-size:28px;">${p.icon}</div>
-          <div>
-            <div style="font-size:15px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
-              ${p.name}
+      <div class="atomx-card" style="cursor:pointer; display:flex; flex-direction:column; justify-content:space-between; height:100%; border:${isActive ? '2px solid var(--blue-primary)' : '1px solid var(--border-subtle)'}; background:${isActive ? 'rgba(59,130,246,0.05)' : 'var(--bg-card)'}; border-radius:var(--radius-md); padding:16px; transition:all 0.2s ease; box-sizing:border-box;" onclick="openAdminProviderModal('${p.id}')">
+        <!-- TOP CONTENT (FLEX: 1) -->
+        <div style="flex:1; display:flex; flex-direction:column;">
+          <!-- 1. Header row with fixed min-height for uniform alignment -->
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; min-height:48px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="font-size:26px; line-height:1;">${p.icon}</div>
+              <div>
+                <div style="font-size:14px; font-weight:800; color:var(--text-primary); line-height:1.2;">${p.name}</div>
+                <div style="font-size:10.5px; color:var(--text-secondary); line-height:1.2; margin-top:2px;">${p.tag}</div>
+              </div>
             </div>
-            <div style="font-size:11px; color:var(--text-secondary);">${p.tag}</div>
+            ${isActive ? `<span class="badge badge-success" style="font-size:9.5px; font-weight:800; padding:3px 7px; white-space:nowrap; letter-spacing:0.3px;">ACTIVE</span>` : ''}
+          </div>
+
+          <!-- 2. Key status badge row with fixed height -->
+          <div style="min-height:24px; margin-bottom:10px;">
+            <span class="badge ${hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10px; font-weight:700;">
+              ${hasKey ? '🟢 Key Active (' + (keyInfo.maskedKey || 'Configured') + ')' : '⚪ Missing Key'}
+            </span>
+          </div>
+
+          <!-- 3. Configured model box with uniform min-height across all cards -->
+          <div style="background:var(--bg-canvas); padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); margin-bottom:14px; min-height:64px; display:flex; flex-direction:column; justify-content:center;">
+            <div style="font-size:9.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:700;">Configured Model</div>
+            <div style="font-size:11.5px; font-weight:700; color:var(--text-primary); font-family:monospace; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${modelName}">
+              ${modelName}
+            </div>
+            ${baseUrlNotice ? baseUrlNotice : '<div style="font-size:10.5px; color:transparent; user-select:none; margin-top:3px;">&nbsp;</div>'}
           </div>
         </div>
 
-        <div style="margin-bottom:10px;">
-          <span class="badge ${hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10.5px;">
-            ${hasKey ? '🟢 Key Active (' + (keyInfo.maskedKey || 'Configured') + ')' : '⚪ Missing Key'}
-          </span>
-        </div>
-
-        <div style="background:var(--bg-canvas); padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); margin-bottom:12px;">
-          <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Configured Model</div>
-          <div style="font-size:12px; font-weight:700; color:var(--text-primary); font-family:monospace; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            ${modelName}
-          </div>
-          ${baseUrlNotice}
-        </div>
-
-        <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'} btn-sm" style="width:100%; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="event.stopPropagation(); openAdminProviderModal('${p.id}')">
+        <!-- BOTTOM BUTTON (HORIZONTALLY ALIGNED ACROSS ALL 5 CARDS) -->
+        <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'} btn-sm" style="width:100%; display:flex; align-items:center; justify-content:center; gap:6px; padding:7px 12px; font-weight:700; font-size:12px; margin-top:auto;" onclick="event.stopPropagation(); openAdminProviderModal('${p.id}')">
           <span>⚙️</span>
           <span>Configure &amp; Test</span>
         </button>
@@ -2995,49 +3001,68 @@ function openAdminProviderModal(providerId) {
   }
 
   const existingModels = AtomXState.modelsCache && AtomXState.modelsCache[p.id];
+  const modelCount = (existingModels && existingModels.length) || getFallbackModelsForProvider(p.id).length;
 
   const modalHTML = `
     <div class="modal-backdrop" id="adminProviderModal">
-      <div class="modal-box" style="max-width:540px; width:95%; max-height:90vh; overflow-y:auto;">
-        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:12px; margin-bottom:16px;">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:24px;">${p.icon}</span>
+      <div class="modal-box" style="max-width:580px; width:95%; max-height:90vh; overflow-y:auto; border-radius:14px; padding:22px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.6);">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:14px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="font-size:28px; width:44px; height:44px; display:flex; align-items:center; justify-content:center; background:rgba(59,130,246,0.1); border-radius:10px; border:1px solid rgba(59,130,246,0.2);">${p.icon}</div>
             <div>
-              <h3 class="modal-title" style="font-size:16px; margin:0;">Configure ${p.name}</h3>
-              <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">${p.tag} • Manage key, custom URL &amp; model</div>
+              <h3 class="modal-title" style="font-size:17px; font-weight:800; margin:0; color:var(--text-primary);">Configure ${p.name}</h3>
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">${p.tag} • Manage key, custom URL &amp; model</div>
             </div>
           </div>
-          <button class="modal-close-btn" onclick="closeModal()" style="font-size:22px; cursor:pointer; background:none; border:none; color:var(--text-secondary);">×</button>
+          <button class="modal-close-btn" onclick="closeModal()" style="font-size:24px; cursor:pointer; background:none; border:none; color:var(--text-secondary); padding:4px 8px;">×</button>
         </div>
 
         <!-- 1. ACTIVE SYSTEM TOGGLE -->
-        <div style="background:var(--bg-canvas); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+        <div style="background:var(--bg-canvas); padding:12px 14px; border-radius:10px; border:1px solid var(--border-subtle); margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
           <div>
-            <div style="font-weight:700; font-size:13px; color:var(--text-primary);">Set as Active System Provider</div>
+            <div style="font-weight:800; font-size:13px; color:var(--text-primary);">Set as Active System Provider</div>
             <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">All Chrome Extension replies will route through this provider.</div>
           </div>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:700; font-size:12px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:800; font-size:13px; background:var(--bg-card); padding:6px 12px; border-radius:6px; border:1px solid var(--border-subtle);">
             <input type="checkbox" id="modalSetActiveCheckbox" ${isActive ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;" />
             <span style="color:var(--text-primary);">Active</span>
           </label>
         </div>
 
-        <!-- 2. MODEL SELECTION -->
-        <div class="form-group" style="margin-bottom:14px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <label class="form-label" style="font-size:12px; margin:0; font-weight:700;">Selected Model</label>
-            <button type="button" class="btn btn-sm" id="btnModalFetchModels" style="font-size:10.5px; padding:2px 8px; background:var(--bg-canvas); border:1px solid var(--border-subtle); color:var(--text-secondary);" onclick="fetchModalModels('${p.id}')">↻ Fetch Live Models</button>
+        <!-- 2. SPATIAL MODEL SELECTION & SEARCH HUB -->
+        <div style="background:var(--bg-canvas); padding:14px; border-radius:10px; border:1px solid var(--border-subtle); margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <label class="form-label" style="font-size:13px; margin:0; font-weight:800; color:var(--text-primary);">Selected Model</label>
+              <span class="badge badge-info" id="modalModelCountBadge" style="font-size:10px; font-weight:700;">${modelCount} Active Models</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnModalFetchModels" style="font-size:11px; padding:5px 12px; display:flex; align-items:center; gap:5px; font-weight:700;" onclick="fetchModalModels('${p.id}')">
+              <span>↻</span>
+              <span>Fetch Live Models</span>
+            </button>
           </div>
-          <select id="modalModelSelect" class="form-select" style="font-size:12.5px; width:100%;">
-            ${renderAdminModelOptionsHTML(p.id, '', currentModel)}
-          </select>
-          <input type="text" id="modalModelSearchInput" class="form-input" placeholder="🔍 Search models (e.g. llama, claude, sonnet)..." style="font-size:11px; padding:4px 8px; margin-top:6px; width:100%; box-sizing:border-box;" oninput="filterModalModelsList(this.value, '${p.id}')">
+
+          <!-- PROMINENT SPACIOUS SEARCH BOX -->
+          <div style="position:relative; margin-bottom:10px;">
+            <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:14px; color:var(--text-muted); pointer-events:none;">🔍</span>
+            <input type="text" id="modalModelSearchInput" class="form-input" placeholder="Search available active models (e.g. llama, claude, sonnet, gpt-4o)..." style="font-size:13px; padding:10px 14px 10px 36px; width:100%; box-sizing:border-box; border-radius:8px; background:var(--bg-card); border:1px solid var(--border-subtle);" oninput="filterModalModelsList(this.value, '${p.id}')">
+          </div>
+
+          <!-- MODEL SELECT DROPDOWN -->
+          <div style="position:relative;">
+            <select id="modalModelSelect" class="form-select" style="font-size:13px; width:100%; padding:10px 12px; border-radius:8px; background:var(--bg-card); border:1px solid var(--border-subtle); font-weight:600; font-family:monospace;">
+              ${renderAdminModelOptionsHTML(p.id, '', currentModel)}
+            </select>
+          </div>
+          <div id="modalModelHint" style="font-size:11px; color:var(--text-secondary); margin-top:6px;">
+            Only active provider generation models are listed. Select a model to route AI engagement replies.
+          </div>
         </div>
 
         <!-- 3. API KEY INPUT -->
-        <div class="form-group" style="margin-bottom:14px;">
+        <div class="form-group" style="margin-bottom:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <label class="form-label" style="font-size:12px; margin:0; font-weight:700;">
+            <label class="form-label" style="font-size:12.5px; margin:0; font-weight:800;">
               ${p.name} API Key
               <span class="badge ${keyInfo.hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10px; margin-left:6px;" id="modalKeyStatusBadge">
                 ${keyInfo.hasKey ? '🟢 Configured (' + keyInfo.maskedKey + ')' : '⚪ Not Set'}
@@ -3046,46 +3071,46 @@ function openAdminProviderModal(providerId) {
             <span style="font-size:10.5px; color:var(--text-muted);">Leave empty to keep existing</span>
           </div>
           <div style="position:relative; display:flex; align-items:center;">
-            <input type="password" id="modalApiKeyInput" class="form-input" style="padding-right:70px; font-family:monospace; font-size:12px;" placeholder="${keyInfo.hasKey ? 'Current: ' + keyInfo.maskedKey + ' (Paste to replace)' : 'Paste ' + p.name + ' API key (e.g. sk-...)'}">
-            <button type="button" id="modalToggleKeyBtn" onclick="toggleModalApiKeyVisibility()" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:11px; color:var(--text-secondary); padding:4px 6px;">👁️ Show</button>
+            <input type="password" id="modalApiKeyInput" class="form-input" style="padding:10px 75px 10px 12px; font-family:monospace; font-size:12.5px; border-radius:8px;" placeholder="${keyInfo.hasKey ? 'Current: ' + keyInfo.maskedKey + ' (Paste to replace)' : 'Paste ' + p.name + ' API key (e.g. sk-...)'}">
+            <button type="button" id="modalToggleKeyBtn" onclick="toggleModalApiKeyVisibility()" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:12px; color:var(--text-secondary); padding:4px 8px; font-weight:700;">👁️ Show</button>
           </div>
         </div>
 
         <!-- 4. BASE URL (FOR ANTHROPIC & OPENAI) -->
         ${p.hasBaseUrl ? `
-          <div class="form-group" style="margin-bottom:14px; background:var(--bg-canvas); padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
-              <label class="form-label" style="font-size:11.5px; margin:0; font-weight:700;">🌐 Base URL (Proxy / Gateway)</label>
+          <div class="form-group" style="margin-bottom:16px; background:var(--bg-canvas); padding:12px; border-radius:10px; border:1px solid var(--border-subtle);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+              <label class="form-label" style="font-size:12px; margin:0; font-weight:800;">🌐 Base URL (Proxy / Gateway)</label>
               <div style="display:flex; gap:6px;">
-                <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:rgba(59,130,246,0.12); color:var(--blue-primary); border:1px solid rgba(59,130,246,0.3);" onclick="setModalBaseUrl('${p.presetUrl}')">⚡ Artbloom Preset</button>
-                <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:var(--bg-card); color:var(--text-secondary); border:1px solid var(--border-subtle);" onclick="setModalBaseUrl('${p.defaultUrl}')">Official</button>
+                <button type="button" class="btn btn-sm" style="font-size:10.5px; padding:3px 10px; background:rgba(59,130,246,0.12); color:var(--blue-primary); border:1px solid rgba(59,130,246,0.3); font-weight:700;" onclick="setModalBaseUrl('${p.presetUrl}')">⚡ Artbloom Preset</button>
+                <button type="button" class="btn btn-sm" style="font-size:10.5px; padding:3px 10px; background:var(--bg-card); color:var(--text-secondary); border:1px solid var(--border-subtle); font-weight:700;" onclick="setModalBaseUrl('${p.defaultUrl}')">Official</button>
               </div>
             </div>
-            <input type="text" id="modalBaseUrlInput" class="form-input" value="${currentBaseUrl}" style="font-size:12px; font-family:monospace;" placeholder="${p.defaultUrl}">
-            <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px;">
+            <input type="text" id="modalBaseUrlInput" class="form-input" value="${currentBaseUrl}" style="font-size:12.5px; font-family:monospace; padding:9px 12px; border-radius:8px;" placeholder="${p.defaultUrl}">
+            <div style="font-size:11px; color:var(--text-secondary); margin-top:5px;">
               Use Artbloom proxy URL for Artbloom keys (<code>sk-ab-...</code>), or Official URL for standard keys.
             </div>
           </div>
         ` : ''}
 
         <!-- 5. TEST CONNECTION -->
-        <div style="margin-bottom:16px; padding:12px; background:var(--bg-canvas); border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
+        <div style="margin-bottom:18px; padding:12px 14px; background:var(--bg-canvas); border-radius:10px; border:1px solid var(--border-subtle);">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
-              <div style="font-weight:700; font-size:12px; color:var(--text-primary);">⚡ Verify Connection</div>
-              <div style="font-size:11px; color:var(--text-secondary);">Test this key &amp; URL against the provider before saving.</div>
+              <div style="font-weight:800; font-size:12.5px; color:var(--text-primary);">⚡ Verify Connection</div>
+              <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Test this key &amp; URL against the provider before saving.</div>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" id="btnModalTestConn" onclick="testModalProviderConnection('${p.id}')">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnModalTestConn" style="font-weight:700; padding:6px 14px;" onclick="testModalProviderConnection('${p.id}')">
               ⚡ Test Connection
             </button>
           </div>
-          <div id="modalTestResult" style="display:none; margin-top:10px; padding:8px 10px; border-radius:var(--radius-sm); font-size:11.5px; line-height:1.4;"></div>
+          <div id="modalTestResult" style="display:none; margin-top:10px; padding:10px 12px; border-radius:8px; font-size:12px; line-height:1.4;"></div>
         </div>
 
         <!-- 6. SINGLE SAVE ACTION BUTTON -->
-        <div style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--border-subtle); padding-top:14px;">
-          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button type="button" class="btn btn-primary" id="btnModalSaveConfig" onclick="saveAdminProviderModal('${p.id}')">
+        <div style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--border-subtle); padding-top:16px;">
+          <button type="button" class="btn btn-secondary" style="padding:8px 18px; font-weight:700;" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnModalSaveConfig" style="padding:8px 20px; font-weight:800;" onclick="saveAdminProviderModal('${p.id}')">
             💾 Save Configuration
           </button>
         </div>
@@ -3098,8 +3123,10 @@ function openAdminProviderModal(providerId) {
   if (!existingModels || existingModels.length === 0) {
     fetchLiveModelsForProvider(p.id, false).then(models => {
       const select = document.getElementById('modalModelSelect');
+      const countBadge = document.getElementById('modalModelCountBadge');
       if (select && models && models.length > 0) {
         select.innerHTML = renderAdminModelOptionsHTML(p.id, '', currentModel);
+        if (countBadge) countBadge.textContent = `${models.length} Active Models`;
       }
     });
   }
@@ -3265,26 +3292,65 @@ function toggleModalApiKeyVisibility() {
 
 async function fetchModalModels(providerId) {
   const btn = document.getElementById('btnModalFetchModels');
-  if (btn) btn.textContent = '↻ Fetching...';
+  const countBadge = document.getElementById('modalModelCountBadge');
+  const keyInput = document.getElementById('modalApiKeyInput');
+  const urlInput = document.getElementById('modalBaseUrlInput');
+
+  const apiKey = (keyInput?.value || '').trim();
+  const baseUrl = (urlInput?.value || '').trim();
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>↻</span> <span>Fetching...</span>';
+  }
+
   try {
-    const models = await fetchLiveModelsForProvider(providerId, true);
-    const select = document.getElementById('modalModelSelect');
-    if (select && models && models.length > 0) {
-      const currentVal = select.value;
-      select.innerHTML = renderAdminModelOptionsHTML(providerId, '', currentVal);
-      showToast(`✓ Fetched ${models.length} live models!`);
+    const params = new URLSearchParams();
+    if (apiKey && apiKey !== 'KEEP_EXISTING') params.set('key', apiKey);
+    if (baseUrl) params.set('baseUrl', baseUrl);
+
+    const res = await fetch(`${API_BASE}/api/providers/${providerId}/models?${params.toString()}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const models = data.models || [];
+
+    if (models.length > 0) {
+      AtomXState.modelsCache[providerId] = models;
+      const select = document.getElementById('modalModelSelect');
+      const searchInput = document.getElementById('modalModelSearchInput');
+      const currentVal = select ? select.value : '';
+      if (select) {
+        select.innerHTML = renderAdminModelOptionsHTML(providerId, searchInput ? searchInput.value : '', currentVal);
+      }
+      if (countBadge) {
+        countBadge.textContent = `${models.length} Active Models`;
+      }
+      showToast(`✓ Fetched ${models.length} active models from ${providerId.toUpperCase()}!`);
+    } else {
+      showToast(`⚠️ No active models returned for ${providerId.toUpperCase()}`);
     }
   } catch (e) {
-    console.warn(e);
+    showToast(`❌ Error fetching models: ${e.message}`);
   } finally {
-    if (btn) btn.textContent = '↻ Fetch Live Models';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>↻</span> <span>Fetch Live Models</span>';
+    }
   }
 }
 
 function filterModalModelsList(query, providerId) {
   const select = document.getElementById('modalModelSelect');
+  const countBadge = document.getElementById('modalModelCountBadge');
   if (!select) return;
   select.innerHTML = renderAdminModelOptionsHTML(providerId, query, select.value);
+  if (countBadge) {
+    const all = (AtomXState.modelsCache && AtomXState.modelsCache[providerId]) || getFallbackModelsForProvider(providerId);
+    countBadge.textContent = query ? `${select.options.length} / ${all.length} Found` : `${all.length} Active Models`;
+  }
 }
 
 function renderAdminAIEngine(container) {
