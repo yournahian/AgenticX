@@ -93,6 +93,8 @@ router.post('/admin/active-model', adminController.saveActiveModel);
 // Dynamic AI API Keys Management
 router.get('/admin/api-keys', adminController.getApiKeys);
 router.post('/admin/api-keys', adminController.saveApiKey);
+router.post('/admin/save-provider-config', adminController.saveProviderConfig);
+router.post('/admin/test-single-key', adminController.testSingleKey);
 
 // Tone & Style Templates Management
 router.get('/tone-styles', adminController.getToneStyles);

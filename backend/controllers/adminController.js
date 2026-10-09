@@ -847,6 +847,99 @@ exports.saveApiKey = async (req, res) => {
   }
 };
 
+// Unified All-in-One Provider Configuration (Saves Key, Base URL, Model, and Sets Active)
+exports.saveProviderConfig = async (req, res) => {
+  try {
+    const { provider, apiKey, model, baseUrl, setActive } = req.body;
+    if (!provider) {
+      return res.status(400).json({ error: 'provider is required' });
+    }
+
+    const prov = provider.toLowerCase().trim();
+    const envVarMap = {
+      groq: 'GROQ_API_KEY',
+      openrouter: 'OPENROUTER_API_KEY',
+      openai: 'OPENAI_API_KEY',
+      anthropic: 'ANTHROPIC_API_KEY',
+      gemini: 'GEMINI_API_KEY'
+    };
+    const envName = envVarMap[prov];
+
+    let data = await getAiSettingsData();
+    if (!data.apiKeys) data.apiKeys = {};
+
+    // 1. API Key
+    const cleanKey = (apiKey || '').trim();
+    if (cleanKey && cleanKey !== 'KEEP_EXISTING') {
+      data.apiKeys[prov] = cleanKey;
+      if (envName) {
+        process.env[envName] = cleanKey;
+        updateEnvFile(envName, cleanKey);
+      }
+    }
+
+    // 2. Base URL
+    if (typeof baseUrl === 'string' && baseUrl.trim()) {
+      const cleanUrl = baseUrl.trim().replace(/\/+$/, '');
+      if (prov === 'openai') {
+        data.openaiBaseUrl = cleanUrl;
+        process.env.OPENAI_BASE_URL = cleanUrl;
+        updateEnvFile('OPENAI_BASE_URL', cleanUrl);
+      } else if (prov === 'anthropic') {
+        data.anthropicBaseUrl = cleanUrl;
+        process.env.ANTHROPIC_BASE_URL = cleanUrl;
+        updateEnvFile('ANTHROPIC_BASE_URL', cleanUrl);
+      }
+    }
+
+    // 3. Model
+    if (model && typeof model === 'string' && model.trim()) {
+      if (!data.providerModels) data.providerModels = {};
+      data.providerModels[prov] = model.trim();
+    }
+
+    // 4. Set as Active System Provider if requested
+    if (setActive === true || setActive === 'true') {
+      data.activeProvider = prov;
+      if (model && typeof model === 'string' && model.trim()) {
+        data.activeModel = model.trim();
+      } else if (data.providerModels && data.providerModels[prov]) {
+        data.activeModel = data.providerModels[prov];
+      }
+    }
+
+    data.lastUpdated = new Date().toISOString();
+    data.updatedBy = 'Admin Control Center';
+
+    await saveAiSettingsData(data);
+
+    const effectiveKey = (cleanKey && cleanKey !== 'KEEP_EXISTING') ? cleanKey : (data.apiKeys[prov] || '');
+    const masked = effectiveKey.length > 8 ? effectiveKey.slice(0, 4) + '••••••••' + effectiveKey.slice(-4) : '••••••••';
+
+    res.json({
+      success: true,
+      message: `✓ ${prov.toUpperCase()} configuration saved successfully!`,
+      settings: data,
+      maskedKey: masked,
+      hasKey: effectiveKey.length > 5
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save provider config: ' + err.message });
+  }
+};
+
+// Test Single Provider Key Connection
+exports.testSingleKey = async (req, res) => {
+  try {
+    const { provider, apiKey, baseUrl } = req.body;
+    if (!provider) return res.status(400).json({ error: 'provider is required' });
+    const result = await multiProviderService.testSingleProviderKey(provider, apiKey, baseUrl);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to test key: ' + err.message });
+  }
+};
+
 // Wipe All User Data Fresh (Clean Slate)
 exports.wipeAllUsers = async (req, res) => {
   try {

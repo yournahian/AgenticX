@@ -1091,6 +1091,70 @@ async function testAllProviderKeys() {
   return results;
 }
 
+async function testSingleProviderKey(provider, overrideKey, overrideBaseUrl) {
+  const p = (provider || '').toLowerCase().trim();
+  const key = (overrideKey && overrideKey !== 'KEEP_EXISTING') ? overrideKey.trim() : getProviderKey(p);
+  if (!key || key.length < 5) {
+    return { configured: false, status: 'MISSING_KEY', message: 'No API key provided or configured' };
+  }
+  try {
+    const t0 = Date.now();
+    let testEndpoint = '';
+    let testHeaders = {};
+    let testBody = null;
+
+    if (p === 'groq') {
+      testEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
+      testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      testBody = { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+    } else if (p === 'openrouter') {
+      testEndpoint = 'https://openrouter.ai/api/v1/chat/completions';
+      testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'HTTP-Referer': 'https://atomx.io' };
+      testBody = { model: 'meta-llama/llama-3.3-70b-instruct', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+    } else if (p === 'openai') {
+      const bUrl = (overrideBaseUrl && overrideBaseUrl.trim()) ? overrideBaseUrl.trim().replace(/\/+$/, '') : getOpenAIBaseUrl();
+      testEndpoint = `${bUrl}/chat/completions`;
+      testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+    } else if (p === 'anthropic') {
+      const bUrl = (overrideBaseUrl && overrideBaseUrl.trim()) ? overrideBaseUrl.trim().replace(/\/+$/, '') : getAnthropicBaseUrl();
+      testEndpoint = `${bUrl}/v1/messages`;
+      testHeaders = {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01'
+      };
+      testBody = {
+        model: 'claude-3-5-haiku-20241022',
+        messages: [{ role: 'user', content: 'hello' }],
+        max_tokens: 5
+      };
+    } else if (p === 'gemini') {
+      testEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+      testHeaders = { 'Content-Type': 'application/json' };
+      testBody = { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] };
+    } else {
+      return { configured: false, status: 'ERROR', message: `Unknown provider: ${p}` };
+    }
+
+    const res = await fetch(testEndpoint, {
+      method: 'POST',
+      headers: testHeaders,
+      body: JSON.stringify(testBody)
+    });
+
+    const latencyMs = Date.now() - t0;
+    if (res.ok) {
+      return { configured: true, status: 'HEALTHY', statusCode: res.status, latencyMs, message: `Connected & Verified! (${latencyMs}ms)` };
+    } else {
+      const errText = await res.text();
+      return { configured: true, status: 'ERROR', statusCode: res.status, latencyMs, message: `HTTP ${res.status}: ${errText.slice(0, 150)}` };
+    }
+  } catch (err) {
+    return { configured: true, status: 'NETWORK_ERROR', message: err.message };
+  }
+}
+
 module.exports = {
   DEFAULT_MODELS,
   fetchLiveModels,
@@ -1098,5 +1162,6 @@ module.exports = {
   getProviderKey,
   getApiLogs,
   addApiLog,
-  testAllProviderKeys
+  testAllProviderKeys,
+  testSingleProviderKey
 };

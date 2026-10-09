@@ -355,8 +355,8 @@ function getAdminModelCountText(prov) {
   return `${models.length} models live`;
 }
 
-function renderAdminModelOptionsHTML(prov, filterQuery = '') {
-  const allModels = AtomXState.modelsCache[prov]?.length > 0
+function renderAdminModelOptionsHTML(prov, filterQuery = '', selectedModel = null) {
+  const allModels = (AtomXState.modelsCache && AtomXState.modelsCache[prov]?.length > 0)
     ? AtomXState.modelsCache[prov]
     : getFallbackModelsForProvider(prov);
   const q = (filterQuery || '').toLowerCase().trim();
@@ -364,7 +364,7 @@ function renderAdminModelOptionsHTML(prov, filterQuery = '') {
     ? allModels.filter(m => m.id.toLowerCase().includes(q) || (m.name && m.name.toLowerCase().includes(q)))
     : allModels;
 
-  const currentVal = AtomXState.currentModel;
+  const currentVal = selectedModel || (AtomXState.providerModels && AtomXState.providerModels[prov]) || (prov === AtomXState.currentProvider ? AtomXState.currentModel : null) || (models[0] && models[0].id);
   return models.map(m => `
     <option value="${m.id}" ${m.id === currentVal ? 'selected' : ''}>
       ${m.name || m.id} ${m.context ? '[' + m.context + ']' : ''}
@@ -2921,6 +2921,372 @@ function renderAdminDashboard(container) {
 // -------------------------------------------------------------
 // SCREEN 23: DEDICATED AI ENGINE & TELEMETRY LOGS (ADMIN)
 // -------------------------------------------------------------
+const ADMIN_AI_PROVIDERS = [
+  { id: 'groq', name: 'Groq', tag: 'Ultra-fast LPU Inference', icon: '🚀', defaultModel: 'llama-3.3-70b-versatile', hasBaseUrl: false },
+  { id: 'openrouter', name: 'OpenRouter', tag: 'Open Models & Aggregator', icon: '🌐', defaultModel: 'meta-llama/llama-3.3-70b-instruct', hasBaseUrl: false },
+  { id: 'openai', name: 'OpenAI', tag: 'GPT-4o & Compatible Proxies', icon: '⚡', defaultModel: 'gpt-4o-mini', hasBaseUrl: true, defaultUrl: 'https://api.openai.com/v1', presetUrl: 'https://api.artbloom.tech/v1' },
+  { id: 'anthropic', name: 'Anthropic', tag: 'Claude 3.5 & Artbloom Gateway', icon: '🧠', defaultModel: 'claude-3-5-sonnet-20241022', hasBaseUrl: true, defaultUrl: 'https://api.anthropic.com', presetUrl: 'https://api.artbloom.tech' },
+  { id: 'gemini', name: 'Google Gemini', tag: 'Multimodal Generative AI', icon: '✨', defaultModel: 'gemini-1.5-flash', hasBaseUrl: false }
+];
+
+function renderAdminProviderCardsHTML() {
+  return ADMIN_AI_PROVIDERS.map(p => {
+    const isActive = (AtomXState.currentProvider || 'groq').toLowerCase() === p.id;
+    const keyInfo = getAdminApiKeyInfo(p.id);
+    const hasKey = keyInfo.hasKey;
+    let modelName = (isActive ? AtomXState.currentModel : (AtomXState.providerModels && AtomXState.providerModels[p.id])) || p.defaultModel;
+    
+    let baseUrlNotice = '';
+    if (p.id === 'anthropic' && AtomXState.adminAnthropicBaseUrl && !AtomXState.adminAnthropicBaseUrl.includes('anthropic.com')) {
+      baseUrlNotice = `<div style="font-size:10.5px; color:#d97706; margin-top:4px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Proxy: ${AtomXState.adminAnthropicBaseUrl}</div>`;
+    } else if (p.id === 'openai' && AtomXState.adminOpenaiBaseUrl && !AtomXState.adminOpenaiBaseUrl.includes('openai.com')) {
+      baseUrlNotice = `<div style="font-size:10.5px; color:var(--blue-primary); margin-top:4px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Proxy: ${AtomXState.adminOpenaiBaseUrl}</div>`;
+    }
+
+    return `
+      <div class="atomx-card" style="cursor:pointer; position:relative; border:${isActive ? '2px solid var(--blue-primary)' : '1px solid var(--border-subtle)'}; background:${isActive ? 'rgba(59,130,246,0.04)' : 'var(--bg-card)'}; transition:all 0.2s ease; padding:16px; border-radius:var(--radius-md);" onclick="openAdminProviderModal('${p.id}')">
+        ${isActive ? `<div style="position:absolute; top:12px; right:12px;"><span class="badge badge-success" style="font-size:10px; font-weight:800; letter-spacing:0.4px;">● ACTIVE FOR SYSTEM</span></div>` : ''}
+        
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+          <div style="font-size:28px;">${p.icon}</div>
+          <div>
+            <div style="font-size:15px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+              ${p.name}
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary);">${p.tag}</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:10px;">
+          <span class="badge ${hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10.5px;">
+            ${hasKey ? '🟢 Key Active (' + (keyInfo.maskedKey || 'Configured') + ')' : '⚪ Missing Key'}
+          </span>
+        </div>
+
+        <div style="background:var(--bg-canvas); padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); margin-bottom:12px;">
+          <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">Configured Model</div>
+          <div style="font-size:12px; font-weight:700; color:var(--text-primary); font-family:monospace; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            ${modelName}
+          </div>
+          ${baseUrlNotice}
+        </div>
+
+        <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'} btn-sm" style="width:100%; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="event.stopPropagation(); openAdminProviderModal('${p.id}')">
+          <span>⚙️</span>
+          <span>Configure &amp; Test</span>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+function openAdminProviderModal(providerId) {
+  closeModal();
+  const p = ADMIN_AI_PROVIDERS.find(x => x.id === providerId) || ADMIN_AI_PROVIDERS[0];
+  const isActive = (AtomXState.currentProvider || 'groq').toLowerCase() === p.id;
+  const keyInfo = getAdminApiKeyInfo(p.id);
+  const currentModel = (isActive ? AtomXState.currentModel : (AtomXState.providerModels && AtomXState.providerModels[p.id])) || p.defaultModel;
+  
+  let currentBaseUrl = '';
+  if (p.id === 'openai') {
+    currentBaseUrl = AtomXState.adminOpenaiBaseUrl || 'https://api.openai.com/v1';
+  } else if (p.id === 'anthropic') {
+    currentBaseUrl = AtomXState.adminAnthropicBaseUrl || 'https://api.anthropic.com';
+  }
+
+  const existingModels = AtomXState.modelsCache && AtomXState.modelsCache[p.id];
+
+  const modalHTML = `
+    <div class="modal-backdrop" id="adminProviderModal">
+      <div class="modal-box" style="max-width:540px; width:95%; max-height:90vh; overflow-y:auto;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:12px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:24px;">${p.icon}</span>
+            <div>
+              <h3 class="modal-title" style="font-size:16px; margin:0;">Configure ${p.name}</h3>
+              <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">${p.tag} • Manage key, custom URL &amp; model</div>
+            </div>
+          </div>
+          <button class="modal-close-btn" onclick="closeModal()" style="font-size:22px; cursor:pointer; background:none; border:none; color:var(--text-secondary);">×</button>
+        </div>
+
+        <!-- 1. ACTIVE SYSTEM TOGGLE -->
+        <div style="background:var(--bg-canvas); padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-weight:700; font-size:13px; color:var(--text-primary);">Set as Active System Provider</div>
+            <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">All Chrome Extension replies will route through this provider.</div>
+          </div>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:700; font-size:12px;">
+            <input type="checkbox" id="modalSetActiveCheckbox" ${isActive ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;" />
+            <span style="color:var(--text-primary);">Active</span>
+          </label>
+        </div>
+
+        <!-- 2. MODEL SELECTION -->
+        <div class="form-group" style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label class="form-label" style="font-size:12px; margin:0; font-weight:700;">Selected Model</label>
+            <button type="button" class="btn btn-sm" id="btnModalFetchModels" style="font-size:10.5px; padding:2px 8px; background:var(--bg-canvas); border:1px solid var(--border-subtle); color:var(--text-secondary);" onclick="fetchModalModels('${p.id}')">↻ Fetch Live Models</button>
+          </div>
+          <select id="modalModelSelect" class="form-select" style="font-size:12.5px; width:100%;">
+            ${renderAdminModelOptionsHTML(p.id, '', currentModel)}
+          </select>
+          <input type="text" id="modalModelSearchInput" class="form-input" placeholder="🔍 Search models (e.g. llama, claude, sonnet)..." style="font-size:11px; padding:4px 8px; margin-top:6px; width:100%; box-sizing:border-box;" oninput="filterModalModelsList(this.value, '${p.id}')">
+        </div>
+
+        <!-- 3. API KEY INPUT -->
+        <div class="form-group" style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label class="form-label" style="font-size:12px; margin:0; font-weight:700;">
+              ${p.name} API Key
+              <span class="badge ${keyInfo.hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10px; margin-left:6px;" id="modalKeyStatusBadge">
+                ${keyInfo.hasKey ? '🟢 Configured (' + keyInfo.maskedKey + ')' : '⚪ Not Set'}
+              </span>
+            </label>
+            <span style="font-size:10.5px; color:var(--text-muted);">Leave empty to keep existing</span>
+          </div>
+          <div style="position:relative; display:flex; align-items:center;">
+            <input type="password" id="modalApiKeyInput" class="form-input" style="padding-right:70px; font-family:monospace; font-size:12px;" placeholder="${keyInfo.hasKey ? 'Current: ' + keyInfo.maskedKey + ' (Paste to replace)' : 'Paste ' + p.name + ' API key (e.g. sk-...)'}">
+            <button type="button" id="modalToggleKeyBtn" onclick="toggleModalApiKeyVisibility()" style="position:absolute; right:8px; background:none; border:none; cursor:pointer; font-size:11px; color:var(--text-secondary); padding:4px 6px;">👁️ Show</button>
+          </div>
+        </div>
+
+        <!-- 4. BASE URL (FOR ANTHROPIC & OPENAI) -->
+        ${p.hasBaseUrl ? `
+          <div class="form-group" style="margin-bottom:14px; background:var(--bg-canvas); padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+              <label class="form-label" style="font-size:11.5px; margin:0; font-weight:700;">🌐 Base URL (Proxy / Gateway)</label>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:rgba(59,130,246,0.12); color:var(--blue-primary); border:1px solid rgba(59,130,246,0.3);" onclick="setModalBaseUrl('${p.presetUrl}')">⚡ Artbloom Preset</button>
+                <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:var(--bg-card); color:var(--text-secondary); border:1px solid var(--border-subtle);" onclick="setModalBaseUrl('${p.defaultUrl}')">Official</button>
+              </div>
+            </div>
+            <input type="text" id="modalBaseUrlInput" class="form-input" value="${currentBaseUrl}" style="font-size:12px; font-family:monospace;" placeholder="${p.defaultUrl}">
+            <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px;">
+              Use Artbloom proxy URL for Artbloom keys (<code>sk-ab-...</code>), or Official URL for standard keys.
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- 5. TEST CONNECTION -->
+        <div style="margin-bottom:16px; padding:12px; background:var(--bg-canvas); border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-weight:700; font-size:12px; color:var(--text-primary);">⚡ Verify Connection</div>
+              <div style="font-size:11px; color:var(--text-secondary);">Test this key &amp; URL against the provider before saving.</div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnModalTestConn" onclick="testModalProviderConnection('${p.id}')">
+              ⚡ Test Connection
+            </button>
+          </div>
+          <div id="modalTestResult" style="display:none; margin-top:10px; padding:8px 10px; border-radius:var(--radius-sm); font-size:11.5px; line-height:1.4;"></div>
+        </div>
+
+        <!-- 6. SINGLE SAVE ACTION BUTTON -->
+        <div style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--border-subtle); padding-top:14px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnModalSaveConfig" onclick="saveAdminProviderModal('${p.id}')">
+            💾 Save Configuration
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+  // Background fetch live models if not cached
+  if (!existingModels || existingModels.length === 0) {
+    fetchLiveModelsForProvider(p.id, false).then(models => {
+      const select = document.getElementById('modalModelSelect');
+      if (select && models && models.length > 0) {
+        select.innerHTML = renderAdminModelOptionsHTML(p.id, '', currentModel);
+      }
+    });
+  }
+}
+
+async function saveAdminProviderModal(providerId) {
+  const p = ADMIN_AI_PROVIDERS.find(x => x.id === providerId) || ADMIN_AI_PROVIDERS[0];
+  const btn = document.getElementById('btnModalSaveConfig');
+  const keyInput = document.getElementById('modalApiKeyInput');
+  const baseUrlInput = document.getElementById('modalBaseUrlInput');
+  const modelSelect = document.getElementById('modalModelSelect');
+  const setActiveCheckbox = document.getElementById('modalSetActiveCheckbox');
+
+  const apiKey = (keyInput?.value || '').trim();
+  const baseUrl = (baseUrlInput?.value || '').trim();
+  const model = modelSelect?.value || p.defaultModel;
+  const setActive = setActiveCheckbox ? setActiveCheckbox.checked : false;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '💾 Saving & Syncing...';
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/save-provider-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: providerId,
+        apiKey: apiKey || 'KEEP_EXISTING',
+        model,
+        baseUrl,
+        setActive
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to save configuration');
+    }
+
+    // Update local state
+    if (!AtomXState.adminApiKeys) AtomXState.adminApiKeys = {};
+    if (data.maskedKey) {
+      AtomXState.adminApiKeys[providerId] = {
+        hasKey: data.hasKey,
+        maskedKey: data.maskedKey
+      };
+    }
+    if (!AtomXState.providerModels) AtomXState.providerModels = {};
+    AtomXState.providerModels[providerId] = model;
+
+    if (providerId === 'openai' && baseUrl) {
+      AtomXState.adminOpenaiBaseUrl = baseUrl;
+    }
+    if (providerId === 'anthropic' && baseUrl) {
+      AtomXState.adminAnthropicBaseUrl = baseUrl;
+    }
+
+    if (setActive) {
+      AtomXState.currentProvider = providerId;
+      AtomXState.currentModel = model;
+    }
+
+    showToast(`✓ ${p.name} configuration saved successfully!`);
+    closeModal();
+
+    // Re-render AI Engine screen to reflect new active provider & card states
+    const contentArea = document.getElementById('mainContentArea');
+    if (contentArea) {
+      renderAdminAIEngine(contentArea);
+    }
+  } catch (err) {
+    showToast('❌ Failed to save: ' + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '💾 Save Configuration';
+    }
+  }
+}
+
+async function testModalProviderConnection(providerId) {
+  const btn = document.getElementById('btnModalTestConn');
+  const resultDiv = document.getElementById('modalTestResult');
+  const keyInput = document.getElementById('modalApiKeyInput');
+  const baseUrlInput = document.getElementById('modalBaseUrlInput');
+
+  const apiKey = (keyInput?.value || '').trim();
+  const baseUrl = (baseUrlInput?.value || '').trim();
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⚡ Testing...';
+  }
+  if (resultDiv) {
+    resultDiv.style.display = 'block';
+    resultDiv.style.background = 'rgba(59,130,246,0.08)';
+    resultDiv.style.color = 'var(--text-secondary)';
+    resultDiv.style.border = '1px solid rgba(59,130,246,0.2)';
+    resultDiv.innerHTML = '⏳ Ping test in progress... Sending test inference payload.';
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/test-single-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: providerId,
+        apiKey: apiKey || 'KEEP_EXISTING',
+        baseUrl
+      })
+    });
+
+    const data = await res.json();
+    if (resultDiv) {
+      if (data.status === 'HEALTHY') {
+        resultDiv.style.background = 'rgba(16,185,129,0.12)';
+        resultDiv.style.color = 'var(--status-success)';
+        resultDiv.style.border = '1px solid rgba(16,185,129,0.3)';
+        resultDiv.innerHTML = `<strong>✓ Connection Verified!</strong> (${data.latencyMs}ms)<br>Provider authorization and endpoint handshake successful.`;
+      } else {
+        resultDiv.style.background = 'rgba(239,68,68,0.12)';
+        resultDiv.style.color = 'var(--status-error)';
+        resultDiv.style.border = '1px solid rgba(239,68,68,0.3)';
+        resultDiv.innerHTML = `<strong>❌ Connection Failed:</strong><br>${data.message || 'Unable to authenticate with provider.'}`;
+      }
+    }
+  } catch (err) {
+    if (resultDiv) {
+      resultDiv.style.background = 'rgba(239,68,68,0.12)';
+      resultDiv.style.color = 'var(--status-error)';
+      resultDiv.style.border = '1px solid rgba(239,68,68,0.3)';
+      resultDiv.innerHTML = `<strong>❌ Network Error:</strong> ${err.message}`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Test Connection';
+    }
+  }
+}
+
+function setModalBaseUrl(url) {
+  const inp = document.getElementById('modalBaseUrlInput');
+  if (inp) {
+    inp.value = url;
+    inp.focus();
+  }
+}
+
+function toggleModalApiKeyVisibility() {
+  const inp = document.getElementById('modalApiKeyInput');
+  const btn = document.getElementById('modalToggleKeyBtn');
+  if (!inp) return;
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    if (btn) btn.textContent = '🙈 Hide';
+  } else {
+    inp.type = 'password';
+    if (btn) btn.textContent = '👁️ Show';
+  }
+}
+
+async function fetchModalModels(providerId) {
+  const btn = document.getElementById('btnModalFetchModels');
+  if (btn) btn.textContent = '↻ Fetching...';
+  try {
+    const models = await fetchLiveModelsForProvider(providerId, true);
+    const select = document.getElementById('modalModelSelect');
+    if (select && models && models.length > 0) {
+      const currentVal = select.value;
+      select.innerHTML = renderAdminModelOptionsHTML(providerId, '', currentVal);
+      showToast(`✓ Fetched ${models.length} live models!`);
+    }
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    if (btn) btn.textContent = '↻ Fetch Live Models';
+  }
+}
+
+function filterModalModelsList(query, providerId) {
+  const select = document.getElementById('modalModelSelect');
+  if (!select) return;
+  select.innerHTML = renderAdminModelOptionsHTML(providerId, query, select.value);
+}
+
 function renderAdminAIEngine(container) {
   container.innerHTML = `
     <div class="app-layout">
@@ -2933,7 +3299,6 @@ function renderAdminAIEngine(container) {
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
             <button class="btn btn-secondary btn-sm" onclick="refreshAdminApiLogs(true)">↻ Refresh Logs</button>
-            <button class="btn btn-primary btn-sm" onclick="saveAdminActiveModel()">💾 Set Active for System</button>
           </div>
         </div>
 
@@ -2947,104 +3312,14 @@ function renderAdminAIEngine(container) {
                   <span class="badge badge-success" id="activeModelBadge">● ACTIVE: ${AtomXState.currentProvider.toUpperCase()} / ${AtomXState.currentModel}</span>
                 </h3>
                 <p style="font-size:12px; color:var(--text-secondary); margin-top:3px;">
-                  Select which provider and model powers all Chrome Extension users in real-time. Providers and keys are managed securely on backend.
+                  Select which provider powers all Chrome Extension users. Click any provider below to configure its API key, custom base URL, model, and test connection in a popup.
                 </p>
               </div>
-              <div style="display:flex; gap:8px;">
-                <button class="btn btn-secondary btn-sm" onclick="refreshAdminModels(true)" id="adminRefreshModelsBtn">↻ Fetch Live Models</button>
-                <button class="btn btn-primary btn-sm" onclick="saveAdminActiveModel()">💾 Set Active for System</button>
-              </div>
             </div>
 
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; align-items:center;">
-              <div>
-                <label class="form-label" style="font-size:12px; margin-bottom:6px;">Select AI Provider</label>
-                <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                  <button class="btn ${AtomXState.currentProvider === 'groq' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('groq')">🚀 Groq</button>
-                  <button class="btn ${AtomXState.currentProvider === 'openrouter' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('openrouter')">🌐 OpenRouter</button>
-                  <button class="btn ${AtomXState.currentProvider === 'openai' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('openai')">⚡ OpenAI</button>
-                  <button class="btn ${AtomXState.currentProvider === 'anthropic' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('anthropic')">🧠 Anthropic</button>
-                  <button class="btn ${AtomXState.currentProvider === 'gemini' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('gemini')">✨ Gemini</button>
-                </div>
-              </div>
-
-              <div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <label class="form-label" style="font-size:12px; margin-bottom:0;">Available Model (Fetched Live)</label>
-                  <span id="modelCountLabel" style="font-size:11px; color:var(--blue-primary); font-weight:700;">${getAdminModelCountText(AtomXState.currentProvider)}</span>
-                </div>
-                <select id="adminModelSelect" class="form-select" onchange="AtomXState.currentModel = this.value">
-                  ${renderAdminModelOptionsHTML(AtomXState.currentProvider)}
-                </select>
-                <input type="text" id="adminModelSearchInput" class="form-input" placeholder="🔍 Search models (e.g. llama-3.3, allam)..." style="font-size:11px; padding:4px 8px; margin-top:6px; width:100%; box-sizing:border-box;" oninput="filterAdminModelsList(this.value)">
-              </div>
-
-              <div style="background:var(--bg-canvas); padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); font-size:12px;">
-                <div style="color:var(--text-secondary); font-size:11px;">Server Status</div>
-                <div style="font-weight:700; color:var(--text-primary); margin-top:2px;">
-                  ✓ Keys Active &amp; Synced
-                </div>
-                <div style="color:var(--text-muted); font-size:11px; margin-top:2px;">Dynamic inference • Zero client exposure</div>
-              </div>
-            </div>
-
-            <!-- DYNAMIC API KEY CONFIGURATION (DIRECT FROM DASHBOARD - NO .ENV MANUAL EDITING) -->
-            <div style="margin-top:16px; padding:12px 14px; background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:var(--radius-sm);">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                <label style="font-size:12px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
-                  <span>🔑</span>
-                  <span><span id="adminApiKeyProviderLabel">${AtomXState.currentProvider.toUpperCase()}</span> API Key</span>
-                  <span id="adminApiKeyStatusBadge" class="badge ${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? 'badge-success' : 'badge-warning'}" style="font-size:10.5px;">
-                    ${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? '🟢 Configured (' + getAdminApiKeyInfo(AtomXState.currentProvider).maskedKey + ')' : '⚪ Missing Key'}
-                  </span>
-                </label>
-                <span style="font-size:11px; color:var(--text-muted);">Change key here anytime without touching .env</span>
-              </div>
-              <div style="display:flex; gap:8px;">
-                <input type="password" id="adminApiKeyInput" class="form-input" placeholder="${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? 'Current: ' + getAdminApiKeyInfo(AtomXState.currentProvider).maskedKey + ' (Paste new key to replace)' : 'Paste ' + AtomXState.currentProvider.toUpperCase() + ' API key (e.g. gsk_... or sk-ab-...)'}" style="font-size:12px; font-family:monospace; flex:1;" />
-                <button type="button" class="btn btn-secondary btn-sm" id="toggleApiKeyVisibilityBtn" onclick="toggleAdminApiKeyVisibility()">👁️ Show</button>
-                <button type="button" class="btn btn-primary btn-sm" onclick="saveAdminApiKey()">💾 Save Configuration</button>
-              </div>
-
-              <!-- DYNAMIC OPENAI / PROXY BASE URL (FOR ARTBLOOM, VLLM, OLLAMA) -->
-              <div id="adminOpenaiBaseUrlRow" style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-subtle); display:${AtomXState.currentProvider === 'openai' ? 'block' : 'none'};">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
-                  <label style="font-size:11.5px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
-                    <span>🌐</span> OpenAI Base URL (Proxy / Gateway)
-                  </label>
-                  <div style="display:flex; gap:6px;">
-                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:rgba(59,130,246,0.12); color:var(--blue-primary); border:1px solid rgba(59,130,246,0.3);" onclick="setAdminOpenaiBaseUrlPreset('https://api.artbloom.tech/v1')">⚡ Artbloom Preset</button>
-                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:var(--bg-canvas); color:var(--text-secondary); border:1px solid var(--border-subtle);" onclick="setAdminOpenaiBaseUrlPreset('https://api.openai.com/v1')">Official OpenAI</button>
-                  </div>
-                </div>
-                <div style="display:flex; gap:8px;">
-                  <input type="text" id="adminOpenaiBaseUrlInput" class="form-input" placeholder="https://api.artbloom.tech/v1" value="${AtomXState.adminOpenaiBaseUrl || 'https://api.openai.com/v1'}" style="font-size:12px; font-family:monospace; flex:1;" />
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="saveAdminApiKey()">💾 Save URL</button>
-                </div>
-                <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px;">
-                  Use <code>https://api.artbloom.tech/v1</code> for Artbloom API keys (e.g. <code>sk-ab-...</code>), or <code>https://api.openai.com/v1</code> for standard OpenAI.
-                </div>
-              </div>
-
-              <!-- DYNAMIC ANTHROPIC / PROXY BASE URL (FOR ARTBLOOM, CLAUDE PROXIES) -->
-              <div id="adminAnthropicBaseUrlRow" style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-subtle); display:${AtomXState.currentProvider === 'anthropic' ? 'block' : 'none'};">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
-                  <label style="font-size:11.5px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
-                    <span>🌐</span> Anthropic Base URL (Proxy / Gateway)
-                  </label>
-                  <div style="display:flex; gap:6px;">
-                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:rgba(217,119,6,0.12); color:#d97706; border:1px solid rgba(217,119,6,0.3);" onclick="setAdminAnthropicBaseUrlPreset('https://api.artbloom.tech')">⚡ Artbloom Preset</button>
-                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:var(--bg-canvas); color:var(--text-secondary); border:1px solid var(--border-subtle);" onclick="setAdminAnthropicBaseUrlPreset('https://api.anthropic.com')">Official Anthropic</button>
-                  </div>
-                </div>
-                <div style="display:flex; gap:8px;">
-                  <input type="text" id="adminAnthropicBaseUrlInput" class="form-input" placeholder="https://api.artbloom.tech" value="${AtomXState.adminAnthropicBaseUrl || 'https://api.anthropic.com'}" style="font-size:12px; font-family:monospace; flex:1;" />
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="saveAdminApiKey()">💾 Save URL</button>
-                </div>
-                <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px;">
-                  Use <code>https://api.artbloom.tech</code> for Artbloom Anthropic keys (e.g. <code>sk-ab-...</code>), or <code>https://api.anthropic.com</code> for official Anthropic.
-                </div>
-              </div>
+            <!-- PROVIDER CARDS GRID -->
+            <div id="adminProviderCardsContainer" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:14px;">
+              ${renderAdminProviderCardsHTML()}
             </div>
           </div>
 
@@ -6216,6 +6491,15 @@ async function loadAdminServerData(preserveScroll = true) {
       if (!AtomXState.currentModel) {
         AtomXState.currentModel = modelData.activeModel || 'llama-3.3-70b-versatile';
       }
+      if (modelData.providerModels) {
+        AtomXState.providerModels = modelData.providerModels;
+      }
+      if (modelData.openaiBaseUrl) {
+        AtomXState.adminOpenaiBaseUrl = modelData.openaiBaseUrl;
+      }
+      if (modelData.anthropicBaseUrl) {
+        AtomXState.adminAnthropicBaseUrl = modelData.anthropicBaseUrl;
+      }
     }
 
     if (engRes && engRes.ok) {
@@ -6284,6 +6568,15 @@ async function loadAdminServerData(preserveScroll = true) {
       const logsTbody = document.getElementById('adminApiLogsTbody');
       if (logsTbody && !isUserTyping) {
         logsTbody.innerHTML = renderAdminApiLogsRowsHTML(AtomXState.adminApiLogs);
+      }
+      const isModalOpen = !!document.getElementById('adminProviderModal');
+      const cardsContainer = document.getElementById('adminProviderCardsContainer');
+      if (cardsContainer && !isModalOpen && !isUserTyping) {
+        cardsContainer.innerHTML = renderAdminProviderCardsHTML();
+      }
+      const activeBadge = document.getElementById('activeModelBadge');
+      if (activeBadge) {
+        activeBadge.textContent = `● ACTIVE: ${AtomXState.currentProvider.toUpperCase()} / ${AtomXState.currentModel}`;
       }
       return;
     }
