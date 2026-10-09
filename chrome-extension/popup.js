@@ -1077,6 +1077,12 @@ function initListeners() {
   document.getElementById('extSubmitRequestBtn')?.addEventListener('click', handleExtSubmitRequest);
   document.getElementById('extCheckStatusBtn')?.addEventListener('click', () => handleExtCheckStatus(true));
   document.getElementById('extCheckApprovalStatusPromptBtn')?.addEventListener('click', handleExtPromptCheckApprovalStatus);
+  document.getElementById('extDoLookupBtn')?.addEventListener('click', handleExtDoLookup);
+  document.getElementById('extLookupBackLink')?.addEventListener('click', () => showAccessSubView('request'));
+  document.getElementById('extLookupHandleInput')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleExtDoLookup();
+  });
+  document.getElementById('extLookupGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extEditRequestBtn')?.addEventListener('click', () => showAccessSubView('request'));
   document.getElementById('extGoToLoginLink')?.addEventListener('click', () => showAccessSubView('login'));
   document.getElementById('extGoToRequestLink')?.addEventListener('click', () => showAccessSubView('request'));
@@ -4170,6 +4176,7 @@ function showAccessSubView(viewName) {
   const views = {
     'loggedIn': document.getElementById('extLoggedInCard'),
     'request': document.getElementById('extRequestAccessView'),
+    'lookup': document.getElementById('extCheckStatusLookupView'),
     'pending': document.getElementById('extPendingApprovalView'),
     'setPassword': document.getElementById('extSetPasswordView'),
     'login': document.getElementById('extLoggedOutCard'),
@@ -4437,39 +4444,141 @@ async function handleExtPromptCheckApprovalStatus() {
   let targetHandle = state.pendingRequest?.handle || inputHandle || '';
   let targetEmail = state.pendingRequest?.email || inputEmail || '';
 
-  if (!targetHandle && !targetEmail) {
-    const entered = prompt('Please enter your Twitter / X Handle (e.g. @yourhandle) or Email:');
-    if (!entered || !entered.trim()) return;
-    const clean = entered.trim();
-    if (clean.includes('@') && clean.includes('.')) {
-      targetEmail = clean;
+  // If handle or email is already available in the inputs or state, check directly
+  if (targetHandle || targetEmail) {
+    if (!state.pendingRequest) {
+      state.pendingRequest = {
+        handle: targetHandle || '@user',
+        email: targetEmail || '',
+        status: 'PENDING',
+        requestedAt: Date.now()
+      };
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        await chrome.storage.local.set({ pendingRequest: state.pendingRequest });
+      }
+    }
+    const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
+    const pHandleText = document.getElementById('extPendingHandleText');
+    const pEmailText = document.getElementById('extPendingEmailText');
+    if (pHandleDisplay) pHandleDisplay.textContent = targetHandle || state.pendingRequest.handle;
+    if (pHandleText) pHandleText.textContent = targetHandle || state.pendingRequest.handle;
+    if (pEmailText) pEmailText.textContent = targetEmail || state.pendingRequest.email || '--';
+
+    showAccessSubView('pending');
+    await handleExtCheckStatus(true);
+    return;
+  }
+
+  // Otherwise, switch cleanly to in-extension lookup subview (NO BROWSER POPUPS!)
+  showAccessSubView('lookup');
+  const lookupInput = document.getElementById('extLookupHandleInput');
+  if (lookupInput) {
+    lookupInput.value = state.verifiedXHandle ? `@${state.verifiedXHandle.replace(/^@/, '')}` : '';
+    setTimeout(() => lookupInput.focus(), 80);
+  }
+}
+
+/**
+ * Perform in-extension lookup for user's approval status
+ */
+async function handleExtDoLookup() {
+  const input = document.getElementById('extLookupHandleInput');
+  const alertEl = document.getElementById('extLookupStatusAlert');
+  const btn = document.getElementById('extDoLookupBtn');
+  const raw = (input?.value || '').trim();
+
+  if (!raw) {
+    if (alertEl) {
+      alertEl.style.display = 'block';
+      alertEl.style.background = 'rgba(239,68,68,0.12)';
+      alertEl.style.color = 'var(--status-error)';
+      alertEl.style.border = '1px solid rgba(239,68,68,0.3)';
+      alertEl.textContent = 'Please enter your Twitter / X ID (e.g. @yournahian) or Email.';
+    }
+    input?.focus();
+    return;
+  }
+
+  let handle = '';
+  let email = '';
+  if (raw.includes('@') && raw.includes('.')) {
+    email = raw;
+  } else {
+    handle = raw.startsWith('@') ? raw : `@${raw}`;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Verifying with Server...';
+  }
+  if (alertEl) alertEl.style.display = 'none';
+
+  try {
+    const backendUrl = await getBackendUrl();
+    const query = new URLSearchParams();
+    if (handle) query.append('handle', handle);
+    if (email) query.append('email', email);
+
+    const res = await fetch(`${backendUrl}/api/auth/check-status?${query.toString()}`);
+    const data = await res.json();
+
+    if (data.status === 'APPROVED') {
+      const approvedHandle = data.handle || handle;
+      const approvedDisp = document.getElementById('extApprovedHandleDisplay');
+      if (approvedDisp) approvedDisp.textContent = approvedHandle;
+      showAccessSubView('setPassword');
+    } else if (data.status === 'PENDING') {
+      state.pendingRequest = {
+        handle: handle || data.handle || '@user',
+        email: email || data.email || '',
+        status: 'PENDING',
+        requestedAt: Date.now()
+      };
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        await chrome.storage.local.set({ pendingRequest: state.pendingRequest });
+      }
+      const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
+      const pHandleText = document.getElementById('extPendingHandleText');
+      const pEmailText = document.getElementById('extPendingEmailText');
+      if (pHandleDisplay) pHandleDisplay.textContent = state.pendingRequest.handle;
+      if (pHandleText) pHandleText.textContent = state.pendingRequest.handle;
+      if (pEmailText) pEmailText.textContent = state.pendingRequest.email || '--';
+      showAccessSubView('pending');
+    } else if (data.status === 'ACTIVE') {
+      const loginInput = document.getElementById('extLoginHandleInput');
+      if (loginInput) loginInput.value = data.handle || handle;
+      showAccessSubView('login');
+    } else if (data.status === 'REJECTED') {
+      if (alertEl) {
+        alertEl.style.display = 'block';
+        alertEl.style.background = 'rgba(239,68,68,0.12)';
+        alertEl.style.color = 'var(--status-error)';
+        alertEl.style.border = '1px solid rgba(239,68,68,0.3)';
+        alertEl.textContent = data.reason || 'Your access request was declined by the administrator.';
+      }
     } else {
-      targetHandle = clean.startsWith('@') ? clean : `@${clean}`;
+      if (alertEl) {
+        alertEl.style.display = 'block';
+        alertEl.style.background = 'rgba(239,68,68,0.12)';
+        alertEl.style.color = 'var(--status-error)';
+        alertEl.style.border = '1px solid rgba(239,68,68,0.3)';
+        alertEl.textContent = `No pending request found for "${raw}". Please verify spelling or submit a request on the form.`;
+      }
+    }
+  } catch (err) {
+    if (alertEl) {
+      alertEl.style.display = 'block';
+      alertEl.style.background = 'rgba(239,68,68,0.12)';
+      alertEl.style.color = 'var(--status-error)';
+      alertEl.style.border = '1px solid rgba(239,68,68,0.3)';
+      alertEl.textContent = `Server connection error: ${err.message}`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Check Status & Proceed';
     }
   }
-
-  // Prepopulate state.pendingRequest so the user status is remembered locally
-  if (!state.pendingRequest) {
-    state.pendingRequest = {
-      handle: targetHandle || '@user',
-      email: targetEmail || '',
-      status: 'PENDING',
-      requestedAt: Date.now()
-    };
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      await chrome.storage.local.set({ pendingRequest: state.pendingRequest });
-    }
-  }
-
-  const pHandleDisplay = document.getElementById('extPendingHandleDisplay');
-  const pHandleText = document.getElementById('extPendingHandleText');
-  const pEmailText = document.getElementById('extPendingEmailText');
-  if (pHandleDisplay) pHandleDisplay.textContent = targetHandle || state.pendingRequest.handle;
-  if (pHandleText) pHandleText.textContent = targetHandle || state.pendingRequest.handle;
-  if (pEmailText) pEmailText.textContent = targetEmail || state.pendingRequest.email || '--';
-
-  showAccessSubView('pending');
-  await handleExtCheckStatus(true);
 }
 
 /**
