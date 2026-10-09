@@ -3941,7 +3941,15 @@ function renderAdminUsers(container) {
                   const isRejected = s === 'REJECTED';
                   const isActive = s === 'ACTIVE';
 
-                  const hasPwdReq = pwdReqs.some(pr => (pr.user && (pr.user === u.handle || pr.user === u.email || pr.user === u.name)) || (pr.reason && (pr.reason.includes(u.handle) || pr.reason.includes(u.email))));
+                  const cleanUHandle = (u.handle || '').toLowerCase().replace(/^@/, '');
+                  const cleanUEmail = (u.email || '').toLowerCase();
+                  const hasPwdReq = pwdReqs.some(pr => {
+                    const prHandle = (pr.handle || pr.user || '').toLowerCase().replace(/^@/, '');
+                    const prEmail = (pr.email || '').toLowerCase();
+                    const prReason = (pr.reason || '').toLowerCase();
+                    return (cleanUHandle && (prHandle === cleanUHandle || prReason.includes(cleanUHandle))) ||
+                           (cleanUEmail && (prEmail === cleanUEmail || prReason.includes(cleanUEmail)));
+                  });
 
                   const cleanHandle = (u.handle || '@user').replace(/^@/, '');
                   const handleLink = `<a href="https://x.com/${cleanHandle}" target="_blank" onclick="event.stopPropagation();" style="color:var(--blue-primary); text-decoration:none; font-weight:700;">@${cleanHandle}</a>`;
@@ -4020,10 +4028,15 @@ function openAdminUserProfileModal(userId) {
   }
 
   const pwdReqs = AtomXState.passwordRequests || [];
-  const pwdReq = pwdReqs.find(pr => 
-    (pr.user && (pr.user === user.handle || pr.user === user.email || pr.user === user.name)) ||
-    (pr.reason && (pr.reason.includes(user.handle) || pr.reason.includes(user.email)))
-  );
+  const cleanUserH = (user.handle || '').toLowerCase().replace(/^@/, '');
+  const cleanUserE = (user.email || '').toLowerCase();
+  const pwdReq = pwdReqs.find(pr => {
+    const prH = (pr.handle || pr.user || '').toLowerCase().replace(/^@/, '');
+    const prE = (pr.email || '').toLowerCase();
+    const prR = (pr.reason || '').toLowerCase();
+    return (cleanUserH && (prH === cleanUserH || prR.includes(cleanUserH))) ||
+           (cleanUserE && (prE === cleanUserE || prR.includes(cleanUserE)));
+  });
 
   const statusUpper = (user.status || 'ACTIVE').toUpperCase();
   const isSuspended = statusUpper === 'SUSPENDED';
@@ -4129,7 +4142,7 @@ function openAdminUserProfileModal(userId) {
           <p style="margin:0 0 8px 0; font-size:11.5px; color:var(--text-muted);">Assign a temporary password for this user. They must enter this as their current password when resetting or signing in.</p>
           <div style="display:flex; gap:8px;">
             <input type="text" id="modalNewPassword" class="form-input" placeholder="Enter new password (min 4 chars)" style="flex:1;">
-            <button class="btn btn-secondary btn-sm" onclick="handleAdminModalSetPassword('${user.id}', '${user.name}')" style="white-space:nowrap;">Assign Password</button>
+            <button class="btn btn-secondary btn-sm" onclick="handleAdminModalSetPassword('${user.id}', '${cleanHandle || user.handle || user.name}')" style="white-space:nowrap;">Assign Password</button>
           </div>
         </div>
 
@@ -4208,7 +4221,7 @@ window.handleAdminModalAdjustCredits = async function(userId) {
   }
 };
 
-window.handleAdminModalSetPassword = async function(userId, userName) {
+window.handleAdminModalSetPassword = async function(userId, userHandle) {
   const password = document.getElementById('modalNewPassword')?.value.trim();
   if (!password || password.length < 4) {
     showToast('Password must be at least 4 characters', 'error');
@@ -4222,15 +4235,25 @@ window.handleAdminModalSetPassword = async function(userId, userName) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to set password');
+
+    // Also call resolve-password-request to ensure credits_ledger row is immediately resolved
+    try {
+      await fetch(`${API_BASE}/api/admin/resolve-password-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, handle: userHandle })
+      });
+    } catch (e) {}
+
     showToast(`✓ Password set! Share "${password}" with user as their temporary password.`, 'success');
     const input = document.getElementById('modalNewPassword');
     if (input) input.value = '';
 
-    // Clear from local password requests list immediately
+    // Clear from local password requests list immediately by user_id or handle
+    const cleanH = (userHandle || '').toLowerCase().replace(/^@/, '');
     AtomXState.passwordRequests = (AtomXState.passwordRequests || []).filter(pr => {
-      const uHandle = (userName || '').toLowerCase().replace(/^@/, '');
       const pUser = (pr.user || pr.handle || '').toLowerCase().replace(/^@/, '');
-      return pr.user_id !== userId && pUser !== uHandle;
+      return pr.user_id !== userId && pUser !== cleanH;
     });
 
     closeModal();

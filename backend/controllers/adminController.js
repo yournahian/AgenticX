@@ -282,9 +282,11 @@ exports.getPlans = async (req, res) => {
     }
     // Fallback to db or default plans
     const defaultPlans = [
-      { id: 'free', name: 'FREE', credits: 100, price: 0, popular: false, offerBadge: '', features: ['100 AI replies', 'Basic reply styles', 'Reply queue', 'Basic history'] },
-      { id: 'growth', name: 'GROWTH', credits: 10000, price: 12, popular: true, offerBadge: 'MOST POPULAR', features: ['10,000 AI replies', 'All reply styles', 'Advanced queue', 'Full history', 'Priority generation'] },
-      { id: 'pro', name: 'PRO', credits: 25000, price: 29, popular: false, offerBadge: 'BEST VALUE', features: ['25,000 AI replies', 'Premium AI models', 'Advanced agents', 'Priority generation', 'Advanced analytics'] }
+      { id: 'free', name: 'FREE', credits: 100, price: 0, popular: false, offerBadge: '', features: ['100 AI credits', 'Free Curated Lists', 'Basic Tone Presets', '1 Custom Tone Style'] },
+      { id: 'starter', name: 'STARTER', credits: 2500, price: 5, popular: false, offerBadge: 'ENTRY', features: ['2,500 AI credits', 'Starter Curated Lists', 'Professional Tone Style', '3 Custom Tone Styles'] },
+      { id: 'pro', name: 'PRO', credits: 10000, price: 15, popular: true, offerBadge: 'MOST POPULAR', features: ['10,000 AI credits', 'Pro Curated Lists Access', 'Engaging Question Tone', '10 Custom Tone Styles', 'Priority AI Models'] },
+      { id: 'growth', name: 'GROWTH', credits: 25000, price: 29, popular: false, offerBadge: 'BEST VALUE', features: ['25,000 AI credits', 'Growth Curated Feeds', 'Witty & Clever Tone', '25 Custom Tone Styles', 'Full Agent Suite'] },
+      { id: 'enterprise', name: 'ENTERPRISE', credits: 100000, price: 79, popular: false, offerBadge: 'VIP ALPHA', features: ['100,000 AI credits', 'VIP Alpha Lists', 'Technical Alpha Tone', 'Unlimited Custom Tones', 'Dedicated Failover Gateway'] }
     ];
     inMemoryPlans = defaultPlans;
     res.json({ plans: defaultPlans, foundingOffer: inMemoryFoundingOffer });
@@ -793,11 +795,21 @@ exports.getToneStyles = async (req, res) => {
     }
     const defaultData = {
       maxCustomTemplatesPerUser: 2,
+      planQuotas: {
+        free: 1,
+        starter: 3,
+        pro: 10,
+        growth: 25,
+        enterprise: 100
+      },
       defaultTones: [
-        { id: 'bullish-short', name: 'Bullish (5-10 words)', description: 'Strictly 5-10 words positive bullish community comment, zero clichés or emojis', prompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nAUTHOR RULE: Never use the post author\'s name or username. Do not tag anyone.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no preamble, no exclamation marks (!).' },
-        { id: 'ct-human', name: 'CT Human Reply', description: 'Authentic Crypto Twitter peer reply, 5-10 words', prompt: 'Write a highly authentic, natural human reply to the post as a Crypto Twitter (CT) community member.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human friend/peer. Zero robotic AI clichés.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no preamble, no exclamation marks (!).' },
-        { id: 'natural', name: 'Natural & Concise', description: 'Casual, human-sounding 5-10 words', prompt: 'Write a casual, highly human response.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nSTYLE: Sound natural, direct and concise. Avoid robotic hashtags or buzzwords.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no exclamation marks (!).' },
-        { id: 'professional', name: 'Professional', description: 'Authoritative, insightful 5-10 words', prompt: 'Sound authoritative and sharp.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no exclamation marks (!).' }
+        { id: 'bullish-short', name: 'Bullish (5-10 words)', minPlanTier: 'free', description: 'Strictly 5-10 words positive bullish community comment, zero clichés or emojis', prompt: 'Write a bullish, positive comment replying to the post.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words. Do not exceed 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human community member. No AI clichés, no generic hype.\nAUTHOR RULE: Never use the post author\'s name or username. Do not tag anyone.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no preamble, no exclamation marks (!).' },
+        { id: 'ct-human', name: 'CT Human Reply', minPlanTier: 'free', description: 'Authentic Crypto Twitter peer reply, 5-10 words', prompt: 'Write a highly authentic, natural human reply to the post as a Crypto Twitter (CT) community member.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nLANGUAGE: Match the post\'s language exactly.\nSTYLE: Sound like an authentic human friend/peer. Zero robotic AI clichés.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no preamble, no exclamation marks (!).' },
+        { id: 'natural', name: 'Natural & Concise', minPlanTier: 'free', description: 'Casual, human-sounding 5-10 words', prompt: 'Write a casual, highly human response.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nSTYLE: Sound natural, direct and concise. Avoid robotic hashtags or buzzwords.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no exclamation marks (!).' },
+        { id: 'professional', name: 'Professional', minPlanTier: 'starter', description: 'Authoritative, insightful 5-10 words', prompt: 'Sound authoritative and sharp.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nFORMAT: Output ONLY the single comment text. No emojis, no quotes, no $, no dashes, no exclamation marks (!).' },
+        { id: 'engaging-question', name: 'Engaging Question', minPlanTier: 'pro', description: 'Conversation starter, thought-provoking query', prompt: 'Ask an insightful question directly relevant to the post topic.\nCRITICAL LENGTH CONSTRAINT: Between 6 and 14 words.\nFORMAT: Output ONLY the single question.' },
+        { id: 'witty', name: 'Witty & Clever', minPlanTier: 'growth', description: 'Clever, humorous observational reply', prompt: 'Write a witty and clever reply with dry humor.\nCRITICAL LENGTH CONSTRAINT: Strictly between 5 and 10 words.\nFORMAT: Output ONLY the single comment text.' },
+        { id: 'technical-alpha', name: 'Technical Alpha', minPlanTier: 'enterprise', description: 'Deep technical, data-driven analysis', prompt: 'Sound like a technical architect or deep crypto researcher offering concise alpha.\nCRITICAL LENGTH CONSTRAINT: Strictly between 8 and 15 words.\nFORMAT: Output ONLY the single comment text.' }
       ]
     };
     inMemoryToneStyles = defaultData;
@@ -809,20 +821,32 @@ exports.getToneStyles = async (req, res) => {
 
 exports.saveToneStyles = async (req, res) => {
   try {
-    const { maxCustomTemplatesPerUser, defaultTones } = req.body;
+    const { maxCustomTemplatesPerUser, planQuotas, defaultTones } = req.body;
     let current = inMemoryToneStyles;
     if (!current && fs.existsSync(toneStylesPath)) {
       try { current = JSON.parse(fs.readFileSync(toneStylesPath, 'utf8')); } catch (e) {}
     }
     if (!current) {
-      current = { maxCustomTemplatesPerUser: 2, defaultTones: [] };
+      current = { maxCustomTemplatesPerUser: 2, planQuotas: { free: 1, starter: 3, pro: 10, growth: 25, enterprise: 100 }, defaultTones: [] };
     }
+
+    const mergedQuotas = {
+      free: Number(planQuotas?.free ?? current.planQuotas?.free ?? 1),
+      starter: Number(planQuotas?.starter ?? current.planQuotas?.starter ?? 3),
+      pro: Number(planQuotas?.pro ?? current.planQuotas?.pro ?? 10),
+      growth: Number(planQuotas?.growth ?? current.planQuotas?.growth ?? 25),
+      enterprise: Number(planQuotas?.enterprise ?? current.planQuotas?.enterprise ?? 100)
+    };
 
     const updated = {
       maxCustomTemplatesPerUser: typeof maxCustomTemplatesPerUser === 'number'
         ? Math.max(1, maxCustomTemplatesPerUser)
         : current.maxCustomTemplatesPerUser || 2,
-      defaultTones: Array.isArray(defaultTones) ? defaultTones : current.defaultTones,
+      planQuotas: mergedQuotas,
+      defaultTones: Array.isArray(defaultTones) ? defaultTones.map(t => ({
+        ...t,
+        minPlanTier: (t.minPlanTier || 'free').toLowerCase()
+      })) : current.defaultTones,
       lastUpdated: new Date().toISOString(),
       updatedBy: 'Admin Control Center'
     };

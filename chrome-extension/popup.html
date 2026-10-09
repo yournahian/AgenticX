@@ -105,7 +105,7 @@
       <!-- ============================================== -->
       <!-- TAB 1: 10 AUTONOMOUS AGENTS (BENTO GRID + DETAIL VIEW) -->
       <!-- ============================================== -->
-      <section id="panel-agents" class="tab-panel">
+      <section id="panel-agents" class="tab-panel active">
 
         <!-- VIEW A: BENTO GRID DASHBOARD -->
         <div id="agentsBentoView" class="agents-bento-container">
@@ -1387,17 +1387,20 @@
           </div>
         </div>
 
-        <!-- Active Tone Prompt Editor & Live Inspector -->
+        <!-- Active Voice Preset Indicator (Prompt hidden from users for security) -->
         <div class="card" style="margin-top:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <span class="label" style="font-weight:700; font-size:11.5px; color:var(--text-primary);">Active System Prompt</span>
-            <span id="globalActiveToneBadge" class="badge-mini" style="background:var(--blue-soft); color:var(--blue-primary); font-size:10.5px; font-weight:700;">Bullish (5-10 words)</span>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:16px;">🎙️</span>
+              <div>
+                <div style="font-weight:700; font-size:12px; color:var(--text-primary);">Active Voice Preset</div>
+                <div style="font-size:10.5px; color:var(--text-secondary);">Applied across all agents and live comments</div>
+              </div>
+            </div>
+            <span id="globalActiveToneBadge" class="badge-mini" style="background:var(--blue-soft); color:var(--blue-primary); font-size:11px; font-weight:700; padding:4px 8px;">Bullish (5-10 words)</span>
           </div>
-          <textarea id="globalActiveTonePromptArea" class="ext-textarea" style="min-height:115px; font-family:monospace; font-size:11px; line-height:1.4; padding:8px;" placeholder="Prompt instructions for this tone..."></textarea>
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-            <span style="font-size:10px; color:var(--text-muted);">Prompt syncs across all agents in real time.</span>
-            <button type="button" id="saveGlobalTonePromptBtn" class="primary-btn mini-btn" style="margin-top:0; font-size:11px; padding:5px 12px;">💾 Save Tone Prompt</button>
-          </div>
+          <!-- Hidden textarea kept for internal script backward compatibility -->
+          <textarea id="globalActiveTonePromptArea" style="display:none;"></textarea>
         </div>
 
         <!-- Rules & Zero Fallback Notice -->
@@ -1542,7 +1545,7 @@
       <!-- ============================================== -->
       <!-- TAB 5: ACCESS & ACCOUNT (1-TO-1 X IDENTITY LOCK) -->
       <!-- ============================================== -->
-      <section id="panel-access" class="tab-panel active">
+      <section id="panel-access" class="tab-panel">
 
         <!-- VIEW 1: Logged In Account Details View -->
         <div id="extLoggedInCard" class="card" style="display:none; padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">

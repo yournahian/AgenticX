@@ -785,6 +785,9 @@ async function syncToneStylesFromServer() {
     }).catch(() => null);
     if (res && res.ok) {
       const data = await res.json();
+      if (data.planQuotas) {
+        state.planQuotas = data.planQuotas;
+      }
       if (typeof data.maxCustomTemplatesPerUser === 'number') {
         state.maxCustomTemplates = data.maxCustomTemplatesPerUser;
       }
@@ -805,6 +808,7 @@ async function syncToneStylesFromServer() {
         if (typeof chrome !== 'undefined' && chrome.storage?.local) {
           chrome.storage.local.set({
             defaultTones: state.defaultTones,
+            planQuotas: state.planQuotas,
             selectedToneId: state.selectedToneId,
             selectedTone: state.selectedTone,
             selectedTonePrompt: state.selectedTonePrompt
@@ -837,9 +841,22 @@ function renderTonePills() {
       if (isMini) btn.style.fontSize = '10px';
       btn.dataset.id = t.id;
       btn.dataset.tone = t.name;
-      btn.textContent = getCleanToneLabel(t.name, isMini);
-      btn.title = `${t.name}\n\nSystem Prompt:\n${t.prompt}`;
-      btn.onclick = () => selectTone(t.id, t.name, t.prompt);
+
+      const reqTier = (t.minPlanTier || 'free').toLowerCase();
+      const canAccess = canUserAccessTier(state.userPlan, reqTier);
+
+      if (!canAccess) {
+        btn.textContent = `🔒 ${getCleanToneLabel(t.name, isMini)}`;
+        btn.title = `${t.name} (${reqTier.toUpperCase()} Plan Required)`;
+        btn.style.opacity = '0.65';
+        btn.onclick = () => {
+          alert(`🔒 Tier Upgrade Required:\nThe "${t.name}" preset is exclusively available for ${reqTier.toUpperCase()} and higher subscribers.\n\nYour current plan: ${state.userPlan || 'Free Plan'}.\nPlease upgrade your plan to unlock this voice.`);
+        };
+      } else {
+        btn.textContent = getCleanToneLabel(t.name, isMini);
+        btn.title = t.name; // NEVER reveal internal system prompt on hover!
+        btn.onclick = () => selectTone(t.id, t.name, t.prompt);
+      }
       targetEl.appendChild(btn);
     });
 
@@ -857,7 +874,7 @@ function renderTonePills() {
       btn.dataset.id = ct.id;
       btn.dataset.tone = ct.name;
       btn.textContent = `⭐ ${ct.name}`;
-      btn.title = `Custom: ${ct.prompt}`;
+      btn.title = ct.name; // NEVER reveal custom prompt on hover!
       btn.onclick = () => selectTone(ct.id, ct.name, ct.prompt);
 
       pillWrap.appendChild(btn);
@@ -906,10 +923,11 @@ function renderTonePills() {
   if (recipVoiceLabel) recipVoiceLabel.textContent = activeVoiceText;
 
   // Update limit display in drawer
+  state.maxCustomTemplates = getPlanMaxCustomTones(state.userPlan);
   const limitEl = document.getElementById('customLimitCount');
   if (limitEl) limitEl.textContent = state.maxCustomTemplates;
   const statusEl = document.getElementById('customLimitStatus');
-  if (statusEl) statusEl.textContent = `${state.customTones.length} / ${state.maxCustomTemplates} custom used`;
+  if (statusEl) statusEl.textContent = `${state.customTones.length} / ${state.maxCustomTemplates} custom used (${(state.userPlan || 'Free').toUpperCase()})`;
 }
 
 function selectTone(id, name, prompt) {
@@ -952,8 +970,10 @@ function setupCustomToneDrawer() {
 
   if (saveBtn) {
     saveBtn.onclick = () => {
-      if (state.customTones.length >= state.maxCustomTemplates) {
-        alert(`Limit reached! Free user quota allows up to ${state.maxCustomTemplates} custom tone templates.\nAdmin can increase quota in Admin Control Center.`);
+      const allowedQuota = getPlanMaxCustomTones(state.userPlan);
+      state.maxCustomTemplates = allowedQuota;
+      if (state.customTones.length >= allowedQuota) {
+        alert(`Limit reached! Your ${(state.userPlan || 'Free').toUpperCase()} plan allows up to ${allowedQuota} custom tone templates.\nPlease upgrade to Pro or Growth for up to 25 custom styles!`);
         return;
       }
 
@@ -2336,10 +2356,45 @@ async function startCommenterReciprocatorWorkflow() {
 // AGENT 1: AUDIENCE BUILDER WORKFLOW ENGINE (A2, GROWTH, FULLY AUTO)
 // =========================================================================
 
-// Global Plan Check Helper
+// =========================================================================
+// UNIVERSAL SUBSCRIPTION TIER HIERARCHY & FEATURE ACCESS ENGINE
+// =========================================================================
+const PLAN_TIER_LEVELS = {
+  'free': 1,
+  'starter': 2,
+  'pro': 3,
+  'growth': 4,
+  'enterprise': 5
+};
+
+function getPlanLevel(plan) {
+  const p = (plan || state.userPlan || state.user?.plan || 'free').toLowerCase();
+  if (p.includes('enterprise') || p.includes('vip') || p.includes('unlimited')) return 5;
+  if (p.includes('growth') || p.includes('tier 1')) return 4;
+  if (p.includes('pro') || p.includes('premium')) return 3;
+  if (p.includes('starter') || p.includes('basic') || p.includes('entry')) return 2;
+  return 1; // free
+}
+
+function canUserAccessTier(userPlan, requiredTier) {
+  if (!requiredTier || requiredTier === 'all' || requiredTier === 'free') return true;
+  const req = (requiredTier || '').toLowerCase();
+  const reqLevel = PLAN_TIER_LEVELS[req] || (req === 'paid' ? 3 : 1);
+  return getPlanLevel(userPlan) >= reqLevel;
+}
+
 function isUserPaidPlan(plan) {
-  const p = (plan || state.userPlan || 'Free').toLowerCase();
-  return p.includes('pro') || p.includes('growth') || p.includes('paid') || p.includes('elite') || p.includes('premium') || p.includes('tier 1') || p.includes('unlimited');
+  return getPlanLevel(plan) >= 3;
+}
+
+function getPlanMaxCustomTones(userPlan) {
+  const level = getPlanLevel(userPlan);
+  const quotas = state.planQuotas || { free: 1, starter: 3, pro: 10, growth: 25, enterprise: 100 };
+  if (level >= 5) return quotas.enterprise || 100;
+  if (level === 4) return quotas.growth || 25;
+  if (level === 3) return quotas.pro || 10;
+  if (level === 2) return quotas.starter || 3;
+  return quotas.free || 1;
 }
 
 // Fallback curated lists if backend offline or cold start
@@ -2430,12 +2485,12 @@ function populateAudienceSelect() {
     const isPublished = (item.status || 'published') === 'published';
     if (item.category === 'Audience Builder' && isPublished) {
       foundAny = true;
-      const isPaid = (item.accessTier || 'free') === 'paid';
-      const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+      const reqTier = (item.accessTier || 'free').toLowerCase();
+      const userCanAccess = canUserAccessTier(state.userPlan, reqTier);
       const opt = document.createElement('option');
       opt.value = k;
       const targetCount = (item.targets || []).length;
-      opt.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
+      opt.textContent = `${!userCanAccess ? `🔒 [${reqTier.toUpperCase()} ONLY] ` : '⭐ '}${item.name} (${targetCount} Targets${reqTier !== 'free' ? ` · ${reqTier.toUpperCase()}` : ''})`;
       select.appendChild(opt);
     }
   });
@@ -2570,15 +2625,15 @@ function initSorsaScoreSystem() {
     const isPublished = (item.status || 'published') === 'published';
     if (item.category === 'Increase Sorsa Score' && isPublished) {
       hasPublished = true;
-      const isPaid = (item.accessTier || 'free') === 'paid';
-      const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+      const reqTier = (item.accessTier || 'free').toLowerCase();
+      const userCanAccess = canUserAccessTier(state.userPlan, reqTier);
       if (userCanAccess && !firstAccessibleKey) {
         firstAccessibleKey = k;
       }
       const opt = document.createElement('option');
       opt.value = k;
       const targetCount = (item.targets || []).length;
-      opt.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
+      opt.textContent = `${!userCanAccess ? `🔒 [${reqTier.toUpperCase()} ONLY] ` : '⭐ '}${item.name} (${targetCount} Targets${reqTier !== 'free' ? ` · ${reqTier.toUpperCase()}` : ''})`;
       select.appendChild(opt);
     }
   });
@@ -2591,7 +2646,7 @@ function initSorsaScoreSystem() {
     firstAccessibleKey = 'sorsaTier2';
   }
 
-  if (firstAccessibleKey && !isUserPaidPlan(state.userPlan)) {
+  if (firstAccessibleKey && (!state.userPlan || state.userPlan.toLowerCase() === 'free')) {
     select.value = firstAccessibleKey;
   }
 }
@@ -2620,12 +2675,12 @@ function initFollowersListsSystem() {
     const item = lists[k];
     const isPublished = (item.status || 'published') === 'published';
     if (item.category === 'Followers Increase' && isPublished) {
-      const isPaid = (item.accessTier || 'free') === 'paid';
-      const userCanAccess = !isPaid || isUserPaidPlan(state.userPlan);
+      const reqTier = (item.accessTier || 'free').toLowerCase();
+      const userCanAccess = canUserAccessTier(state.userPlan, reqTier);
       const el = document.createElement('option');
       el.value = k;
       const targetCount = (item.targets || []).length;
-      el.textContent = `${isPaid && !userCanAccess ? '🔒 [PRO ONLY] ' : '⭐ '}${item.name} (${targetCount} Targets${isPaid ? ' · Pro' : ''})`;
+      el.textContent = `${!userCanAccess ? `🔒 [${reqTier.toUpperCase()} ONLY] ` : '⭐ '}${item.name} (${targetCount} Targets${reqTier !== 'free' ? ` · ${reqTier.toUpperCase()}` : ''})`;
       select.appendChild(el);
     }
   });
@@ -2653,11 +2708,12 @@ async function startAudienceBuilderWorkflow() {
     });
   }
 
-  // Check Paid plan access BEFORE toggling UI
+  // Check Plan access BEFORE toggling UI
   if (listSelect !== 'custom') {
     const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect];
-    if (curated?.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
-      alert(`🔒 Pro Plan Required!\n\n"${curated.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
+    const reqTier = (curated?.accessTier || 'free').toLowerCase();
+    if (reqTier !== 'free' && !canUserAccessTier(state.userPlan, reqTier)) {
+      alert(`🔒 ${reqTier.toUpperCase()} Plan Required!\n\n"${curated?.name || 'Selected List'}" is reserved for ${reqTier.toUpperCase()} subscribers.\n\nYour current plan: ${state.userPlan || 'Free Plan'}.\nPlease upgrade your subscription in the Credits tab.`);
       switchExtTab('credits');
       return;
     }
@@ -3029,9 +3085,10 @@ async function startSorsaScoreBoosterWorkflow() {
   const tierKey = (selectedListKey === 'tier1' ? 'sorsaTier1' : (selectedListKey === 'tier2' ? 'sorsaTier2' : selectedListKey));
   const tierData = state.curatedLists?.[tierKey] || FALLBACK_CURATED_LISTS?.[tierKey];
 
-  // Check Paid plan access BEFORE toggling UI
-  if (tierData?.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
-    alert(`🔒 Pro Plan Required!\n\n"${tierData.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab or select a free tier.`);
+  // Check Plan access BEFORE toggling UI
+  const reqTier = (tierData?.accessTier || 'free').toLowerCase();
+  if (reqTier !== 'free' && !canUserAccessTier(state.userPlan, reqTier)) {
+    alert(`🔒 ${reqTier.toUpperCase()} Plan Required!\n\n"${tierData?.name || 'Selected Tier'}" is reserved for ${reqTier.toUpperCase()} subscribers.\n\nYour current plan: ${state.userPlan || 'Free Plan'}.\nPlease upgrade your subscription in the Credits tab or select a free tier.`);
     switchExtTab('credits');
     return;
   }
@@ -3344,8 +3401,9 @@ async function startFollowersIncreaseWorkflow() {
 
   const curatedFollower = state.curatedLists?.[niche];
   if (curatedFollower) {
-    if (curatedFollower.accessTier === 'paid' && !isUserPaidPlan(state.userPlan)) {
-      alert(`🔒 Pro Plan Required!\n\n"${curatedFollower.name}" is a Premium / Paid list reserved for Pro subscribers.\nPlease upgrade your subscription in the Credits tab.`);
+    const reqTier = (curatedFollower.accessTier || 'free').toLowerCase();
+    if (reqTier !== 'free' && !canUserAccessTier(state.userPlan, reqTier)) {
+      alert(`🔒 ${reqTier.toUpperCase()} Plan Required!\n\n"${curatedFollower.name}" is reserved for ${reqTier.toUpperCase()} subscribers.\n\nYour current plan: ${state.userPlan || 'Free Plan'}.\nPlease upgrade your subscription in the Credits tab.`);
       switchExtTab('credits');
       return;
     }
