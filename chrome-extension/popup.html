@@ -82,8 +82,8 @@
         <span class="tab-text">Agents</span>
       </button>
       <button class="tab-btn" data-tab="reply">
-        <span class="tab-icon">🎭</span>
-        <span class="tab-text">Tone & Style</span>
+        <span class="tab-icon">💬</span>
+        <span class="tab-text">Reply</span>
       </button>
       <button class="tab-btn" data-tab="safety">
         <span class="tab-icon">🛡️</span>
@@ -446,7 +446,11 @@
                     <option value="15" selected>15s (Safe & Human)</option>
                     <option value="8">8s (Fast)</option>
                     <option value="25">25s (Ultra Safe)</option>
+                    <option value="custom">⏱️ Custom Delay (Seconds)...</option>
                   </select>
+                  <div id="audienceCustomDelayBox" style="display:none; margin-top:6px;">
+                    <input type="number" id="audienceCustomDelayInput" class="ext-input" placeholder="Enter delay (e.g. 20s)" min="3" value="15">
+                  </div>
                 </div>
               </div>
 
@@ -535,10 +539,10 @@
                 <select id="sorsaTierSelect" class="ext-select">
                   <option value="sorsaTier1" selected>⭐ Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
                   <option value="sorsaTier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
-                  <option value="custom">➕ Add Your Own Custom Twitter List URL</option>
+                  <option value="custom">➕ Add Your Own Custom Twitter List or Accounts</option>
                 </select>
                 <div id="customSorsaListUrlBox" style="display:none; margin-top:6px;">
-                  <input type="text" id="customSorsaListUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...)">
+                  <input type="text" id="customSorsaListUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...) or @handles...">
                 </div>
                 <div style="font-size:10.5px; color:var(--text-muted); margin-top:4px;">
                   Includes: @cz_binance, @brian_armstrong, @aeyakovenko, @vitalikbuterin, @ethereum
@@ -555,7 +559,11 @@
                     <option value="48">48 Hours</option>
                     <option value="168">7 Days</option>
                     <option value="99999">Always Skip (Permanent)</option>
+                    <option value="custom">⏱️ Custom Cool-Off Hours...</option>
                   </select>
+                  <div id="sorsaCustomCooloffBox" style="display:none; margin-top:6px;">
+                    <input type="number" id="sorsaCustomCooloffInput" class="ext-input" placeholder="Enter hours (e.g. 6, 36)" min="1" value="24">
+                  </div>
                 </div>
                 <div>
                   <label class="opt-label">Accounts Per Cycle</label>
@@ -564,6 +572,20 @@
                     <option value="10">10 Accounts</option>
                     <option value="15">15 Accounts (Max)</option>
                   </select>
+                </div>
+              </div>
+
+              <!-- Safety Delay Between Accounts -->
+              <div>
+                <label class="opt-label">Safety Delay Between Accounts</label>
+                <select id="sorsaDelaySelect" class="ext-select">
+                  <option value="15" selected>15s (Safe & Human)</option>
+                  <option value="10">10s (Faster)</option>
+                  <option value="25">25s (Ultra Safe)</option>
+                  <option value="custom">⏱️ Custom Delay (Seconds)...</option>
+                </select>
+                <div id="sorsaCustomDelayBox" style="display:none; margin-top:6px;">
+                  <input type="number" id="sorsaCustomDelayInput" class="ext-input" placeholder="Enter delay (e.g. 20s)" min="3" value="15">
                 </div>
               </div>
 
@@ -642,10 +664,10 @@
                   <option value="solana">⚡ Solana Ecosystem (Live Feed)</option>
                   <option value="followerList1">⭐ List 1: Web3 & Crypto Alpha Hunters (Curated List)</option>
                   <option value="followerList2">⭐ List 2: Tech Founders & Angel VCs (Curated List)</option>
-                  <option value="custom">➕ Add Your Own Custom Twitter List or Search URL</option>
+                  <option value="custom">➕ Add Your Own Custom Twitter List or Accounts</option>
                 </select>
                 <div id="customFollowerUrlBox" style="display:none; margin-top:6px;">
-                  <input type="text" id="customFollowerUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...) or Search URL">
+                  <input type="text" id="customFollowerUrlInput" class="ext-input" placeholder="Paste Twitter List URL, Search URL, or @handles...">
                 </div>
               </div>
 
@@ -666,7 +688,11 @@
                     <option value="15" selected>15s (Human Pacing)</option>
                     <option value="10">10s (Faster)</option>
                     <option value="25">25s (Ultra Safe)</option>
+                    <option value="custom">⏱️ Custom Delay (Seconds)...</option>
                   </select>
+                  <div id="followerCustomDelayBox" style="display:none; margin-top:6px;">
+                    <input type="number" id="followerCustomDelayInput" class="ext-input" placeholder="Enter delay (e.g. 20s)" min="3" value="15">
+                  </div>
                 </div>
               </div>
 

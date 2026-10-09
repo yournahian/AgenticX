@@ -1314,6 +1314,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'POPUP_CLOSED') {
+    isPopupOpenLocally = false;
+    chrome.storage.local.get(['atomx_active_hud', 'atomx_hud_dismissed']).then(s => {
+      if (s?.atomx_active_hud && !s?.atomx_hud_dismissed) {
+        updateFloatingHud(s.atomx_active_hud);
+      }
+    }).catch(() => null);
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.type === 'EXTRACT_FOCUSED_TWEET') {
     const firstTweet = getMainPostArticle();
     if (firstTweet) {

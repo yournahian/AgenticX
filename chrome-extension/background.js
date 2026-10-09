@@ -37,7 +37,28 @@ chrome.runtime.onInstalled.addListener(() => {
     id: 'atomx-generate-reply',
     title: 'ATOMX: Generate AI Reply for selection',
     contexts: ['selection']
-  });
+});
+
+// ─────────────────────────────────────────────
+// POPUP LIFECYCLE (Guaranteed detection when popup closes to show Floating HUD)
+// ─────────────────────────────────────────────
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'atomx_popup_lifecycle') {
+    chrome.storage.local.set({ atomx_popup_open: true }).catch(() => null);
+    port.onDisconnect.addListener(() => {
+      chrome.storage.local.set({ atomx_popup_open: false }).catch(() => null);
+      // Immediately notify active tabs that popup closed so Floating HUD displays
+      try {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs && tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'POPUP_CLOSED' }).catch(() => null);
+          }
+        });
+      } catch (e) {
+        // ignore
+      }
+    });
+  }
 });
 
 // Keep service worker alive while a workflow is running

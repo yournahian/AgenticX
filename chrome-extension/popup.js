@@ -16,15 +16,29 @@ function safeRemoveTab(tabId) {
     }
   }
 }
-// Notify content scripts when popup is open vs closed (HUD should only appear when popup is closed)
-if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-  chrome.storage.local.set({ atomx_popup_open: true }).catch(() => null);
-  window.addEventListener('unload', () => {
-    chrome.storage.local.set({ atomx_popup_open: false }).catch(() => null);
-  });
-  window.addEventListener('pagehide', () => {
-    chrome.storage.local.set({ atomx_popup_open: false }).catch(() => null);
-  });
+// Notify background service worker and content scripts of popup lifecycle via persistent port
+let popupLifecyclePort = null;
+if (typeof chrome !== 'undefined' && chrome.runtime?.connect) {
+  try {
+    popupLifecyclePort = chrome.runtime.connect({ name: 'atomx_popup_lifecycle' });
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Global safe JSON parser for all backend API responses
+async function safeParseApiResponse(res) {
+  const text = await res.text().catch(() => '');
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    if (!res.ok) {
+      throw new Error(`Server temporarily unavailable (${res.status}). Please try again in a moment.`);
+    }
+    throw new Error('Invalid response received from server.');
+  }
+  return data;
 }
 
 let state = {
@@ -1520,14 +1534,33 @@ function initAgentListeners() {
     });
   });
 
+  // Agent 2: Audience Builder Delay
+  document.getElementById('audienceDelaySelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('audienceCustomDelayBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+
   // Agent 3: Increase Sorsa Score
   document.getElementById('sorsaTierSelect')?.addEventListener('change', (e) => {
     const box = document.getElementById('customSorsaListUrlBox');
     if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
   });
+  document.getElementById('sorsaCooloffSelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('sorsaCustomCooloffBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+  document.getElementById('sorsaDelaySelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('sorsaCustomDelayBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
 
+  // Agent 4: Followers Growth
   document.getElementById('followerNicheSelect')?.addEventListener('change', (e) => {
     const box = document.getElementById('customFollowerUrlBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+  document.getElementById('followerDelaySelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('followerCustomDelayBox');
     if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
   });
 
@@ -2605,7 +2638,10 @@ async function startAudienceBuilderWorkflow() {
   const dateRange = document.getElementById('audienceDateRangeSelect')?.value || '24h';
   const sortBy = document.getElementById('audienceSortBySelect')?.value || 'replies';
   const targetCount = Number(document.getElementById('audienceTargetCountSelect')?.value || 10);
-  const delaySec = Number(document.getElementById('audienceDelaySelect')?.value || 15);
+  const delaySelVal = document.getElementById('audienceDelaySelect')?.value || '15';
+  const delaySec = delaySelVal === 'custom'
+    ? (Number(document.getElementById('audienceCustomDelayInput')?.value) || 15)
+    : (Number(delaySelVal) || 15);
   const likePosts = document.getElementById('audienceLikePostsToggle')?.checked ?? true;
   const replyPosts = document.getElementById('audienceReplyPostsToggle')?.checked ?? true;
   const autoUnfollow = document.getElementById('audienceUnfollowToggle')?.checked ?? false;
@@ -3047,9 +3083,10 @@ async function startSorsaScoreBoosterWorkflow() {
       alert('⚠️ Please enter a Twitter List URL or account handles for your custom Sorsa target list.');
       return;
     }
-    const extracted = rawInput.match(/@?([a-zA-Z0-9_]{1,15})/g);
-    if (extracted && extracted.length > 0) {
-      rawCustomTargets = extracted;
+    const cleanMatches = rawInput.match(/@?([a-zA-Z0-9_]{1,15})/g) || [];
+    const validHandles = cleanMatches.filter(w => !['https', 'http', 'twitter', 'com', 'lists', 'i'].includes(w.toLowerCase()));
+    if (validHandles.length > 0) {
+      rawCustomTargets = validHandles;
     } else {
       rawCustomTargets = FALLBACK_CURATED_LISTS.sorsaTier1.targets;
     }
@@ -3059,7 +3096,15 @@ async function startSorsaScoreBoosterWorkflow() {
       : (FALLBACK_CURATED_LISTS[tierKey]?.targets || FALLBACK_CURATED_LISTS.sorsaTier1.targets);
   }
 
-  const cooloffHours = Number(document.getElementById('sorsaCooloffSelect')?.value || 24);
+  const cooloffSelVal = document.getElementById('sorsaCooloffSelect')?.value || '24';
+  const cooloffHours = cooloffSelVal === 'custom'
+    ? (Number(document.getElementById('sorsaCustomCooloffInput')?.value) || 24)
+    : (Number(cooloffSelVal) || 24);
+
+  const sorsaDelaySelVal = document.getElementById('sorsaDelaySelect')?.value || '15';
+  const delaySec = sorsaDelaySelVal === 'custom'
+    ? (Number(document.getElementById('sorsaCustomDelayInput')?.value) || 15)
+    : (Number(sorsaDelaySelVal) || 15);
 
   try {
     const storedHistory = await new Promise(resolve => {
@@ -3128,7 +3173,7 @@ async function startSorsaScoreBoosterWorkflow() {
       title: 'Sorsa Booster',
       items: collectedProfiles,
       options: {
-        delaySec: 12,
+        delaySec: delaySec,
         likePosts,
         replyPosts,
         followPosts,
@@ -3286,7 +3331,10 @@ async function startFollowersIncreaseWorkflow() {
   const niche = document.getElementById('followerNicheSelect')?.value || 'crypto';
   const strategy = document.getElementById('followerStratSelect')?.value || 'High-Resonance Insights';
   const targetCount = Number(document.getElementById('followerDailyTargetSelect')?.value || 8);
-  const delaySec = Number(document.getElementById('followerDelaySelect')?.value || 15);
+  const followerDelaySelVal = document.getElementById('followerDelaySelect')?.value || '15';
+  const delaySec = followerDelaySelVal === 'custom'
+    ? (Number(document.getElementById('followerCustomDelayInput')?.value) || 15)
+    : (Number(followerDelaySelVal) || 15);
 
   if (state.credits < 1) {
     alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to run Follower Growth.`);
@@ -3345,13 +3393,23 @@ async function startFollowersIncreaseWorkflow() {
 
   let targetUrl = '';
   if (niche === 'custom') {
-    targetUrl = document.getElementById('customFollowerUrlInput')?.value.trim() || '';
-    if (!targetUrl) {
-      alert('⚠️ Please enter a Twitter List URL or Search URL for your Custom Target Community.');
+    const rawVal = document.getElementById('customFollowerUrlInput')?.value.trim() || '';
+    if (!rawVal) {
+      alert('⚠️ Please enter a Twitter List URL, Search URL, or account handles for your Custom Target Community.');
       if (startBtn) startBtn.style.display = 'block';
       if (stopBtn) stopBtn.style.display = 'none';
       if (progressCard) progressCard.style.display = 'none';
       return;
+    }
+    if (rawVal.startsWith('http://') || rawVal.startsWith('https://')) {
+      targetUrl = rawVal;
+    } else {
+      const handles = rawVal.match(/@([a-zA-Z0-9_]{1,15})/g) || rawVal.split(/[\s,;\n\r]+/).map(w => w.replace(/^@/, '')).filter(w => /^[a-zA-Z0-9_]{1,15}$/.test(w));
+      if (handles.length > 0) {
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent(handles.slice(0, 5).map(h => `from:${h}`).join(' OR ')) + '&f=live';
+      } else {
+        targetUrl = 'https://x.com/search?q=' + encodeURIComponent(rawVal) + '&f=live';
+      }
     }
   } else if (curatedFollower) {
     if (curatedFollower.listUrl) {
@@ -4586,19 +4644,6 @@ async function handleExtSubmitRequest() {
     btn.textContent = 'Submitting Request...';
   }
 
-async function safeParseApiResponse(res) {
-  const text = await res.text().catch(() => '');
-  let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch (e) {
-    if (!res.ok) {
-      throw new Error(`Server temporarily unavailable (${res.status}). Please try again in a moment.`);
-    }
-    throw new Error('Invalid response received from server.');
-  }
-  return data;
-}
 
   try {
     const backendUrl = await getBackendUrl();
@@ -5398,8 +5443,10 @@ async function autoDetectTweet() {
         if (response.authorName || response.authorHandle) {
           const row = document.getElementById('tweetAuthorRow');
           if (row) row.style.display = 'flex';
-          document.getElementById('authorName').textContent = response.authorName || 'Author';
-          document.getElementById('authorHandle').textContent = response.authorHandle || '';
+          const nameEl = document.getElementById('authorName');
+          if (nameEl) nameEl.textContent = response.authorName || 'Author';
+          const handleEl = document.getElementById('authorHandle');
+          if (handleEl) handleEl.textContent = response.authorHandle || '';
         }
       });
     }
