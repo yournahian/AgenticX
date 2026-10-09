@@ -328,6 +328,14 @@ function getFallbackModelsForProvider(prov) {
         { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', context: '1M' },
         { id: 'google/gemini-flash-1.5', name: 'Gemini Flash 1.5', context: '1M' }
       ];
+    case 'anthropic':
+      return [
+        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Latest)', context: '200k' },
+        { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Fast)', context: '200k' },
+        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus (Deep Reasoning)', context: '200k' },
+        { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', context: '200k' },
+        { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', context: '200k' }
+      ];
     case 'openai':
     default:
       return [
@@ -510,6 +518,14 @@ function updateAdminApiKeyUI(prov) {
   if (baseUrlInput && AtomXState.adminOpenaiBaseUrl) {
     baseUrlInput.value = AtomXState.adminOpenaiBaseUrl;
   }
+  const anthropicRow = document.getElementById('adminAnthropicBaseUrlRow');
+  const anthropicInput = document.getElementById('adminAnthropicBaseUrlInput');
+  if (anthropicRow) {
+    anthropicRow.style.display = (p === 'anthropic') ? 'block' : 'none';
+  }
+  if (anthropicInput && AtomXState.adminAnthropicBaseUrl) {
+    anthropicInput.value = AtomXState.adminAnthropicBaseUrl;
+  }
 }
 
 function setAdminOpenaiBaseUrlPreset(url) {
@@ -517,7 +533,16 @@ function setAdminOpenaiBaseUrlPreset(url) {
   if (input) {
     input.value = url;
     input.focus();
-    showToast(`✓ Base URL set to ${url}`);
+    showToast(`✓ OpenAI Base URL set to ${url}`);
+  }
+}
+
+function setAdminAnthropicBaseUrlPreset(url) {
+  const input = document.getElementById('adminAnthropicBaseUrlInput');
+  if (input) {
+    input.value = url;
+    input.focus();
+    showToast(`✓ Anthropic Base URL set to ${url}`);
   }
 }
 
@@ -540,9 +565,13 @@ async function saveAdminApiKey() {
   const apiKey = (input?.value || '').trim();
   const baseUrlInput = document.getElementById('adminOpenaiBaseUrlInput');
   const openaiBaseUrl = baseUrlInput ? baseUrlInput.value.trim() : '';
+  const anthropicInput = document.getElementById('adminAnthropicBaseUrlInput');
+  const anthropicBaseUrl = anthropicInput ? anthropicInput.value.trim() : '';
   const hasExistingKey = getAdminApiKeyInfo(prov).hasKey;
 
-  if (!apiKey && (!openaiBaseUrl || prov !== 'openai' || !hasExistingKey)) {
+  const isUpdatingUrl = (prov === 'openai' && openaiBaseUrl) || (prov === 'anthropic' && anthropicBaseUrl);
+
+  if (!apiKey && (!isUpdatingUrl || !hasExistingKey)) {
     showToast(`⚠️ Please enter an API key for ${prov.toUpperCase()}`);
     return;
   }
@@ -550,6 +579,9 @@ async function saveAdminApiKey() {
   const payload = { provider: prov, apiKey: apiKey || 'KEEP_EXISTING' };
   if (prov === 'openai' && openaiBaseUrl) {
     payload.openaiBaseUrl = openaiBaseUrl;
+  }
+  if (prov === 'anthropic' && anthropicBaseUrl) {
+    payload.anthropicBaseUrl = anthropicBaseUrl;
   }
 
   try {
@@ -570,6 +602,9 @@ async function saveAdminApiKey() {
       }
       if (prov === 'openai' && openaiBaseUrl) {
         AtomXState.adminOpenaiBaseUrl = openaiBaseUrl;
+      }
+      if (prov === 'anthropic' && anthropicBaseUrl) {
+        AtomXState.adminAnthropicBaseUrl = anthropicBaseUrl;
       }
       updateAdminApiKeyUI(prov);
       showToast(data.message || `✓ ${prov.toUpperCase()} configuration saved!`);
@@ -598,6 +633,7 @@ function renderAdminKeysHealthHTML(keysStatus) {
     groq: { name: 'Groq (LPU)', icon: '🚀' },
     openrouter: { name: 'OpenRouter', icon: '🌐' },
     openai: { name: 'OpenAI', icon: '⚡' },
+    anthropic: { name: 'Anthropic (Claude)', icon: '🧠' },
     gemini: { name: 'Google Gemini', icon: '✨' }
   };
 
@@ -2917,6 +2953,7 @@ function renderAdminAIEngine(container) {
                   <button class="btn ${AtomXState.currentProvider === 'groq' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('groq')">🚀 Groq</button>
                   <button class="btn ${AtomXState.currentProvider === 'openrouter' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('openrouter')">🌐 OpenRouter</button>
                   <button class="btn ${AtomXState.currentProvider === 'openai' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('openai')">⚡ OpenAI</button>
+                  <button class="btn ${AtomXState.currentProvider === 'anthropic' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('anthropic')">🧠 Anthropic</button>
                   <button class="btn ${AtomXState.currentProvider === 'gemini' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchAdminAIProvider('gemini')">✨ Gemini</button>
                 </div>
               </div>
@@ -2976,6 +3013,26 @@ function renderAdminAIEngine(container) {
                 </div>
                 <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px;">
                   Use <code>https://api.artbloom.tech/v1</code> for Artbloom API keys (e.g. <code>sk-ab-...</code>), or <code>https://api.openai.com/v1</code> for standard OpenAI.
+                </div>
+              </div>
+
+              <!-- DYNAMIC ANTHROPIC / PROXY BASE URL (FOR ARTBLOOM, CLAUDE PROXIES) -->
+              <div id="adminAnthropicBaseUrlRow" style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-subtle); display:${AtomXState.currentProvider === 'anthropic' ? 'block' : 'none'};">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+                  <label style="font-size:11.5px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                    <span>🌐</span> Anthropic Base URL (Proxy / Gateway)
+                  </label>
+                  <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:rgba(217,119,6,0.12); color:#d97706; border:1px solid rgba(217,119,6,0.3);" onclick="setAdminAnthropicBaseUrlPreset('https://api.artbloom.tech')">⚡ Artbloom Preset</button>
+                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:var(--bg-canvas); color:var(--text-secondary); border:1px solid var(--border-subtle);" onclick="setAdminAnthropicBaseUrlPreset('https://api.anthropic.com')">Official Anthropic</button>
+                  </div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <input type="text" id="adminAnthropicBaseUrlInput" class="form-input" placeholder="https://api.artbloom.tech" value="${AtomXState.adminAnthropicBaseUrl || 'https://api.anthropic.com'}" style="font-size:12px; font-family:monospace; flex:1;" />
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="saveAdminApiKey()">💾 Save URL</button>
+                </div>
+                <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px;">
+                  Use <code>https://api.artbloom.tech</code> for Artbloom Anthropic keys (e.g. <code>sk-ab-...</code>), or <code>https://api.anthropic.com</code> for official Anthropic.
                 </div>
               </div>
             </div>
@@ -6086,7 +6143,13 @@ async function loadAdminServerData(preserveScroll = true) {
       if (kd.openaiBaseUrl) {
         AtomXState.adminOpenaiBaseUrl = kd.openaiBaseUrl;
       }
-      updateAdminApiKeyUI(AtomXState.currentProvider);
+      if (kd.anthropicBaseUrl) {
+        AtomXState.adminAnthropicBaseUrl = kd.anthropicBaseUrl;
+      }
+      const isInputActive = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+      if (!isInputActive) {
+        updateAdminApiKeyUI(AtomXState.currentProvider);
+      }
     }
 
     if (tonesRes && tonesRes.ok) {
@@ -6135,8 +6198,14 @@ async function loadAdminServerData(preserveScroll = true) {
 
     if (modelRes && modelRes.ok) {
       const modelData = await modelRes.json();
-      if (modelData.activeProvider) AtomXState.currentProvider = modelData.activeProvider;
-      if (modelData.activeModel) AtomXState.currentModel = modelData.activeModel;
+      AtomXState.activeSystemProvider = modelData.activeProvider || 'groq';
+      AtomXState.activeSystemModel = modelData.activeModel || 'llama-3.3-70b-versatile';
+      if (!AtomXState.currentProvider) {
+        AtomXState.currentProvider = modelData.activeProvider || 'groq';
+      }
+      if (!AtomXState.currentModel) {
+        AtomXState.currentModel = modelData.activeModel || 'llama-3.3-70b-versatile';
+      }
     }
 
     if (engRes && engRes.ok) {
@@ -6190,7 +6259,26 @@ async function loadAdminServerData(preserveScroll = true) {
     }
 
     const activeAdminScreens = ['12', '13', '14', '15', '16', '17', '20', '21', '22', '23'];
-    if (activeAdminScreens.includes(AtomXState.currentScreen)) {
+    const isUserTyping = document.activeElement && (
+      document.activeElement.tagName === 'INPUT' ||
+      document.activeElement.tagName === 'TEXTAREA' ||
+      document.activeElement.tagName === 'SELECT'
+    );
+
+    // If on Screen 23 (AI Engine Hub):
+    // NEVER wipe the screen while the user is viewing or typing!
+    // Seamlessly update telemetry logs table and badge in-place without page jump!
+    if (AtomXState.currentScreen === '23') {
+      const logsCountBadge = document.getElementById('apiLogsCountBadge');
+      if (logsCountBadge) logsCountBadge.textContent = `${AtomXState.adminApiLogs?.length || 0} Logs`;
+      const logsTbody = document.getElementById('adminApiLogsTbody');
+      if (logsTbody && !isUserTyping) {
+        logsTbody.innerHTML = renderAdminApiLogsRowsHTML(AtomXState.adminApiLogs);
+      }
+      return;
+    }
+
+    if (!isUserTyping && activeAdminScreens.includes(AtomXState.currentScreen)) {
       navigateToScreen(AtomXState.currentScreen, preserveScroll);
     }
   } catch (err) {

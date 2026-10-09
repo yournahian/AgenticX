@@ -672,11 +672,12 @@ exports.getApiKeys = (req, res) => {
       savedKeys = data.apiKeys || {};
     }
 
-    const providers = ['groq', 'openrouter', 'openai', 'gemini'];
+    const providers = ['groq', 'openrouter', 'openai', 'anthropic', 'gemini'];
     const envVarMap = {
       groq: 'GROQ_API_KEY',
       openrouter: 'OPENROUTER_API_KEY',
       openai: 'OPENAI_API_KEY',
+      anthropic: 'ANTHROPIC_API_KEY',
       gemini: 'GEMINI_API_KEY'
     };
 
@@ -695,17 +696,22 @@ exports.getApiKeys = (req, res) => {
     }
 
     let openaiBaseUrl = '';
+    let anthropicBaseUrl = '';
     if (fs.existsSync(aiSettingsPath)) {
       try {
         const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
         openaiBaseUrl = data.openaiBaseUrl || '';
+        anthropicBaseUrl = data.anthropicBaseUrl || '';
       } catch (e) {}
     }
     if (!openaiBaseUrl) {
       openaiBaseUrl = process.env.OPENAI_BASE_URL || readEnvValue('OPENAI_BASE_URL') || 'https://api.openai.com/v1';
     }
+    if (!anthropicBaseUrl) {
+      anthropicBaseUrl = process.env.ANTHROPIC_BASE_URL || readEnvValue('ANTHROPIC_BASE_URL') || 'https://api.anthropic.com';
+    }
 
-    res.json({ keys: result, openaiBaseUrl });
+    res.json({ keys: result, openaiBaseUrl, anthropicBaseUrl });
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve API keys: ' + err.message });
   }
@@ -714,7 +720,7 @@ exports.getApiKeys = (req, res) => {
 // Save and activate API Key from Admin Control Center (Syncs to aiSettings.json, process.env, and .env)
 exports.saveApiKey = (req, res) => {
   try {
-    const { provider, apiKey, openaiBaseUrl } = req.body;
+    const { provider, apiKey, openaiBaseUrl, anthropicBaseUrl } = req.body;
     if (!provider || typeof apiKey !== 'string') {
       return res.status(400).json({ error: 'provider and apiKey are required' });
     }
@@ -724,6 +730,7 @@ exports.saveApiKey = (req, res) => {
       groq: 'GROQ_API_KEY',
       openrouter: 'OPENROUTER_API_KEY',
       openai: 'OPENAI_API_KEY',
+      anthropic: 'ANTHROPIC_API_KEY',
       gemini: 'GEMINI_API_KEY'
     };
 
@@ -750,6 +757,12 @@ exports.saveApiKey = (req, res) => {
       data.openaiBaseUrl = cleanUrl;
       process.env.OPENAI_BASE_URL = cleanUrl;
       updateEnvFile('OPENAI_BASE_URL', cleanUrl);
+    }
+    if (typeof anthropicBaseUrl === 'string') {
+      const cleanUrl = anthropicBaseUrl.trim().replace(/\/+$/, '');
+      data.anthropicBaseUrl = cleanUrl;
+      process.env.ANTHROPIC_BASE_URL = cleanUrl;
+      updateEnvFile('ANTHROPIC_BASE_URL', cleanUrl);
     }
     data.lastUpdated = new Date().toISOString();
     fs.mkdirSync(path.dirname(aiSettingsPath), { recursive: true });

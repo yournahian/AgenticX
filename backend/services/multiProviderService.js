@@ -65,6 +65,13 @@ const DEFAULT_MODELS = {
     { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 (Reasoning)', context: '128k' },
     { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', context: '1M' },
     { id: 'google/gemini-flash-1.5', name: 'Gemini Flash 1.5 via OpenRouter', context: '1M' }
+  ],
+  anthropic: [
+    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Latest)', context: '200k' },
+    { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Ultra Fast)', context: '200k' },
+    { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus (Deep Reasoning)', context: '200k' },
+    { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', context: '200k' },
+    { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', context: '200k' }
   ]
 };
 
@@ -73,6 +80,7 @@ function getProviderKey(provider) {
   const norm = (provider || 'openai').toLowerCase();
   const envVarMap = {
     openai: 'OPENAI_API_KEY',
+    anthropic: 'ANTHROPIC_API_KEY',
     gemini: 'GEMINI_API_KEY',
     groq: 'GROQ_API_KEY',
     openrouter: 'OPENROUTER_API_KEY'
@@ -149,6 +157,33 @@ function getOpenAIBaseUrl() {
   return 'https://api.openai.com/v1';
 }
 
+function getAnthropicBaseUrl() {
+  try {
+    const aiSettingsPath = path.join(__dirname, '../data/aiSettings.json');
+    if (fs.existsSync(aiSettingsPath)) {
+      const data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
+      if (data.anthropicBaseUrl && data.anthropicBaseUrl.trim()) {
+        return data.anthropicBaseUrl.trim().replace(/\/+$/, '');
+      }
+    }
+  } catch (e) {}
+
+  if (process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_BASE_URL.trim()) {
+    return process.env.ANTHROPIC_BASE_URL.trim().replace(/\/+$/, '');
+  }
+
+  try {
+    const envFile = path.join(__dirname, '..', '.env');
+    if (fs.existsSync(envFile)) {
+      const content = fs.readFileSync(envFile, 'utf8');
+      const match = content.match(/ANTHROPIC_BASE_URL=([^\r\n\s]+)/);
+      if (match && match[1]) return match[1].trim().replace(/\/+$/, '');
+    }
+  } catch (e) {}
+
+  return 'https://api.anthropic.com';
+}
+
 /**
  * Fetch live available models in real-time from the chosen provider API
  */
@@ -191,6 +226,40 @@ async function fetchLiveModels(provider, customApiKey = null) {
           isLive: true,
           count: chatModels.length,
           models: chatModels.length > 0 ? chatModels : DEFAULT_MODELS.openai
+        };
+      }
+
+      case 'anthropic': {
+        const baseUrl = getAnthropicBaseUrl();
+        try {
+          const res = await fetch(`${baseUrl}/v1/models`, {
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01'
+            }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const models = (data.data || []).map(m => ({
+              id: m.id,
+              name: m.display_name || m.id,
+              context: '200k'
+            }));
+            if (models.length > 0) {
+              return {
+                provider: 'anthropic',
+                isLive: true,
+                count: models.length,
+                models
+              };
+            }
+          }
+        } catch (e) {}
+        return {
+          provider: 'anthropic',
+          isLive: Boolean(apiKey),
+          count: DEFAULT_MODELS.anthropic.length,
+          models: DEFAULT_MODELS.anthropic
         };
       }
 
@@ -520,6 +589,70 @@ async function generateWithProvider({
             };
           }
         }
+      } else if (prov === 'anthropic') {
+        const t0 = Date.now();
+        const baseUrl = getAnthropicBaseUrl();
+        const endpoint = `${baseUrl}/v1/messages`;
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            max_tokens: maxTokens,
+            system: systemPrompt,
+            messages: [
+              { role: 'user', content: userContent }
+            ]
+          })
+        });
+
+        const latencyMs = Date.now() - t0;
+        if (response.ok) {
+          const data = await response.json();
+          let reply = data.content?.[0]?.text?.trim() || '';
+          reply = sanitizeReplyOutput(reply, styleInstruction, tweetAuthor, tweetAuthorName);
+          if (reply) {
+            addApiLog({
+              provider: 'ANTHROPIC',
+              model: data.model || selectedModel,
+              user: userHandle,
+              userName,
+              userEmail,
+              status: 'SUCCESS',
+              statusCode: 200,
+              targetSnippet: tweetText,
+              author: tweetAuthor,
+              reply,
+              latencyMs
+            });
+            return {
+              reply,
+              provider: 'ANTHROPIC',
+              modelUsed: data.model || selectedModel,
+              tokensUsed: data.usage?.output_tokens || 50
+            };
+          }
+        } else {
+          const errBody = await response.text();
+          console.warn(`[MultiProvider] ANTHROPIC returned ${response.status}:`, errBody);
+          addApiLog({
+            provider: 'ANTHROPIC',
+            model: selectedModel,
+            user: userHandle,
+            userName,
+            userEmail,
+            status: 'FAILED',
+            statusCode: response.status,
+            targetSnippet: tweetText,
+            author: tweetAuthor,
+            error: errBody.slice(0, 200),
+            latencyMs
+          });
+        }
       } else {
         // OpenAI, Groq, and OpenRouter all use OpenAI-compatible Chat Completions
         let endpoint = `${getOpenAIBaseUrl()}/chat/completions`;
@@ -819,8 +952,12 @@ async function addApiLog(entry) {
       await supabase.from('plans').upsert({
         id: 'system_telemetry_logs',
         name: 'System Telemetry Logs',
+        price_monthly: 0,
+        credits_monthly: 0,
+        is_popular: false,
+        is_active: false,
         features: recentApiLogs.slice(0, 50)
-      });
+      }, { onConflict: 'id' });
     }
   } catch (e) {}
 }
@@ -869,7 +1006,7 @@ async function getApiLogs() {
 
 async function testAllProviderKeys() {
   const results = {};
-  const providers = ['groq', 'openrouter', 'openai', 'gemini'];
+  const providers = ['groq', 'openrouter', 'openai', 'anthropic', 'gemini'];
   for (const p of providers) {
     const key = getProviderKey(p);
     if (!key || key.length < 5) {
@@ -894,6 +1031,18 @@ async function testAllProviderKeys() {
         testEndpoint = `${getOpenAIBaseUrl()}/chat/completions`;
         testHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
         testBody = { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'hello' }], max_tokens: 5 };
+      } else if (p === 'anthropic') {
+        testEndpoint = `${getAnthropicBaseUrl()}/v1/messages`;
+        testHeaders = {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01'
+        };
+        testBody = {
+          model: 'claude-3-5-haiku-20241022',
+          messages: [{ role: 'user', content: 'hello' }],
+          max_tokens: 5
+        };
       } else if (p === 'gemini') {
         testEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
         testHeaders = { 'Content-Type': 'application/json' };
