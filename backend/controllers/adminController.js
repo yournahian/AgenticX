@@ -740,7 +740,11 @@ exports.saveApiKey = (req, res) => {
       data = JSON.parse(fs.readFileSync(aiSettingsPath, 'utf8'));
     }
     if (!data.apiKeys) data.apiKeys = {};
-    data.apiKeys[prov] = cleanKey;
+    if (cleanKey && cleanKey !== 'KEEP_EXISTING') {
+      data.apiKeys[prov] = cleanKey;
+      process.env[envName] = cleanKey;
+      updateEnvFile(envName, cleanKey);
+    }
     if (typeof openaiBaseUrl === 'string') {
       const cleanUrl = openaiBaseUrl.trim().replace(/\/+$/, '');
       data.openaiBaseUrl = cleanUrl;
@@ -751,13 +755,8 @@ exports.saveApiKey = (req, res) => {
     fs.mkdirSync(path.dirname(aiSettingsPath), { recursive: true });
     fs.writeFileSync(aiSettingsPath, JSON.stringify(data, null, 2), 'utf8');
 
-    // 2. Update in runtime process.env
-    process.env[envName] = cleanKey;
-
-    // 3. Sync to backend/.env
-    updateEnvFile(envName, cleanKey);
-
-    const masked = cleanKey.length > 8 ? cleanKey.slice(0, 4) + '••••••••' + cleanKey.slice(-4) : '••••••••';
+    const effectiveKey = (cleanKey && cleanKey !== 'KEEP_EXISTING') ? cleanKey : (data.apiKeys[prov] || '');
+    const masked = effectiveKey.length > 8 ? effectiveKey.slice(0, 4) + '••••••••' + effectiveKey.slice(-4) : '••••••••';
     res.json({
       message: `✓ ${provider.toUpperCase()} API key saved successfully and activated immediately!`,
       provider: prov,

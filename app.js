@@ -416,10 +416,10 @@ async function switchAdminAIProvider(provId) {
     }
   }
 
-  navigateToScreen('12');
+  navigateToScreen(AtomXState.currentScreen || '23');
   updateAdminApiKeyUI(provId);
 
-  // Fetch live in background to ensure all 450+ models are loaded
+  // Fetch live in background to ensure all models are loaded
   fetchLiveModelsForProvider(provId, false).then(models => {
     const select = document.getElementById('adminModelSelect');
     if (select && models) {
@@ -487,6 +487,8 @@ function updateAdminApiKeyUI(prov) {
   const label = document.getElementById('adminApiKeyProviderLabel');
   const badge = document.getElementById('adminApiKeyStatusBadge');
   const input = document.getElementById('adminApiKeyInput');
+  const baseUrlRow = document.getElementById('adminOpenaiBaseUrlRow');
+  const baseUrlInput = document.getElementById('adminOpenaiBaseUrlInput');
 
   if (label) label.textContent = p.toUpperCase();
   if (badge) {
@@ -500,7 +502,22 @@ function updateAdminApiKeyUI(prov) {
   }
   if (input) {
     input.value = '';
-    input.placeholder = info.hasKey ? `Current Key: ${info.maskedKey} (Paste new key to replace)` : `Paste ${p.toUpperCase()} API key (e.g. gsk_...)`;
+    input.placeholder = info.hasKey ? `Current Key: ${info.maskedKey} (Paste new key to replace)` : `Paste ${p.toUpperCase()} API key (e.g. gsk_... or sk-ab-...)`;
+  }
+  if (baseUrlRow) {
+    baseUrlRow.style.display = (p === 'openai') ? 'block' : 'none';
+  }
+  if (baseUrlInput && AtomXState.adminOpenaiBaseUrl) {
+    baseUrlInput.value = AtomXState.adminOpenaiBaseUrl;
+  }
+}
+
+function setAdminOpenaiBaseUrlPreset(url) {
+  const input = document.getElementById('adminOpenaiBaseUrlInput');
+  if (input) {
+    input.value = url;
+    input.focus();
+    showToast(`✓ Base URL set to ${url}`);
   }
 }
 
@@ -521,28 +538,41 @@ async function saveAdminApiKey() {
   const prov = (AtomXState.currentProvider || 'groq').toLowerCase();
   const input = document.getElementById('adminApiKeyInput');
   const apiKey = (input?.value || '').trim();
+  const baseUrlInput = document.getElementById('adminOpenaiBaseUrlInput');
+  const openaiBaseUrl = baseUrlInput ? baseUrlInput.value.trim() : '';
+  const hasExistingKey = getAdminApiKeyInfo(prov).hasKey;
 
-  if (!apiKey) {
+  if (!apiKey && (!openaiBaseUrl || prov !== 'openai' || !hasExistingKey)) {
     showToast(`⚠️ Please enter an API key for ${prov.toUpperCase()}`);
     return;
+  }
+
+  const payload = { provider: prov, apiKey: apiKey || 'KEEP_EXISTING' };
+  if (prov === 'openai' && openaiBaseUrl) {
+    payload.openaiBaseUrl = openaiBaseUrl;
   }
 
   try {
     const res = await fetch(`${API_BASE}/api/admin/api-keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: prov, apiKey })
+      body: JSON.stringify(payload)
     });
 
     if (res.ok) {
       const data = await res.json();
       if (!AtomXState.adminApiKeys) AtomXState.adminApiKeys = {};
-      AtomXState.adminApiKeys[prov] = {
-        hasKey: true,
-        maskedKey: data.maskedKey
-      };
+      if (apiKey) {
+        AtomXState.adminApiKeys[prov] = {
+          hasKey: true,
+          maskedKey: data.maskedKey
+        };
+      }
+      if (prov === 'openai' && openaiBaseUrl) {
+        AtomXState.adminOpenaiBaseUrl = openaiBaseUrl;
+      }
       updateAdminApiKeyUI(prov);
-      showToast(data.message || `✓ ${prov.toUpperCase()} API Key saved!`);
+      showToast(data.message || `✓ ${prov.toUpperCase()} configuration saved!`);
 
       // Automatically refresh live models using new key
       refreshAdminModels(true);
@@ -2924,9 +2954,29 @@ function renderAdminAIEngine(container) {
                 <span style="font-size:11px; color:var(--text-muted);">Change key here anytime without touching .env</span>
               </div>
               <div style="display:flex; gap:8px;">
-                <input type="password" id="adminApiKeyInput" class="form-input" placeholder="${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? 'Current: ' + getAdminApiKeyInfo(AtomXState.currentProvider).maskedKey + ' (Paste new key to replace)' : 'Paste ' + AtomXState.currentProvider.toUpperCase() + ' API key (e.g. gsk_...)'}" style="font-size:12px; font-family:monospace; flex:1;" />
+                <input type="password" id="adminApiKeyInput" class="form-input" placeholder="${getAdminApiKeyInfo(AtomXState.currentProvider).hasKey ? 'Current: ' + getAdminApiKeyInfo(AtomXState.currentProvider).maskedKey + ' (Paste new key to replace)' : 'Paste ' + AtomXState.currentProvider.toUpperCase() + ' API key (e.g. gsk_... or sk-ab-...)'}" style="font-size:12px; font-family:monospace; flex:1;" />
                 <button type="button" class="btn btn-secondary btn-sm" id="toggleApiKeyVisibilityBtn" onclick="toggleAdminApiKeyVisibility()">👁️ Show</button>
-                <button type="button" class="btn btn-primary btn-sm" onclick="saveAdminApiKey()">💾 Save API Key</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveAdminApiKey()">💾 Save Configuration</button>
+              </div>
+
+              <!-- DYNAMIC OPENAI / PROXY BASE URL (FOR ARTBLOOM, VLLM, OLLAMA) -->
+              <div id="adminOpenaiBaseUrlRow" style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-subtle); display:${AtomXState.currentProvider === 'openai' ? 'block' : 'none'};">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+                  <label style="font-size:11.5px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                    <span>🌐</span> OpenAI Base URL (Proxy / Gateway)
+                  </label>
+                  <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:rgba(59,130,246,0.12); color:var(--blue-primary); border:1px solid rgba(59,130,246,0.3);" onclick="setAdminOpenaiBaseUrlPreset('https://api.artbloom.tech/v1')">⚡ Artbloom Preset</button>
+                    <button type="button" class="btn btn-sm" style="font-size:10px; padding:2px 8px; background:var(--bg-canvas); color:var(--text-secondary); border:1px solid var(--border-subtle);" onclick="setAdminOpenaiBaseUrlPreset('https://api.openai.com/v1')">Official OpenAI</button>
+                  </div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <input type="text" id="adminOpenaiBaseUrlInput" class="form-input" placeholder="https://api.artbloom.tech/v1" value="${AtomXState.adminOpenaiBaseUrl || 'https://api.openai.com/v1'}" style="font-size:12px; font-family:monospace; flex:1;" />
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="saveAdminApiKey()">💾 Save URL</button>
+                </div>
+                <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px;">
+                  Use <code>https://api.artbloom.tech/v1</code> for Artbloom API keys (e.g. <code>sk-ab-...</code>), or <code>https://api.openai.com/v1</code> for standard OpenAI.
+                </div>
               </div>
             </div>
           </div>
@@ -6033,6 +6083,9 @@ async function loadAdminServerData(preserveScroll = true) {
     if (keysRes && keysRes.ok) {
       const kd = await keysRes.json();
       AtomXState.adminApiKeys = kd.keys || {};
+      if (kd.openaiBaseUrl) {
+        AtomXState.adminOpenaiBaseUrl = kd.openaiBaseUrl;
+      }
       updateAdminApiKeyUI(AtomXState.currentProvider);
     }
 
