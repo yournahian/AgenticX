@@ -432,6 +432,28 @@ exports.saveCuratedLists = async (req, res) => {
       return res.status(400).json({ error: 'Valid lists object required' });
     }
 
+    // Strict validation of agent list types:
+    // 1. Audience Builder & Followers Increase ONLY support Twitter List URLs (targets cleared to empty array).
+    // 2. Increase Sorsa Score ONLY supports username accounts / CSV (listUrl cleared to empty string).
+    Object.keys(lists).forEach(k => {
+      const item = lists[k];
+      if (!item || typeof item !== 'object') return;
+      const cat = (item.category || '').toLowerCase();
+      if (cat.includes('audience') || cat.includes('follower')) {
+        item.targets = [];
+        if (!item.listUrl || typeof item.listUrl !== 'string' || !item.listUrl.trim()) {
+          item.listUrl = 'https://x.com/i/lists/2103557569319219223';
+        } else {
+          item.listUrl = item.listUrl.trim();
+        }
+      } else if (cat.includes('sorsa')) {
+        item.listUrl = '';
+        if (!Array.isArray(item.targets)) {
+          item.targets = [];
+        }
+      }
+    });
+
     // Always update in-memory immediately
     inMemoryCuratedLists = lists;
 

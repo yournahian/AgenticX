@@ -16,6 +16,46 @@ function safeRemoveTab(tabId) {
     }
   }
 }
+
+// Reuses a SINGLE browser tab/window for all links/actions instead of opening/closing repeatedly
+async function getOrCreateReusedTab(existingTabId, targetUrl) {
+  // 1. If an existing working tab is known, verify it is still open and update it in-place
+  if (existingTabId && typeof existingTabId === 'number' && existingTabId > 0) {
+    try {
+      const existingTab = await chrome.tabs.get(existingTabId);
+      if (existingTab && existingTab.id) {
+        await chrome.tabs.update(existingTab.id, { url: targetUrl, active: true });
+        return existingTab.id;
+      }
+    } catch (e) {
+      // Tab was closed by user
+    }
+  }
+
+  // 2. Check for active tab in current window if already on X / Twitter
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs && tabs[0];
+    if (activeTab && activeTab.id && activeTab.url && (activeTab.url.includes('x.com') || activeTab.url.includes('twitter.com'))) {
+      await chrome.tabs.update(activeTab.id, { url: targetUrl, active: true });
+      return activeTab.id;
+    }
+  } catch (e) {}
+
+  // 3. Check for ANY open Twitter / X tab in any window so we reuse it instead of opening new windows/tabs
+  try {
+    const openTwitterTabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] });
+    if (openTwitterTabs && openTwitterTabs.length > 0 && openTwitterTabs[0]?.id) {
+      const tabToUse = openTwitterTabs[0];
+      await chrome.tabs.update(tabToUse.id, { url: targetUrl, active: true });
+      return tabToUse.id;
+    }
+  } catch (e) {}
+
+  // 4. Fallback: only if no Twitter tab exists anywhere, open a single tab in the current window and reuse it
+  const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
+  return newTab.id;
+}
 // Notify background service worker and content scripts of popup lifecycle via persistent port
 let popupLifecyclePort = null;
 if (typeof chrome !== 'undefined' && chrome.runtime?.connect) {
@@ -28,6 +68,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.connect) {
 
 // Global safe JSON parser for all backend API responses
 async function safeParseApiResponse(res) {
+  if (!res) return {};
   const text = await res.text().catch(() => '');
   let data = null;
   try {
@@ -38,8 +79,10 @@ async function safeParseApiResponse(res) {
     }
     throw new Error('Invalid response received from server.');
   }
-  return data;
+  return data || {};
 }
+if (typeof window !== 'undefined') window.safeParseApiResponse = safeParseApiResponse;
+if (typeof globalThis !== 'undefined') globalThis.safeParseApiResponse = safeParseApiResponse;
 
 let state = {
   credits: 0,
@@ -216,8 +259,26 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
       return true;
     }
 
-    if (message.type === 'ABORT_WORKFLOW') {
+    if (message.type === 'TOGGLE_WORKFLOW_PAUSE') {
+      state.isPaused = typeof message.isPaused === 'boolean' ? message.isPaused : !state.isPaused;
+      updateAllPauseButtonsUI(state.isPaused);
+      sendResponse({ success: true, isPaused: state.isPaused });
+      return true;
+    }
+
+    if (message.type === 'SKIP_WORKFLOW_ITEM') {
+      state.skipCurrent = true;
+      showExtToast?.('Skipping current item...', '⏭️');
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (message.type === 'ABORT_WORKFLOW' || message.type === 'BG_ABORT_TG_RAID' || message.type === 'BG_ABORT_AGENT_WORKFLOW') {
       state.isAborted = true;
+      state.isWorkflowRunning = false;
+      state.isPaused = false;
+      updateAllPauseButtonsUI(false);
+      setAutomationRunningUI(false);
       console.log('[ATOMX] Workflow aborted via message signal.');
       sendResponse({ success: true });
       return true;
@@ -391,6 +452,14 @@ function showExtNotification(message, options = {}) {
     formattedHtml = `<div>${str}</div>`;
   }
 
+  const cancelBtn = document.getElementById('extNotifyCancelBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+  if (okBtn) {
+    okBtn.textContent = 'Got It';
+    okBtn.style.background = '';
+    okBtn.style.borderColor = '';
+  }
+
   bodyEl.innerHTML = formattedHtml;
   overlay.style.display = 'flex';
 
@@ -404,6 +473,72 @@ function showExtNotification(message, options = {}) {
   overlay.onclick = (e) => {
     if (e.target === overlay) closeNotification();
   };
+}
+
+function showExtConfirm(message, options = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('extNotificationOverlay');
+    const titleEl = document.getElementById('extNotifyTitle');
+    const iconEl = document.getElementById('extNotifyIcon');
+    const bodyEl = document.getElementById('extNotifyBody');
+    const okBtn = document.getElementById('extNotifyOkBtn');
+    const cancelBtn = document.getElementById('extNotifyCancelBtn');
+    const closeBtn = document.getElementById('extNotifyCloseBtn');
+
+    if (!overlay || !bodyEl || !okBtn) {
+      resolve(true);
+      return;
+    }
+
+    const title = options.title || 'Confirmation';
+    const icon = options.icon || '⚠️';
+    const confirmText = options.confirmText || 'Confirm';
+    const cancelText = options.cancelText || 'Cancel';
+
+    if (titleEl) titleEl.textContent = title;
+    if (iconEl) {
+      iconEl.textContent = icon;
+      iconEl.className = options.danger ? 'ext-notify-icon-box warning' : 'ext-notify-icon-box';
+    }
+
+    bodyEl.innerHTML = `<div style="font-weight:600; color:var(--text-primary); font-size:13px; line-height:1.5;">${String(message || '')}</div>`;
+
+    okBtn.textContent = confirmText;
+    if (options.danger) {
+      okBtn.style.background = '#DC2626';
+      okBtn.style.borderColor = '#DC2626';
+    } else {
+      okBtn.style.background = '';
+      okBtn.style.borderColor = '';
+    }
+
+    if (cancelBtn) {
+      cancelBtn.style.display = 'inline-block';
+      cancelBtn.textContent = cancelText;
+    }
+
+    overlay.style.display = 'flex';
+
+    const cleanup = (result) => {
+      overlay.style.display = 'none';
+      if (cancelBtn) cancelBtn.style.display = 'none';
+      okBtn.textContent = 'Got It';
+      okBtn.style.background = '';
+      okBtn.style.borderColor = '';
+      okBtn.onclick = null;
+      if (cancelBtn) cancelBtn.onclick = null;
+      if (closeBtn) closeBtn.onclick = null;
+      overlay.onclick = null;
+      resolve(result);
+    };
+
+    okBtn.onclick = () => cleanup(true);
+    if (cancelBtn) cancelBtn.onclick = () => cleanup(false);
+    if (closeBtn) closeBtn.onclick = () => cleanup(false);
+    overlay.onclick = (e) => {
+      if (e.target === overlay) cleanup(false);
+    };
+  });
 }
 
 let toastTimer = null;
@@ -430,6 +565,38 @@ if (typeof window !== 'undefined') {
   };
 }
 
+function updateAllPauseButtonsUI(isPaused) {
+  const pauseButtonIds = [
+    'pauseTgEngageBtn',
+    'pauseAudienceBuilderBtn',
+    'pauseSorsaBoosterBtn',
+    'pauseFollowerIncreaseBtn',
+    'pauseReplyBackBtn',
+    'pauseAutoUnfollowBtn',
+    'pauseReciprocatorBtn'
+  ];
+  pauseButtonIds.forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
+      btn.style.background = isPaused ? '#059669' : '#D97706';
+      btn.style.borderColor = isPaused ? '#059669' : '#D97706';
+    }
+  });
+
+  const stateBadges = document.querySelectorAll(
+    '#tgStateBadge, #audienceStateBadge, #sorsaStateBadge, #followerStateBadge, #replyBackStateBadge, #unfollowStateBadge, #reciprocatorStateBadge'
+  );
+  stateBadges.forEach(badge => {
+    if (isPaused && badge.textContent !== 'IDLE' && badge.textContent !== 'STOPPED' && badge.textContent !== 'DONE') {
+      badge.dataset.prevText = badge.textContent;
+      badge.textContent = 'PAUSED';
+    } else if (!isPaused && badge.textContent === 'PAUSED') {
+      badge.textContent = badge.dataset.prevText || 'ENGAGING';
+    }
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TELEGRAM & AGENT BACKGROUND WORKFLOW SYNCHRONIZATION
 // Keeps popup trackers 100% in sync with background execution & survives closes
@@ -447,6 +614,8 @@ function updateTelegramProgressUI(raidState) {
   const tgStatus     = document.getElementById('tgLiveStatusText');
   const tgCountdown  = document.getElementById('tgCountdownText');
   const runBtn       = document.getElementById('runTgEngageBtn');
+  const pauseBtn     = document.getElementById('pauseTgEngageBtn');
+  const skipBtn      = document.getElementById('skipTgEngageBtn');
   const stopBtn      = document.getElementById('stopTgEngageBtn');
 
   if (progressCard) progressCard.style.display = 'block';
@@ -467,7 +636,14 @@ function updateTelegramProgressUI(raidState) {
   if (raidState.active) {
     if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
     if (stopBtn) stopBtn.style.display = 'inline-block';
-    if (tgStateBadge) tgStateBadge.textContent = raidState.stateBadge || 'ENGAGING';
+    if (pauseBtn) {
+      pauseBtn.style.display = 'inline-block';
+      pauseBtn.textContent = raidState.isPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.style.background = raidState.isPaused ? '#059669' : '#D97706';
+      pauseBtn.style.borderColor = raidState.isPaused ? '#059669' : '#D97706';
+    }
+    if (skipBtn) skipBtn.style.display = 'inline-block';
+    if (tgStateBadge) tgStateBadge.textContent = raidState.isPaused ? 'PAUSED' : (raidState.stateBadge || 'ENGAGING');
     if (tgStatus && raidState.statusText) tgStatus.textContent = raidState.statusText;
     if (tgCountdown) {
       if (raidState.countdownText) {
@@ -479,12 +655,16 @@ function updateTelegramProgressUI(raidState) {
     }
   } else if (raidState.isStopped) {
     if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
     if (tgStateBadge) tgStateBadge.textContent = 'STOPPED';
     if (tgStatus) tgStatus.textContent = raidState.statusText || 'Workflow stopped by user.';
     if (tgCountdown) tgCountdown.style.display = 'none';
   } else if (done + skipped >= total && total > 0) {
     if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
     if (tgStateBadge) tgStateBadge.textContent = 'DONE';
     if (tgStatus) tgStatus.textContent = `✓ Completed! ${done} engaged, ${skipped} skipped.`;
@@ -500,31 +680,43 @@ function updateAgentWorkflowProgressUI(wf) {
       card: 'audienceProgressCard', badge: 'audienceStateBadge', ind: 'audienceQueueIndicator',
       done: 'audienceDoneCount', col: 'audienceCollectedCount', skip: 'audienceSkippedCount',
       bar: 'audienceProgressBar', status: 'audienceLiveStatusText', cd: 'audienceCountdownText',
-      startBtn: 'runAudienceBuilderBtn', stopBtn: 'stopAudienceBuilderBtn'
+      startBtn: 'runAudienceBuilderBtn', stopBtn: 'stopAudienceBuilderBtn',
+      pauseBtn: 'pauseAudienceBuilderBtn', skipBtn: 'skipAudienceBuilderBtn'
     },
     sorsa: {
       card: 'sorsaProgressCard', badge: 'sorsaStateBadge', ind: 'sorsaQueueIndicator',
       done: 'sorsaDoneCount', col: 'sorsaCollectedCount', skip: 'sorsaSkippedCount',
       bar: 'sorsaProgressBar', status: 'sorsaLiveStatusText', cd: 'sorsaCountdownText',
-      startBtn: 'runSorsaBoosterBtn', stopBtn: 'stopSorsaBoosterBtn'
+      startBtn: 'runSorsaBoosterBtn', stopBtn: 'stopSorsaBoosterBtn',
+      pauseBtn: 'pauseSorsaBoosterBtn', skipBtn: 'skipSorsaBoosterBtn'
     },
     followers: {
       card: 'followerProgressCard', badge: 'followerStateBadge', ind: 'followerQueueIndicator',
       done: 'followerDoneCount', col: 'followerCollectedCount', skip: 'followerSkippedCount',
       bar: 'followerProgressBar', status: 'followerLiveStatusText', cd: 'followerCountdownText',
-      startBtn: 'runFollowerIncreaseBtn', stopBtn: 'stopFollowerIncreaseBtn'
+      startBtn: 'runFollowerIncreaseBtn', stopBtn: 'stopFollowerIncreaseBtn',
+      pauseBtn: 'pauseFollowerIncreaseBtn', skipBtn: 'skipFollowerIncreaseBtn'
     },
     replyback: {
       card: 'replyBackProgressCard', badge: 'replyBackStateBadge', ind: 'replyBackQueueIndicator',
       done: 'replyBackDoneCount', col: 'replyBackCollectedCount', skip: 'replyBackSkippedCount',
       bar: 'replyBackProgressBar', status: 'replyBackLiveStatusText', cd: 'replyBackCountdownText',
-      startBtn: 'runReplyBackBtn', stopBtn: 'stopReplyBackBtn'
+      startBtn: 'runReplyBackBtn', stopBtn: 'stopReplyBackBtn',
+      pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn'
+    },
+    unfollow: {
+      card: 'unfollowProgressCard', badge: 'unfollowStateBadge', ind: null,
+      done: 'unfollowCountSuccess', col: 'unfollowCountTotal', skip: 'unfollowCountFailed',
+      bar: null, status: 'unfollowLiveStatusText', cd: 'unfollowCountdownText',
+      startBtn: 'runAutoUnfollowBtn', stopBtn: 'stopAutoUnfollowBtn',
+      pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn'
     },
     reciprocator: {
       card: 'reciprocatorProgressCard', badge: 'reciprocatorStateBadge', ind: 'reciprocatorQueueIndicator',
       done: 'reciprocatorDoneCount', col: 'reciprocatorCollectedCount', skip: 'reciprocatorSkippedCount',
       bar: 'reciprocatorProgressBar', status: 'reciprocatorLiveStatusText', cd: 'reciprocatorCountdownText',
-      startBtn: 'runReciprocatorBtn', stopBtn: 'stopReciprocatorBtn'
+      startBtn: 'runReciprocatorBtn', stopBtn: 'stopReciprocatorBtn',
+      pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn'
     }
   };
 
@@ -533,15 +725,17 @@ function updateAgentWorkflowProgressUI(wf) {
 
   const card = document.getElementById(map.card);
   const badge = document.getElementById(map.badge);
-  const ind = document.getElementById(map.ind);
+  const ind = map.ind ? document.getElementById(map.ind) : null;
   const doneEl = document.getElementById(map.done);
   const colEl = document.getElementById(map.col);
   const skipEl = document.getElementById(map.skip);
-  const bar = document.getElementById(map.bar);
+  const bar = map.bar ? document.getElementById(map.bar) : null;
   const status = document.getElementById(map.status);
   const cd = document.getElementById(map.cd);
   const startBtn = document.getElementById(map.startBtn);
   const stopBtn = document.getElementById(map.stopBtn);
+  const pauseBtn = map.pauseBtn ? document.getElementById(map.pauseBtn) : null;
+  const skipBtn = map.skipBtn ? document.getElementById(map.skipBtn) : null;
 
   if (card) card.style.display = 'block';
 
@@ -561,7 +755,14 @@ function updateAgentWorkflowProgressUI(wf) {
   if (wf.active) {
     if (startBtn) startBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'inline-block';
-    if (badge) badge.textContent = wf.stateBadge || 'RUNNING';
+    if (pauseBtn) {
+      pauseBtn.style.display = 'inline-block';
+      pauseBtn.textContent = wf.isPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.style.background = wf.isPaused ? '#059669' : '#D97706';
+      pauseBtn.style.borderColor = wf.isPaused ? '#059669' : '#D97706';
+    }
+    if (skipBtn) skipBtn.style.display = 'inline-block';
+    if (badge) badge.textContent = wf.isPaused ? 'PAUSED' : (wf.stateBadge || 'RUNNING');
     if (status && wf.statusText) status.textContent = wf.statusText;
     if (cd) {
       if (wf.countdownText) {
@@ -574,12 +775,16 @@ function updateAgentWorkflowProgressUI(wf) {
   } else if (wf.isStopped) {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     if (badge) badge.textContent = 'STOPPED';
     if (status) status.textContent = wf.statusText || 'Workflow stopped by user.';
     if (cd) cd.style.display = 'none';
   } else if (done + skipped >= total && total > 0) {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     if (badge) badge.textContent = 'DONE';
     if (status) status.textContent = `✓ Completed! ${done} processed, ${skipped} skipped.`;
     if (cd) cd.style.display = 'none';
@@ -591,7 +796,11 @@ function initBackgroundWorkflowSync() {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
 
   // Hydrate current state on popup open
-  chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow'], (res) => {
+  chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow', 'atomx_workflow_paused'], (res) => {
+    if (typeof res?.atomx_workflow_paused === 'boolean') {
+      state.isPaused = res.atomx_workflow_paused;
+      updateAllPauseButtonsUI(state.isPaused);
+    }
     if (res?.atomx_tg_raid && (res.atomx_tg_raid.active || res.atomx_tg_raid.currentIndex > 0)) {
       updateTelegramProgressUI(res.atomx_tg_raid);
     }
@@ -603,6 +812,10 @@ function initBackgroundWorkflowSync() {
   // Listen to background updates in real-time
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.atomx_workflow_paused) {
+      state.isPaused = !!changes.atomx_workflow_paused.newValue;
+      updateAllPauseButtonsUI(state.isPaused);
+    }
     if (changes.atomx_tg_raid && changes.atomx_tg_raid.newValue) {
       updateTelegramProgressUI(changes.atomx_tg_raid.newValue);
     }
@@ -1120,20 +1333,7 @@ function initListeners() {
     }
   });
 
-  // Automatically open Floating Mini Window if user closes extension popup during active workflow
-  window.addEventListener('pagehide', () => {
-    if (state.isWorkflowRunning && !state.isAborted) {
-      try {
-        chrome.windows?.create({
-          url: chrome.runtime.getURL('mini-hud.html'),
-          type: 'popup',
-          width: 380,
-          height: 260,
-          focused: false
-        }).catch(() => null);
-      } catch (e) {}
-    }
-  });
+
 
   // Provider switcher
   const provSelect = document.getElementById('extProviderSelect');
@@ -1147,30 +1347,97 @@ function initListeners() {
   // Fetch Live Models
   document.getElementById('extFetchModelsBtn')?.addEventListener('click', fetchLiveModels);
 
-  // Safety Controls
-  const delaySlider = document.getElementById('extDelaySlider');
-  if (delaySlider) {
-    delaySlider.addEventListener('input', (e) => {
-      state.delaySeconds = Number(e.target.value);
-      document.getElementById('valExtDelay').textContent = `${state.delaySeconds - 2} - ${state.delaySeconds + 2} sec`;
+  // Centralized Anti-Ban Safety Controls
+  const replyDelaySlider = document.getElementById('extReplyDelaySlider');
+  if (replyDelaySlider) {
+    replyDelaySlider.addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      const valEl = document.getElementById('valExtReplyDelay');
+      if (valEl) valEl.textContent = `${Math.max(3, v - 2)} - ${v + 4} sec`;
+      chrome.storage.local.get(['atomx_safety_settings'], res => {
+        const s = res?.atomx_safety_settings || {};
+        s.replyDelay = v;
+        chrome.storage.local.set({ atomx_safety_settings: s });
+      });
     });
   }
 
-  const breakSlider = document.getElementById('extBreakSlider');
-  if (breakSlider) {
-    breakSlider.addEventListener('input', (e) => {
-      state.breakActions = Number(e.target.value);
-      document.getElementById('valExtBreak').textContent = `${state.breakActions} actions`;
+  const profileWaitSlider = document.getElementById('extProfileWaitSlider');
+  if (profileWaitSlider) {
+    profileWaitSlider.addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      const valEl = document.getElementById('valExtProfileWait');
+      if (valEl) valEl.textContent = `${Math.max(5, v - 3)} - ${v + 5} sec`;
+      chrome.storage.local.get(['atomx_safety_settings'], res => {
+        const s = res?.atomx_safety_settings || {};
+        s.profileWait = v;
+        chrome.storage.local.set({ atomx_safety_settings: s });
+      });
     });
   }
+
+  const breakActionsSlider = document.getElementById('extBreakActionsSlider');
+  if (breakActionsSlider) {
+    breakActionsSlider.addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      const valEl = document.getElementById('valExtBreakActions');
+      if (valEl) valEl.textContent = `${v} actions`;
+      chrome.storage.local.get(['atomx_safety_settings'], res => {
+        const s = res?.atomx_safety_settings || {};
+        s.breakActions = v;
+        chrome.storage.local.set({ atomx_safety_settings: s });
+      });
+    });
+  }
+
+  const restDurationSlider = document.getElementById('extRestDurationSlider');
+  if (restDurationSlider) {
+    restDurationSlider.addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      const valEl = document.getElementById('valExtRestDuration');
+      if (valEl) valEl.textContent = `${v} minutes`;
+      chrome.storage.local.get(['atomx_safety_settings'], res => {
+        const s = res?.atomx_safety_settings || {};
+        s.restDuration = v;
+        chrome.storage.local.set({ atomx_safety_settings: s });
+      });
+    });
+  }
+
+  // Restore saved safety settings
+  chrome.storage.local.get(['atomx_safety_settings'], res => {
+    const s = res?.atomx_safety_settings;
+    if (s) {
+      if (s.replyDelay && replyDelaySlider) {
+        replyDelaySlider.value = s.replyDelay;
+        const valEl = document.getElementById('valExtReplyDelay');
+        if (valEl) valEl.textContent = `${Math.max(3, s.replyDelay - 2)} - ${s.replyDelay + 4} sec`;
+      }
+      if (s.profileWait && profileWaitSlider) {
+        profileWaitSlider.value = s.profileWait;
+        const valEl = document.getElementById('valExtProfileWait');
+        if (valEl) valEl.textContent = `${Math.max(5, s.profileWait - 3)} - ${s.profileWait + 5} sec`;
+      }
+      if (s.breakActions && breakActionsSlider) {
+        breakActionsSlider.value = s.breakActions;
+        const valEl = document.getElementById('valExtBreakActions');
+        if (valEl) valEl.textContent = `${s.breakActions} actions`;
+      }
+      if (s.restDuration && restDurationSlider) {
+        restDurationSlider.value = s.restDuration;
+        const valEl = document.getElementById('valExtRestDuration');
+        if (valEl) valEl.textContent = `${s.restDuration} minutes`;
+      }
+    }
+  });
 
   // Crypto Tx Verification
   document.getElementById('extVerifyTxBtn')?.addEventListener('click', handleVerifyCryptoTx);
 
   // Copy Invite Code
   document.getElementById('extCopyInviteBtn')?.addEventListener('click', () => {
-    navigator.clipboard?.writeText('EVAN-X924');
-    alert('✓ Invite Code EVAN-X924 copied to clipboard! Share with friends to earn bonus credits.');
+    navigator.clipboard?.writeText('MYTHOPAIR-X924');
+    alert('✓ Invite Code MYTHOPAIR-X924 copied to clipboard! Share with friends to earn bonus credits.');
   });
 
   // 1-to-1 Verified Account & In-Extension Request Access Flow
@@ -1204,10 +1471,17 @@ function initListeners() {
   document.getElementById('extLoginSubmitBtn')?.addEventListener('click', handleExtLogin);
   document.getElementById('extLogoutBtn')?.addEventListener('click', handleExtLogout);
   document.getElementById('extForceResetBtn')?.addEventListener('click', async () => {
-    if (confirm('Clear all local extension session cache and return to request access?')) {
-      await purgeExtLocalUserSession();
-      alert('✓ Local cache cleared successfully.');
-    }
+    const confirmed = await showExtConfirm('Clear all local extension session cache and return to request access?', {
+      title: 'Reset Local Cache',
+      icon: '🧹',
+      confirmText: 'Clear Cache',
+      cancelText: 'Cancel',
+      danger: true
+    });
+    if (!confirmed) return;
+    await purgeExtLocalUserSession();
+    alert('✓ Local cache cleared successfully.');
+    showAccessSubView('request');
   });
   document.getElementById('extSyncAccountBtn')?.addEventListener('click', async () => {
     await loadServerState();
@@ -1268,16 +1542,70 @@ const AGENT_META = {
   audience: { title: 'Audience Builder', icon: '👥', badge: 'GROWTH', desc: 'Target specific niche audiences (2 Free Curated Lists included)' },
   sorsa: { title: 'Increase Sorsa Score', icon: '⚡', badge: 'AIRDROP ROI', desc: 'Boost Sorsa Score for airdrops & promotions via top accounts' },
   followers: { title: 'Followers Increase', icon: '📈', badge: '100% AUTO', desc: '100% Automatic — Smart value-replies for high organic follow-backs' },
-  postgen: { title: 'Post Generator', icon: '✍️', badge: 'AI STUDIO', desc: 'Convert rough notes or links into Medium, Long, or Threads' },
   replyback: { title: 'Reply Back Loop', icon: '🔄', badge: 'AUTO LOOP', desc: 'Auto-likes and contextually replies to all comments on your tweet' },
   unfollow: { title: 'Auto Unfollow', icon: '🧹', badge: 'SAFETY', desc: 'Filter non-followers or low Walchain scores with safety delay' },
-  match: { title: 'Picture & Voice Match', icon: '🎨', badge: 'PERSONA', desc: 'Generate matched images + replicate authentic writing style' },
   creators: { title: 'Favorite Creators Radar', icon: '⭐', badge: 'RADAR', desc: 'Save favorite handles ➔ Instant top early comment spots' },
-  replystudio: { title: 'AI Reply Assistant', icon: '💬', badge: '1-CLICK', desc: 'Contextual 1-click reply engine calibrated to your tone' },
   defaulter: { title: 'Find Defaulters', icon: '🔍', badge: 'AUDIT POD', desc: 'Scan post comments & detect members who skipped commenting' },
   tgliveliker: { title: 'TG Live Liker (Proof Rec)', icon: '🔴', badge: 'PROOF REC', desc: 'Continuous raid liker — keeps tab open for screen record proof' },
   reciprocator: { title: 'Commenter Reciprocator', icon: '🤝', badge: 'RECIPROCAL', desc: 'Visits accounts who commented on your post & comments back on their recent posts' }
 };
+
+function extractTwitterListUrl(text) {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+
+  // 1. Pure numeric ID (e.g. 2103557569319219223)
+  if (/^\d{10,25}$/.test(trimmed)) {
+    return `https://x.com/i/lists/${trimmed}`;
+  }
+
+  // 2. Full or partial Twitter/X list URL
+  const urlMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?(?:x\.com|twitter\.com)\/(?:i\/lists\/\d+|[a-zA-Z0-9_]+\/lists\/[a-zA-Z0-9_-]+)(?:\/[a-zA-Z0-9_-]+)?/i);
+  if (urlMatch) {
+    let url = urlMatch[0];
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    return url;
+  }
+
+  // 3. Match i/lists/123456...
+  const partialMatch = trimmed.match(/i\/lists\/\d+/i);
+  if (partialMatch) {
+    return `https://x.com/${partialMatch[0]}`;
+  }
+
+  return null;
+}
+
+function extractTwitterListId(text) {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (/^\d{10,25}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const match = trimmed.match(/(?:lists\/|list:)(\d{10,25})/i);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return null;
+}
+
+function extractHandlesFromText(text) {
+  if (!text) return [];
+  const matches = text.match(/@?([a-zA-Z0-9_]{1,15})/g) || [];
+  const banned = new Set(['https', 'http', 'twitter', 'com', 'lists', 'i', 'x', 'status', 'search', 'home', 'notifications', 'messages', 'true', 'false', 'null', 'undefined']);
+  const result = [];
+  const seen = new Set();
+  for (const m of matches) {
+    const clean = m.replace(/^@/, '').trim();
+    if (clean && !banned.has(clean.toLowerCase()) && !seen.has(clean.toLowerCase())) {
+      seen.add(clean.toLowerCase());
+      result.push(clean);
+    }
+  }
+  return result;
+}
 
 function initAgentListeners() {
   // Bento Grid Card Clicks -> Open Dedicated Page
@@ -1425,32 +1753,49 @@ function initAgentListeners() {
     });
   });
 
-  // Pause / Resume button for Telegram Group Engage
-  document.getElementById('pauseTgEngageBtn')?.addEventListener('click', () => {
+  // Universal Pause / Resume Handler for ALL Agents + Telegram Engage
+  function toggleUniversalWorkflowPause() {
     state.isPaused = !state.isPaused;
     chrome.storage.local.set({ atomx_workflow_paused: state.isPaused }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: state.isPaused }).catch(() => null);
-    const pauseBtn = document.getElementById('pauseTgEngageBtn');
-    const tgStateBadge = document.getElementById('tgStateBadge');
-    const tgStatus = document.getElementById('tgLiveStatusText');
-    if (pauseBtn) {
-      pauseBtn.textContent = state.isPaused ? '▶️ Resume' : '⏸️ Pause';
-      pauseBtn.style.background = state.isPaused ? '#059669' : '#D97706';
-      pauseBtn.style.borderColor = state.isPaused ? '#059669' : '#D97706';
-    }
-    if (tgStateBadge) tgStateBadge.textContent = state.isPaused ? 'PAUSED' : 'ENGAGING';
-    if (tgStatus && state.isPaused) tgStatus.textContent = '⏸️ Workflow paused. Click Resume to continue.';
+    updateAllPauseButtonsUI(state.isPaused);
     showExtToast(state.isPaused ? 'Workflow Paused' : 'Workflow Resumed', state.isPaused ? '⏸️' : '▶️');
-  });
+  }
 
-  // Skip button for Telegram Group Engage
-  document.getElementById('skipTgEngageBtn')?.addEventListener('click', () => {
+  // Universal Skip Handler for ALL Agents + Telegram Engage
+  function triggerUniversalWorkflowSkip() {
     state.skipCurrent = true;
     chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
-    const tgStatus = document.getElementById('tgLiveStatusText');
-    if (tgStatus) tgStatus.textContent = '⏭️ Skipping current item...';
-    showExtToast('Skipping current link...', '⏭️');
+    showExtToast('Skipping current item...', '⏭️');
+  }
+
+  // Bind Pause buttons across ALL agents
+  const allPauseBtnIds = [
+    'pauseTgEngageBtn',
+    'pauseAudienceBuilderBtn',
+    'pauseSorsaBoosterBtn',
+    'pauseFollowerIncreaseBtn',
+    'pauseReplyBackBtn',
+    'pauseAutoUnfollowBtn',
+    'pauseReciprocatorBtn'
+  ];
+  allPauseBtnIds.forEach(id => {
+    document.getElementById(id)?.addEventListener('click', toggleUniversalWorkflowPause);
+  });
+
+  // Bind Skip buttons across ALL agents
+  const allSkipBtnIds = [
+    'skipTgEngageBtn',
+    'skipAudienceBuilderBtn',
+    'skipSorsaBoosterBtn',
+    'skipFollowerIncreaseBtn',
+    'skipReplyBackBtn',
+    'skipAutoUnfollowBtn',
+    'skipReciprocatorBtn'
+  ];
+  allSkipBtnIds.forEach(id => {
+    document.getElementById(id)?.addEventListener('click', triggerUniversalWorkflowSkip);
   });
 
   // Stop button for Telegram Group Engage
@@ -1499,18 +1844,36 @@ function initAgentListeners() {
     startAudienceBuilderWorkflow();
   });
 
-  document.getElementById('stopAudienceBuilderBtn')?.addEventListener('click', () => {
-    state.isAborted = true;
-    state.isWorkflowRunning = false;
-    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
-    syncFloatingHud(null, {
-      title: 'Audience Builder',
-      stateBadge: 'STOPPED',
-      statusText: 'Workflow stopped by user.',
-      isStopped: true
+function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
+  state.isAborted = true;
+  state.isWorkflowRunning = false;
+  chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
+  chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
+  chrome.storage.local.set({
+    atomx_agent_workflow: { active: false, isStopped: true, stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.' },
+    atomx_active_hud: { stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.', isStopped: true, active: false }
+  }).catch(() => null);
+  if (typeof chrome !== 'undefined' && chrome.tabs) {
+    chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        tabs.forEach(t => {
+          if (t.id) chrome.tabs.sendMessage(t.id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+        });
+      }
     });
+  }
+  syncFloatingHud(null, {
+    title: agentTitle,
+    stateBadge: 'STOPPED',
+    statusText: 'Workflow stopped by user.',
+    isStopped: true,
+    active: false
+  });
+}
+
+  document.getElementById('stopAudienceBuilderBtn')?.addEventListener('click', () => {
+    broadcastAbortToAllTabsAndStorage('Audience Builder');
     if (audienceWorkingTabId) {
-      chrome.tabs.sendMessage(audienceWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       safeRemoveTab(audienceWorkingTabId);
       audienceWorkingTabId = null;
     }
@@ -1528,11 +1891,36 @@ function initAgentListeners() {
     showExtToast('Audience Builder Stopped', '⏹');
   });
 
+  // Telegram Engage Reset Button
+  document.getElementById('resetTelegramQueueBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove(['atomx_tg_engaged_cache', 'atomx_tg_counters'], () => {
+      const doneEl = document.getElementById('tgDoneCount');
+      const colEl = document.getElementById('tgCollectedCount');
+      const skipEl = document.getElementById('tgSkippedCount');
+      const qInd = document.getElementById('tgQueueIndicator');
+      const bar = document.getElementById('tgProgressBar');
+      const status = document.getElementById('tgLiveStatusText');
+      const badge = document.getElementById('tgStateBadge');
+      const countdown = document.getElementById('tgCountdownText');
+      if (doneEl) doneEl.textContent = '0';
+      if (colEl) colEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (qInd) qInd.textContent = 'Tweet 0/0';
+      if (bar) bar.style.width = '0%';
+      if (status) status.textContent = 'Telegram raid queue and counters reset.';
+      if (badge) badge.textContent = 'IDLE';
+      if (countdown) countdown.style.display = 'none';
+      showExtToast('Telegram Queue Reset', '🔄');
+    });
+  });
+
+  // Audience Builder Reset Button
   document.getElementById('resetAudienceQueueBtn')?.addEventListener('click', () => {
     chrome.storage.local.remove([
       'atomx_audience_queue',
       'atomx_audience_queue_pos',
-      'atomx_audience_counters'
+      'atomx_audience_counters',
+      'atomx_audience_engaged_history'
     ], () => {
       const doneEl = document.getElementById('audienceDoneCount');
       const colEl = document.getElementById('audienceCollectedCount');
@@ -1547,58 +1935,266 @@ function initAgentListeners() {
       if (skipEl) skipEl.textContent = '0';
       if (qInd) qInd.textContent = 'Profile 0/0';
       if (bar) bar.style.width = '0%';
-      if (status) status.textContent = 'Audience queue and counters reset.';
+      if (status) status.textContent = 'Audience queue, history and counters reset.';
       if (badge) badge.textContent = 'IDLE';
       if (countdown) countdown.style.display = 'none';
       showExtToast('Audience Queue Reset', '🔄');
     });
   });
 
-  // Agent 2: Audience Builder Delay
+  // Sorsa Booster Reset Button
+  document.getElementById('resetSorsaQueueBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove([
+      'atomx_sorsa_engaged_history',
+      'atomx_sorsa_counters',
+      'atomx_sorsa_queue'
+    ], () => {
+      const doneEl = document.getElementById('sorsaDoneCount');
+      const colEl = document.getElementById('sorsaCollectedCount');
+      const skipEl = document.getElementById('sorsaSkippedCount');
+      const qInd = document.getElementById('sorsaQueueIndicator');
+      const bar = document.getElementById('sorsaProgressBar');
+      const status = document.getElementById('sorsaLiveStatusText');
+      const badge = document.getElementById('sorsaStateBadge');
+      const countdown = document.getElementById('sorsaCountdownText');
+      if (doneEl) doneEl.textContent = '0';
+      if (colEl) colEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (qInd) qInd.textContent = 'Account 0/0';
+      if (bar) bar.style.width = '0%';
+      if (status) status.textContent = 'Sorsa booster history, queue and counters reset.';
+      if (badge) badge.textContent = 'IDLE';
+      if (countdown) countdown.style.display = 'none';
+      showExtToast('Sorsa Queue & History Reset', '🔄');
+    });
+  });
+
+  // Followers Growth Reset Button
+  document.getElementById('resetFollowerQueueBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove([
+      'atomx_follower_engaged_history',
+      'atomx_follower_counters'
+    ], () => {
+      const doneEl = document.getElementById('followerDoneCount');
+      const colEl = document.getElementById('followerCollectedCount');
+      const skipEl = document.getElementById('followerSkippedCount');
+      const qInd = document.getElementById('followerQueueIndicator');
+      const bar = document.getElementById('followerProgressBar');
+      const status = document.getElementById('followerLiveStatusText');
+      const badge = document.getElementById('followerStateBadge');
+      const countdown = document.getElementById('followerCountdownText');
+      if (doneEl) doneEl.textContent = '0';
+      if (colEl) colEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (qInd) qInd.textContent = 'Profile 0/0';
+      if (bar) bar.style.width = '0%';
+      if (status) status.textContent = 'Follower growth history and counters reset.';
+      if (badge) badge.textContent = 'IDLE';
+      if (countdown) countdown.style.display = 'none';
+      showExtToast('Followers Queue & History Reset', '🔄');
+    });
+  });
+
+  // Reply Back Loop Reset Button
+  document.getElementById('resetReplyBackQueueBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove(['atomx_replyback_counters'], () => {
+      const doneEl = document.getElementById('replyBackDoneCount');
+      const qEl = document.getElementById('replyBackQueueCount');
+      const skipEl = document.getElementById('replyBackSkippedCount');
+      const bar = document.getElementById('replyBackProgressBar');
+      const status = document.getElementById('replyBackLiveStatusText');
+      const badge = document.getElementById('replyBackStateBadge');
+      const countdown = document.getElementById('replyBackCountdownText');
+      if (doneEl) doneEl.textContent = '0';
+      if (qEl) qEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (bar) bar.style.width = '0%';
+      if (status) status.textContent = 'Reply back loop counters reset.';
+      if (badge) badge.textContent = 'IDLE';
+      if (countdown) countdown.style.display = 'none';
+      showExtToast('Reply Back Counters Reset', '🔄');
+    });
+  });
+
+  // Auto Unfollow Reset Button
+  document.getElementById('resetUnfollowQueueBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove(['atomx_unfollow_counters'], () => {
+      const doneEl = document.getElementById('unfollowCountDone');
+      const skipEl = document.getElementById('unfollowCountSkipped');
+      const failEl = document.getElementById('unfollowCountFailed');
+      const bar = document.getElementById('unfollowProgressBar');
+      const status = document.getElementById('unfollowLiveStatusText');
+      const badge = document.getElementById('unfollowStateBadge');
+      const countdown = document.getElementById('unfollowCountdownText');
+      if (doneEl) doneEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (failEl) failEl.textContent = '0';
+      if (bar) bar.style.width = '0%';
+      if (status) status.textContent = 'Unfollow counters and queue reset.';
+      if (badge) badge.textContent = 'IDLE';
+      if (countdown) countdown.style.display = 'none';
+      showExtToast('Unfollow Counters Reset', '🔄');
+    });
+  });
+
+  // Reciprocator Reset Button
+  document.getElementById('resetReciprocatorQueueBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove(['atomx_reciprocated_commenters', 'atomx_reciprocator_counters'], () => {
+      const doneEl = document.getElementById('reciprocatorCountDone');
+      const qEl = document.getElementById('reciprocatorCountQueue');
+      const skipEl = document.getElementById('reciprocatorCountSkipped');
+      const bar = document.getElementById('reciprocatorProgressBar');
+      const status = document.getElementById('reciprocatorLiveStatusText');
+      const badge = document.getElementById('reciprocatorStateBadge');
+      const countdown = document.getElementById('reciprocatorCountdownText');
+      if (doneEl) doneEl.textContent = '0';
+      if (qEl) qEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (bar) bar.style.width = '0%';
+      if (status) status.textContent = 'Reciprocator queue, commenters history and counters reset.';
+      if (badge) badge.textContent = 'IDLE';
+      if (countdown) countdown.style.display = 'none';
+      showExtToast('Reciprocator History Reset', '🔄');
+    });
+  });
+
+  // TG Live Liker Reset Button
+  document.getElementById('resetTgLiveLikerBtn')?.addEventListener('click', () => {
+    const lEl = document.getElementById('tgLiveCountLiked');
+    const rEl = document.getElementById('tgLiveCountReposted');
+    const cEl = document.getElementById('tgLiveCountCommented');
+    const bEl = document.getElementById('tgLiveCountBookmarked');
+    if (lEl) lEl.textContent = '0';
+    if (rEl) rEl.textContent = '0';
+    if (cEl) cEl.textContent = '0';
+    if (bEl) bEl.textContent = '0';
+    showExtToast('TG Live Counters Reset', '🔄');
+  });
+
+  // Agent 2: Audience Builder List Selection, Delay & Cool-Off
+  document.getElementById('audienceListSelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('customListUrlBox');
+    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  });
+
+  document.getElementById('customListUrlInput')?.addEventListener('input', (e) => {
+    const val = (e.target.value || '').trim();
+    const listUrl = extractTwitterListUrl(val);
+    const badge = document.getElementById('audienceCustomCountBadge');
+    if (!badge) return;
+    if (listUrl) {
+      badge.textContent = '✓ Twitter List URL recognized';
+      badge.style.color = '#10B981';
+    } else {
+      badge.textContent = 'Enter List URL (e.g. x.com/i/lists/...)';
+      badge.style.color = 'var(--text-secondary)';
+    }
+  });
+
   document.getElementById('audienceDelaySelect')?.addEventListener('change', (e) => {
     const box = document.getElementById('audienceCustomDelayBox');
     if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
   });
-
-  // Agent 3: Increase Sorsa Score
-  document.getElementById('sorsaTierSelect')?.addEventListener('change', (e) => {
-    const box = document.getElementById('customSorsaListUrlBox');
+  document.getElementById('audienceCooloffSelect')?.addEventListener('change', (e) => {
+    const box = document.getElementById('audienceCustomCooloffBox');
     if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
   });
+
+  // Agent 3: Sorsa Score Booster (CSV Upload, Preset KOLs, Textarea & Dual Mode)
+  document.getElementById('sorsaUploadCsvBtn')?.addEventListener('click', () => {
+    document.getElementById('sorsaCsvFileInput')?.click();
+  });
+
+  document.getElementById('sorsaCsvFileInput')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result || '';
+      const lines = String(text).split(/[\r\n,]+/);
+      const extracted = lines.map(l => l.replace(/["'@\s]/g, '').trim()).filter(h => /^[A-Za-z0-9_]{1,25}$/.test(h));
+      const textarea = document.getElementById('sorsaHandlesInput');
+      if (textarea) textarea.value = extracted.map(h => `@${h}`).join(', ');
+      const badge = document.getElementById('sorsaParsedCountBadge');
+      if (badge) badge.textContent = `${extracted.length} accounts loaded from CSV`;
+      const curSelect = document.getElementById('sorsaCuratedListSelect');
+      if (curSelect) curSelect.value = 'custom';
+      showExtToast(`Loaded ${extracted.length} handles from CSV`, '📁');
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById('sorsaCuratedListSelect')?.addEventListener('change', (e) => {
+    loadSorsaCuratedList(e.target.value);
+  });
+
+  document.getElementById('sorsaLoadCuratedBtn')?.addEventListener('click', () => {
+    const val = document.getElementById('sorsaCuratedListSelect')?.value || 'preset_kols';
+    loadSorsaCuratedList(val);
+  });
+
+  document.getElementById('sorsaLoadPresetKolsBtn')?.addEventListener('click', () => {
+    const val = document.getElementById('sorsaCuratedListSelect')?.value || 'preset_kols';
+    loadSorsaCuratedList(val);
+  });
+
+  document.getElementById('sorsaHandlesInput')?.addEventListener('input', (e) => {
+    const val = (e.target.value || '').trim();
+    if (extractTwitterListUrl(val)) {
+      alert('⚠️ Increase Sorsa Score ONLY accepts .CSV file uploads or usernames (e.g. @cz_binance, @vitalikbuterin).\n\nTwitter List URLs are NOT supported here. Please use Audience Builder or Followers Increase for Twitter List URLs.');
+      e.target.value = '';
+      const badge = document.getElementById('sorsaParsedCountBadge');
+      if (badge) badge.textContent = '0 accounts ready';
+      return;
+    }
+    const handles = val.split(/[\r\n,]+/).map(h => h.replace(/["'@\s]/g, '').trim()).filter(h => /^[A-Za-z0-9_]{1,25}$/.test(h));
+    const badge = document.getElementById('sorsaParsedCountBadge');
+    if (badge) badge.textContent = handles.length > 0 ? `${handles.length} accounts ready` : '0 accounts ready';
+  });
+
+  document.getElementById('sorsaModeSelect')?.addEventListener('change', (e) => {
+    const isMode2 = e.target.value === 'deduplication';
+    const box = document.getElementById('sorsaDeduplicationWindowBox');
+    if (box) box.style.display = isMode2 ? 'block' : 'none';
+    const desc = document.getElementById('sorsaModeDescription');
+    if (desc) {
+      desc.textContent = isMode2
+        ? 'Checks each account against your chosen cool-off window, skipping those engaged recently.'
+        : 'Remembers your last processed account index and picks up where it left off on every run.';
+    }
+  });
+
   document.getElementById('sorsaCooloffSelect')?.addEventListener('change', (e) => {
     const box = document.getElementById('sorsaCustomCooloffBox');
     if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
   });
-  document.getElementById('sorsaDelaySelect')?.addEventListener('change', (e) => {
-    const box = document.getElementById('sorsaCustomDelayBox');
-    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
-  });
 
-  // Agent 4: Followers Growth
+  // Agent 4: Followers Growth Twitter List Dropdown & Custom URL
   document.getElementById('followerNicheSelect')?.addEventListener('change', (e) => {
     const box = document.getElementById('customFollowerUrlBox');
     if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
   });
-  document.getElementById('followerDelaySelect')?.addEventListener('change', (e) => {
-    const box = document.getElementById('followerCustomDelayBox');
-    if (box) box.style.display = e.target.value === 'custom' ? 'block' : 'none';
+
+  document.getElementById('customFollowerUrlInput')?.addEventListener('input', (e) => {
+    const val = (e.target.value || '').trim();
+    const listUrl = extractTwitterListUrl(val);
+    const badge = document.getElementById('followerCustomCountBadge');
+    if (!badge) return;
+    if (listUrl) {
+      badge.textContent = '✓ Twitter List URL recognized';
+      badge.style.color = '#10B981';
+    } else {
+      badge.textContent = 'Enter List URL (e.g. x.com/i/lists/...)';
+      badge.style.color = 'var(--text-secondary)';
+    }
   });
 
   document.getElementById('runSorsaBoosterBtn')?.addEventListener('click', () => {
     startSorsaScoreBoosterWorkflow();
   });
   document.getElementById('stopSorsaBoosterBtn')?.addEventListener('click', () => {
-    state.isAborted = true;
-    state.isWorkflowRunning = false;
-    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
-    syncFloatingHud(null, {
-      title: 'Sorsa Booster',
-      stateBadge: 'STOPPED',
-      statusText: 'Workflow stopped by user.',
-      isStopped: true
-    });
+    broadcastAbortToAllTabsAndStorage('Sorsa Booster');
     if (sorsaWorkingTabId) {
-      chrome.tabs.sendMessage(sorsaWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       safeRemoveTab(sorsaWorkingTabId);
       sorsaWorkingTabId = null;
     }
@@ -1621,21 +2217,12 @@ function initAgentListeners() {
     startFollowersIncreaseWorkflow();
   });
   document.getElementById('stopFollowerIncreaseBtn')?.addEventListener('click', () => {
-    state.isAborted = true;
-    state.isWorkflowRunning = false;
-    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
-    syncFloatingHud(null, {
-      title: 'Followers Growth',
-      stateBadge: 'STOPPED',
-      statusText: 'Workflow stopped by user.',
-      isStopped: true
-    });
+    broadcastAbortToAllTabsAndStorage('Followers Increase');
     if (followerWorkingTabId) {
-      chrome.tabs.sendMessage(followerWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       safeRemoveTab(followerWorkingTabId);
       followerWorkingTabId = null;
     }
-    updateAgentConsole('⏹️ Stopped', 'Follower Growth stopped by user.');
+    updateAgentConsole('⏹️ Stopped', 'Followers Increase stopped by user.');
     const startBtn = document.getElementById('runFollowerIncreaseBtn');
     const stopBtn = document.getElementById('stopFollowerIncreaseBtn');
     if (startBtn) startBtn.style.display = 'block';
@@ -1646,45 +2233,9 @@ function initAgentListeners() {
     if (countdownEl) countdownEl.style.display = 'none';
     const badge = document.getElementById('followerStateBadge');
     if (badge) badge.textContent = 'STOPPED';
-    showExtToast('Follower Growth Stopped', '⏹');
+    showExtToast('Followers Increase Stopped', '⏹');
   });
 
-  // Agent 5: Post Generator
-  document.getElementById('generatePostBtn')?.addEventListener('click', async () => {
-    const notes = document.getElementById('rawNotesInput')?.value.trim();
-    if (!notes) {
-      alert('Please enter your raw notes or link to generate post.');
-      return;
-    }
-    const fmt = document.getElementById('postFormatSelect')?.value || 'medium';
-    const outContainer = document.getElementById('postOutputContainer');
-    const outArea = document.getElementById('postOutputArea');
-    if (outContainer) outContainer.style.display = 'flex';
-    if (outArea) {
-      outArea.style.display = 'block';
-      outArea.value = 'Generating viral post via ATOMX AI engine...';
-    }
-    deductCredits(1);
-
-    setTimeout(() => {
-      if (outArea) {
-        if (fmt === 'thread') {
-          outArea.value = `1/4 Most creators overcomplicate Twitter growth.\n\nHere is what actually works based on 22k+ followers: consistency, value-first replies, and autonomous pacing.\n\n2/4 Stop commenting generic phrases. Give actionable perspectives.\n\n3/4 Focus on high Sorsa Score accounts to build real ecosystem authority.\n\n4/4 Execution compounds every single day. Keep building.`;
-        } else {
-          outArea.value = `The secret to rapid organic distribution on X isn't luck—it's high-context resonance delivered with relentless consistency. Focus on adding genuine insight to every thread.`;
-        }
-      }
-      updateAgentConsole('Post Generated', `Successfully formatted post (${fmt}) using ATOMX AI Studio.`);
-    }, 500);
-  });
-
-  document.getElementById('copyPostDraftBtn')?.addEventListener('click', () => {
-    const text = document.getElementById('postOutputArea')?.value;
-    if (text) {
-      navigator.clipboard?.writeText(text);
-      alert('✓ Post draft copied to clipboard!');
-    }
-  });
 
   // Agent 6: Reply Back (A6, Posts, Fully Auto)
   document.getElementById('replyBackUseCurrentTabBtn')?.addEventListener('click', async () => {
@@ -1718,17 +2269,8 @@ function initAgentListeners() {
   });
 
   document.getElementById('stopReplyBackBtn')?.addEventListener('click', () => {
-    state.isAborted = true;
-    state.isWorkflowRunning = false;
-    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
-    syncFloatingHud(null, {
-      title: 'Reply Back Loop',
-      stateBadge: 'STOPPED',
-      statusText: 'Workflow stopped by user.',
-      isStopped: true
-    });
+    broadcastAbortToAllTabsAndStorage('Reply Back');
     if (replyBackWorkingTabId) {
-      chrome.tabs.sendMessage(replyBackWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       safeRemoveTab(replyBackWorkingTabId);
       replyBackWorkingTabId = null;
     }
@@ -1772,13 +2314,6 @@ function initAgentListeners() {
     showExtToast('Auto Unfollow Stopped', '⏹');
   });
 
-  // Agent 8: Picture & Voice Match
-  document.getElementById('runPictureVoiceBtn')?.addEventListener('click', () => {
-    const voice = document.getElementById('personaVoiceSelect')?.value;
-    deductCredits(2);
-    updateAgentConsole('Persona Calibrated', `Voice persona set to: "${voice}".`);
-    alert(`🎨 Picture & Voice Match Complete!\nTuned persona to: "${voice}". Visual prompt and stylistic tonality calibrated.`);
-  });
 
   // Agent 9: Add Creator
   document.getElementById('addCreatorBtn')?.addEventListener('click', () => {
@@ -1805,10 +2340,20 @@ function initAgentListeners() {
   // Agent 11: Find Defaulter Listeners
   document.getElementById('defaulterUseCurrentTabBtn')?.addEventListener('click', async () => {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com'))) {
+      let tabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+      if (!tabs || tabs.length === 0 || !tabs[0]?.url) {
+        tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+      }
+      if (!tabs || tabs.length === 0 || !tabs[0]?.url || (!tabs[0].url.includes('/status/'))) {
+        const twitterTabs = await chrome.tabs.query({ url: ['*://x.com/*/status/*', '*://twitter.com/*/status/*'] }).catch(() => []);
+        if (twitterTabs && twitterTabs.length > 0) {
+          tabs = twitterTabs;
+        }
+      }
+      const targetTab = (tabs || []).find(t => t.url && (t.url.includes('twitter.com') || t.url.includes('x.com')) && t.url.includes('/status/')) || tabs?.[0];
+      if (targetTab?.url && (targetTab.url.includes('twitter.com') || targetTab.url.includes('x.com')) && targetTab.url.includes('/status/')) {
         const inp = document.getElementById('defaulterPostUrl');
-        if (inp) inp.value = tabs[0].url.split('?')[0];
+        if (inp) inp.value = targetTab.url.split('?')[0];
         showExtToast('Current Tweet URL Linked', '⚡');
       } else {
         alert('Please open your target tweet on Twitter / X in your active browser tab first.');
@@ -1857,10 +2402,20 @@ function initAgentListeners() {
   // Agent 13: Commenter Reciprocator Listeners
   document.getElementById('reciprocatorUseCurrentTabBtn')?.addEventListener('click', async () => {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com')) && tabs[0].url.includes('/status/')) {
+      let tabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+      if (!tabs || tabs.length === 0 || !tabs[0]?.url) {
+        tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+      }
+      if (!tabs || tabs.length === 0 || !tabs[0]?.url || (!tabs[0].url.includes('/status/'))) {
+        const twitterTabs = await chrome.tabs.query({ url: ['*://x.com/*/status/*', '*://twitter.com/*/status/*'] }).catch(() => []);
+        if (twitterTabs && twitterTabs.length > 0) {
+          tabs = twitterTabs;
+        }
+      }
+      const targetTab = (tabs || []).find(t => t.url && (t.url.includes('twitter.com') || t.url.includes('x.com')) && t.url.includes('/status/')) || tabs?.[0];
+      if (targetTab?.url && (targetTab.url.includes('twitter.com') || targetTab.url.includes('x.com')) && targetTab.url.includes('/status/')) {
         const inp = document.getElementById('reciprocatorPostUrl');
-        if (inp) inp.value = tabs[0].url.split('?')[0];
+        if (inp) inp.value = targetTab.url.split('?')[0];
         showExtToast('Current Tweet URL Linked', '⚡');
       } else {
         alert('Please open your target tweet on Twitter / X in your active browser tab first.');
@@ -1870,11 +2425,8 @@ function initAgentListeners() {
 
   document.getElementById('runReciprocatorBtn')?.addEventListener('click', startCommenterReciprocatorWorkflow);
   document.getElementById('stopReciprocatorBtn')?.addEventListener('click', () => {
-    state.isAborted = true;
-    state.isWorkflowRunning = false;
-    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
+    broadcastAbortToAllTabsAndStorage('Commenter Reciprocator');
     if (reciprocatorWorkingTabId) {
-      chrome.tabs.sendMessage(reciprocatorWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       safeRemoveTab(reciprocatorWorkingTabId);
       reciprocatorWorkingTabId = null;
     }
@@ -1927,11 +2479,13 @@ function parseDefaulterHandles(raw) {
     'status', 'statuses', 'home', 'explore', 'notifications', 'messages',
     'i', 'compose', 'settings', 'search', 'hashtag', 'intent', 'post',
     'posts', 'tweet', 'tweets', 'link', 'links', 'telegram', 't', 'me',
-    'joinchat', 'photo', 'video', 'analytics', 'following', 'followers', 'verified'
+    'joinchat', 'photo', 'video', 'analytics', 'following', 'followers', 'verified',
+    'bot', 'ape_bot', 'apebot', 'reply', 'replies', 'in', 'to', 'engage', 'with',
+    'vip', 'star', 'raid', 'raids', 'member', 'members', 'admin', 'mod'
   ]);
 
-  // 1. Extract usernames from Twitter/X URLs (e.g., https://x.com/username/status/12345 or https://x.com/username)
-  const urlRegex = /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([A-Za-z0-9_]{1,15})(?:\/[^\s\n\r]*)?/gi;
+  // Stage 1: High-Priority — Extract username from x.com or twitter.com post/profile URLs
+  const urlRegex = /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([A-Za-z0-9_]{1,25})(?:\/status\/\d+|\/photo|\/video|\/?\b)/gi;
   let match;
   while ((match = urlRegex.exec(raw)) !== null) {
     const handle = match[1].toLowerCase().trim();
@@ -1940,11 +2494,11 @@ function parseDefaulterHandles(raw) {
     }
   }
 
-  // Remove URLs from raw text before checking the rest so status IDs and URL parts don't get matched
+  // Remove URLs before scanning remaining raw text to avoid matching status IDs or URL paths
   const textWithoutUrls = raw.replace(/(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/[^\s\n\r]*/gi, ' ');
 
-  // 2. Extract explicit @handles (e.g. @catqpx)
-  const atRegex = /@([A-Za-z0-9_]{1,15})/g;
+  // Stage 2: Extract explicit @handles (e.g. @reduansheikh11, @Bharnij, @fepz_, @ManuelMartial018)
+  const atRegex = /@([A-Za-z0-9_]{1,25})\b/g;
   while ((match = atRegex.exec(textWithoutUrls)) !== null) {
     const handle = match[1].toLowerCase().trim();
     if (handle && !RESERVED_WORDS.has(handle) && !/^\d+$/.test(handle)) {
@@ -1952,24 +2506,28 @@ function parseDefaulterHandles(raw) {
     }
   }
 
-  // 3. Extract numbered list items (e.g. "170. catqpx" or "170) catqpx")
+  // Stage 3: Process raw lines (handles telegram raid logs, bot announcements, numbered lists)
   const lines = textWithoutUrls.split(/[\r\n]+/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const listMatch = trimmed.match(/^\d+[\.\)\-:\s]+@?([A-Za-z0-9_]{1,15})\b/);
-    if (listMatch) {
-      const handle = listMatch[1].toLowerCase().trim();
-      if (handle && !RESERVED_WORDS.has(handle) && !/^\d+$/.test(handle)) {
-        clean.add(handle);
-      }
-    } else {
-      const singleMatch = trimmed.match(/^@?([A-Za-z0-9_]{1,15})$/);
-      if (singleMatch) {
-        const handle = singleMatch[1].toLowerCase().trim();
-        if (handle && !RESERVED_WORDS.has(handle) && !/^\d+$/.test(handle)) {
-          clean.add(handle);
-        }
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+    // Skip telegram timestamp lines like [20-Sep-26 1:52 AM]
+    if (/^\[\d{1,2}-[A-Za-z]{3}-\d{2,4}/.test(line)) continue;
+    // Skip telegram quote reply lines starting with >
+    if (line.startsWith('>')) continue;
+
+    // Clean bot labels, badges, emojis
+    const cleanLine = line
+      .replace(/#\d+\b/g, '')
+      .replace(/^\d+[\.\)\-:\s]+/g, '')
+      .replace(/[★☆💹🔥✨🔴]/g, '')
+      .trim();
+
+    const tokens = cleanLine.split(/[\s,;|]+/);
+    for (const token of tokens) {
+      const h = token.replace(/^@/, '').toLowerCase().trim();
+      if (/^[a-z0-9_]{3,25}$/.test(h) && !RESERVED_WORDS.has(h) && !/^\d+$/.test(h)) {
+        clean.add(h);
       }
     }
   }
@@ -2017,17 +2575,23 @@ async function startDefaulterAuditWorkflow() {
   const statExp = document.getElementById('defaulterStatExpected');
   const statCom = document.getElementById('defaulterStatCommented');
   const statDef = document.getElementById('defaulterStatDefaulters');
+  const summaryEl = document.getElementById('defaulterSummaryText');
+  const copyBox = document.getElementById('defaulterCopyBox');
+  const copyBoxContainer = document.getElementById('defaulterCopyBoxContainer');
+  const copyMainBtn = document.getElementById('copyDefaultersMainBtn');
   const chipsContainer = document.getElementById('defaulterChipsContainer');
   const copyBtn = document.getElementById('copyDefaultersBtn');
 
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'block';
   if (resultsCard) resultsCard.style.display = 'block';
-  if (heading) heading.textContent = 'Scanning comments on tweet feed...';
+  if (heading) heading.textContent = 'Scanning comments & expanding spam replies...';
   if (statExp) statExp.textContent = String(expectedHandles.length);
   if (statCom) statCom.textContent = '...';
   if (statDef) statDef.textContent = '...';
-  if (chipsContainer) chipsContainer.innerHTML = '<span style="font-size:11px; color:var(--text-muted); padding:6px;">Auditing comment replies in background... Please wait ~15-20s.</span>';
+  if (summaryEl) summaryEl.textContent = 'Scrolling post comments till end & checking probable spam... Please wait.';
+  if (copyBoxContainer) copyBoxContainer.style.display = 'none';
+  if (chipsContainer) chipsContainer.innerHTML = '<span style="font-size:11px; color:var(--text-muted); padding:6px;">Auditing comment replies in background... Please wait ~15-30s.</span>';
   if (copyBtn) copyBtn.style.display = 'none';
 
   updateAgentConsole('Audit Running', `Scanning comments on: ${postUrl}`);
@@ -2042,7 +2606,7 @@ async function startDefaulterAuditWorkflow() {
     if (state.isAborted) return;
 
     const auditRes = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(tab.id, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, (res) => resolve(res || { success: false, commenters: [] }));
+      chrome.tabs.sendMessage(tab.id, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 100 }, (res) => resolve(res || { success: false, commenters: [] }));
     });
 
     safeRemoveTab(tab?.id);
@@ -2068,10 +2632,51 @@ async function startDefaulterAuditWorkflow() {
     if (statCom) statCom.textContent = String(compliant.length);
     if (statDef) statDef.textContent = String(defaulters.length);
 
+    if (summaryEl) {
+      if (defaulters.length === 0) {
+        summaryEl.innerHTML = '<span style="color:#10B981; font-weight:700;">🎉 100% Compliant! All ' + expectedHandles.length + ' group members commented on your post!</span>';
+      } else {
+        summaryEl.innerHTML = `<strong>${defaulters.length}</strong> out of <strong>${expectedHandles.length}</strong> members failed to comment on this post. (<strong>${compliant.length}</strong> commented).`;
+      }
+    }
+
+    // Populate Defaulters Copy Box
+    if (copyBox && copyBoxContainer) {
+      if (defaulters.length > 0) {
+        copyBoxContainer.style.display = 'flex';
+        copyBox.value = defaulters.map(d => `@${d}`).join(' ');
+        copyBox.onclick = () => {
+          copyBox.select();
+          navigator.clipboard?.writeText(copyBox.value);
+          showExtToast(`Copied ${defaulters.length} Defaulters!`, '📋');
+        };
+      } else {
+        copyBoxContainer.style.display = 'none';
+      }
+    }
+
+    // Setup 1-Click Copy Buttons
+    const handleCopyAll = () => {
+      const textToCopy = defaulters.map(d => `@${d}`).join(' ');
+      navigator.clipboard?.writeText(textToCopy);
+      if (copyMainBtn) copyMainBtn.textContent = '✓ COPIED TO CLIPBOARD!';
+      setTimeout(() => { if (copyMainBtn) copyMainBtn.textContent = '📋 COPY DEFAULTERS LIST'; }, 2000);
+      showExtToast(`Copied ${defaulters.length} defaulters to clipboard`, '📋');
+    };
+
+    if (copyMainBtn && defaulters.length > 0) {
+      copyMainBtn.onclick = handleCopyAll;
+    }
+
+    if (copyBtn && defaulters.length > 0) {
+      copyBtn.style.display = 'block';
+      copyBtn.onclick = handleCopyAll;
+    }
+
     if (chipsContainer) {
       chipsContainer.innerHTML = '';
       if (defaulters.length === 0) {
-        chipsContainer.innerHTML = '<span style="font-size:11px; color:#10B981; font-weight:700; padding:6px;">🎉 100% Compliant! All ' + expectedHandles.length + ' group members commented on your post!</span>';
+        chipsContainer.innerHTML = '<span style="font-size:11px; color:#10B981; font-weight:700; padding:6px;">🎉 100% Compliant! Zero defaulters detected.</span>';
       } else {
         defaulters.forEach(d => {
           const badge = document.createElement('span');
@@ -2086,15 +2691,6 @@ async function startDefaulterAuditWorkflow() {
           chipsContainer.appendChild(badge);
         });
       }
-    }
-
-    if (copyBtn && defaulters.length > 0) {
-      copyBtn.style.display = 'block';
-      copyBtn.onclick = () => {
-        const textToCopy = defaulters.map(d => `@${d}`).join(' ');
-        navigator.clipboard?.writeText(textToCopy);
-        showExtToast(`Copied ${defaulters.length} defaulters to clipboard`, '📋');
-      };
     }
 
     updateAgentConsole('Audit Finished', `Found ${defaulters.length} defaulters out of ${expectedHandles.length} members. 5 credits deducted.`);
@@ -2287,11 +2883,19 @@ async function startCommenterReciprocatorWorkflow() {
   }
 
   const maxCount = Number(document.getElementById('reciprocatorMaxCount')?.value || 10);
-  const delaySec = Number(document.getElementById('reciprocatorDelaySelect')?.value || 15);
+  const postsCount = document.getElementById('reciprocatorPostsPerProfileSelect')?.value || 'random';
+  const commentLikeDelayMs = Number(document.getElementById('reciprocatorLikeDelaySelect')?.value || 4000);
   const tone = state.selectedTone || 'Bullish (5-10 words)';
   const tonePrompt = state.selectedTonePrompt || '';
   const optLike = document.getElementById('reciprocatorOptLike')?.checked ?? true;
+  const optComment = document.getElementById('reciprocatorOptComment')?.checked ?? true;
+  const optRepost = document.getElementById('reciprocatorOptRepost')?.checked ?? false;
   const optFollow = document.getElementById('reciprocatorOptFollow')?.checked ?? false;
+
+  if (!optLike && !optComment && !optRepost && !optFollow) {
+    alert('⚠️ Please select at least one engagement action (Like, Comment, Repost, or Follow).');
+    return;
+  }
 
   const startBtn = document.getElementById('runReciprocatorBtn');
   const stopBtn = document.getElementById('stopReciprocatorBtn');
@@ -2318,7 +2922,7 @@ async function startCommenterReciprocatorWorkflow() {
   if (barEl) barEl.style.width = '5%';
   if (countdownEl) countdownEl.style.display = 'none';
   if (queueIndicator) queueIndicator.textContent = `Commenter 0/${maxCount}`;
-  if (statusText) statusText.textContent = `Accessing post: ${postUrl}... Scanning commenters.`;
+  if (statusText) statusText.textContent = `Accessing post: ${postUrl}... Liking unliked comments & collecting profiles.`;
 
   syncFloatingHud(null, {
     title: 'Commenter Reciprocator',
@@ -2328,7 +2932,7 @@ async function startCommenterReciprocatorWorkflow() {
     collected: maxCount,
     skipped: 0,
     progressPercent: 5,
-    statusText: `Accessing post to scan commenters...`
+    statusText: `Accessing post: ${postUrl}... Liking unliked comments & collecting profiles.`
   });
 
   // Delegate immediately to background service worker — survives extension popup closing!
@@ -2341,9 +2945,15 @@ async function startCommenterReciprocatorWorkflow() {
     options: {
       postUrl,
       maxCount,
-      delaySec,
+      postsCount,
+      postsPerProfile: postsCount,
+      commentLikeDelayMs,
+      likePosts: optLike,
+      replyPosts: optComment,
+      repostPosts: optRepost,
+      followPosts: optFollow,
       likeRecent: optLike,
-      commentRecent: true,
+      commentRecent: optComment,
       followUser: optFollow,
       style: tone,
       stylePrompt: tonePrompt,
@@ -2399,75 +3009,564 @@ function getPlanMaxCustomTones(userPlan) {
 
 // Fallback curated lists if backend offline or cold start
 const FALLBACK_CURATED_LISTS = {
-  audienceList1: {
-    id: 'audienceList1',
-    name: 'Web3 & Crypto Alpha Hunters',
-    category: 'Audience Builder',
-    status: 'published',
-    accessTier: 'free',
-    listUrl: '',
-    targets: [
-      '@vitalikbuterin', '@sassal0x', '@cobie', '@inversebrah', '@brian_armstrong',
-      '@zachxbt', '@balajis', '@cz_binance', '@aeyakovenko', '@staniKulechov',
-      '@haydenzadams', '@sreeramkannan', '@shawmakesmagic', '@mertmumtaz',
-      '@hosseeb', '@ercwl', '@danrobinson', '@hasufl', '@bantg', '@Rewkang'
-    ]
+  "sorsaTier1": {
+    "id": "sorsaTier1",
+    "name": "Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)",
+    "status": "published",
+    "listUrl": "",
+    "targets": [
+      "@sabbirzc",
+      "@miiportable_btc",
+      "@0xzorroo",
+      "@Naija_PR",
+      "@Fatimabadam",
+      "@Ehsanasadivip",
+      "@YunaEmpire_01",
+      "@shafi7706",
+      "@alfianrudi_",
+      "@Piquis_Bar",
+      "@theMadridZone",
+      "@YaseerGumel",
+      "@Sirbest247",
+      "@jnr_pips",
+      "@BigCasperEth",
+      "@kaixweb3",
+      "@JSimulat3",
+      "@DavidMorganXBT",
+      "@0xemotions_",
+      "@RifdahSR_11",
+      "@samcryptto",
+      "@0x_Quant69",
+      "@arnoldwall_sol",
+      "@_ummukulthum",
+      "@kore_vs_",
+      "@AYZwgmi",
+      "@Rexa302",
+      "@0x_Flames",
+      "@Jokerchimp",
+      "@Shiyas_wb3",
+      "@martinsrex65950",
+      "@Belialoglu",
+      "@shu_bomi",
+      "@FindAngus",
+      "@SpideyWebyb",
+      "@W3B_GURU",
+      "@CryptPshyc",
+      "@Robiulislam796",
+      "@Rukon__Kholifa",
+      "@0xkiYuki",
+      "@FlipMe_now",
+      "@CrypNhuel",
+      "@oxdeer_",
+      "@alexacrrypt",
+      "@mazanga_daniel",
+      "@RealDea_n",
+      "@Auwalsulai69118",
+      "@BlaqBonez",
+      "@MOCRYPTODC",
+      "@OxMullha",
+      "@ArtYxEth",
+      "@zangart90",
+      "@Flipfury40",
+      "@thoby_lobah",
+      "@Anox_0x",
+      "@captmarvel02",
+      "@therealtorah_",
+      "@lenzendoo",
+      "@0xghost_Lab",
+      "@0x_zyven",
+      "@Emermuo",
+      "@LeDuc_03",
+      "@Shahidu23581181",
+      "@Va_rian01",
+      "@D_GreatVictor",
+      "@biggerz",
+      "@NFTBarney69",
+      "@Honieplat",
+      "@0xStego",
+      "@BankzNo1",
+      "@Wendy_rohsee",
+      "@Olahosts",
+      "@Nyerishi",
+      "@Odogwu",
+      "@web3parkerr",
+      "@kewu_crypto",
+      "@SADIWEB3",
+      "@0x_Ecko",
+      "@lordsnowone",
+      "@haider_103",
+      "@BkCryp0786",
+      "@chinese_devil",
+      "@14NV__",
+      "@Retard589",
+      "@0xmahdishadow",
+      "@HHisnothing",
+      "@Abdulla8187",
+      "@Sdyahaya_",
+      "@freshguy789857",
+      "@heisastaX",
+      "@gy_vhh82812",
+      "@Mastuurah_",
+      "@togisahil1",
+      "@Iamsmart238",
+      "@sangminyu3",
+      "@archie_eth27",
+      "@EAsuperstar",
+      "@Sadiqjhussaini0",
+      "@dmoonguy",
+      "@kerlve",
+      "@feurimas10",
+      "@alfuratyalatiqe",
+      "@tricia4644",
+      "@0xjason3333",
+      "@moomoneymeta",
+      "@SolTheGr8",
+      "@tang__kira",
+      "@0xSourav_",
+      "@0xAleexx",
+      "@Gengui25106320",
+      "@RussellQuantum",
+      "@Mark_A78",
+      "@Proof__Seeker",
+      "@Tessara_C",
+      "@raztradesz",
+      "@adeniyiontwit",
+      "@Hancrypto_2fa",
+      "@eddiecrypt1",
+      "@Shola478",
+      "@gokorea2022",
+      "@btchiim",
+      "@heyvaro",
+      "@aboy1134",
+      "@peanutphan_eth",
+      "@AvaLuna28",
+      "@Parkerxbtc",
+      "@arescoins",
+      "@sabirraza33",
+      "@EErinmez82864",
+      "@Johnyy_bravooo",
+      "@0xRyze",
+      "@Huynhcongduy3",
+      "@xiaoQeth",
+      "@pygroxe",
+      "@Mainmijo",
+      "@EmlexNiSeh",
+      "@Olivelinex",
+      "@AYOMI40",
+      "@suryawanshi_pr",
+      "@GagantuaWEB3",
+      "@johnkelly639934",
+      "@Mark_Swago",
+      "@societyhatemafe",
+      "@fredkaff",
+      "@BearDegen_eth",
+      "@BlackBullweb3",
+      "@needazar",
+      "@Mrho3in1sti",
+      "@MichOkings",
+      "@ofcnewyorkers",
+      "@king_web3g",
+      "@D4rylf",
+      "@noorofweb3",
+      "@wizzybanks26",
+      "@crypto_milu",
+      "@DtCryptoo",
+      "@sykn1977",
+      "@habercimcum",
+      "@NenitoCrypto",
+      "@Lajay99",
+      "@aad2degen",
+      "@Jonny_Gram0X",
+      "@JARMIU9",
+      "@NeverGiveUp868",
+      "@maybach_eth",
+      "@chime1813559",
+      "@QwezhangPlm",
+      "@mdkitchen7",
+      "@Madrii_dd",
+      "@Yasmina_sm",
+      "@justonedave_1",
+      "@vtn1508",
+      "@TweetsbyXV",
+      "@bella_summerss",
+      "@Web3_boss",
+      "@smol244",
+      "@jayjay_md231",
+      "@WombatJin87",
+      "@necheobay",
+      "@Crypt0_Birds",
+      "@ohmahahm",
+      "@Nixiweb3",
+      "@ayhankayan_",
+      "@mahogany0609",
+      "@TessyWeb3",
+      "@NFTANONYMO",
+      "@muhammadatiqim",
+      "@frogmanhaha",
+      "@phamtoi678",
+      "@Damos20820110",
+      "@tamonex2000",
+      "@hunt14008",
+      "@whoiswannie",
+      "@HaykinsTaiwo",
+      "@MehmetBerkErgin",
+      "@VaultWatcher",
+      "@Pgreat120",
+      "@bachkhoabnb",
+      "@Geta_Boshi_",
+      "@BlessedPharm",
+      "@_owletto",
+      "@bethelO723",
+      "@nakoshisss",
+      "@kaswizofficial",
+      "@dominicsol_",
+      "@_OneOrTwo",
+      "@CryptoKrexxt",
+      "@DannyP1333",
+      "@0xJoseDinero",
+      "@mel_sol1",
+      "@JessyPineault",
+      "@servermonk15",
+      "@shalom_web3",
+      "@CoinTivars",
+      "@Manazrealfact",
+      "@Raven0nX",
+      "@sirkparaka",
+      "@omotolarideon",
+      "@DeNostradameX",
+      "@Sana_pht",
+      "@Zahra_udaw",
+      "@AMBASSADOR10X",
+      "@0xUzman",
+      "@Jvstheman",
+      "@Doppelganger_OX",
+      "@WTF_Rehanuwn",
+      "@abrahamgambler",
+      "@TheGo2Guy",
+      "@CryptoEarner12",
+      "@louieggonx",
+      "@iRalmix",
+      "@OxbigSam",
+      "@0xAstrokid69",
+      "@AJMetaX1",
+      "@Raihan_Offcial1",
+      "@KINGMAROHQ",
+      "@seikolambo19",
+      "@Maidatacrypto",
+      "@pelscrypt",
+      "@0xDenis__",
+      "@fhecat",
+      "@Menionchain",
+      "@0xRallas"
+    ],
+    "category": "Audience Builder",
+    "accessTier": "paid",
+    "description": "High-weight accounts for maximum Sorsa Score multiplier (Pro Plan)."
   },
-  audienceList2: {
-    id: 'audienceList2',
-    name: 'Tech Founders & Angel VCs',
-    category: 'Audience Builder',
-    status: 'published',
-    accessTier: 'paid',
-    listUrl: '',
-    targets: [
-      '@elonmusk', '@sama', '@paulg', '@balajis', '@brian_armstrong',
-      '@naval', '@pmarca', '@garrytan', '@levie', '@satyanadella',
-      '@sundarpichai', '@shl', '@levelsio', '@tobi', '@dharmesh',
-      '@cdixon', '@jason', '@rabois', '@alexisohanian', '@Austen'
-    ]
+  "sorsaTier2": {
+    "id": "sorsaTier2",
+    "name": "Tier 2: High-Volume Ecosystem Projects",
+    "status": "published",
+    "listUrl": "",
+    "targets": [
+      "@ethereum",
+      "@solana",
+      "@base",
+      "@arbitrum",
+      "@ton_blockchain"
+    ],
+    "category": "Increase Sorsa Score",
+    "accessTier": "free",
+    "description": "Official ecosystem foundations and protocol accounts (Free Plan)."
   },
-  sorsaTier1: {
-    id: 'sorsaTier1',
-    name: 'Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)',
-    category: 'Increase Sorsa Score',
-    status: 'published',
-    accessTier: 'paid',
-    listUrl: '',
-    targets: [
-      '@cz_binance', '@brian_armstrong', '@aeyakovenko', '@staniKulechov', '@haydenzadams',
-      '@vitalikbuterin', '@balajis', '@mertmumtaz', '@sreeramkannan', '@shawmakesmagic',
-      '@sassal0x', '@cobie', '@inversebrah', '@zachxbt', '@hosseeb',
-      '@ercwl', '@hasufl', '@danrobinson', '@bantg', '@Rewkang'
-    ]
+  "audienceList1": {
+    "id": "audienceList1",
+    "name": "Web3 & Crypto Alpha Hunters",
+    "status": "published",
+    "listUrl": "",
+    "targets": [
+      "@evanjawadx",
+      "@vitalikbuterin",
+      "@sassal0x",
+      "@cobie",
+      "@inversebrah",
+      "@garyvee",
+      "@brian_armstrong",
+      "@zachxbt",
+      "@balajis",
+      "@DeeZe",
+      "@cdixon",
+      "@realDonaldTrump",
+      "@osf_rekt",
+      "@rektmando",
+      "@LucaNetz",
+      "@jessepollak",
+      "@CapetainTrippy",
+      "@justinsuntron",
+      "@NathanHeadPhoto",
+      "@moonpay",
+      "@rajgokal",
+      "@waleswoosh",
+      "@TheShamdoo",
+      "@a1lon9",
+      "@NFTPrince",
+      "@Swickie",
+      "@TuckerCarlson",
+      "@scott_lew_is",
+      "@BalouBAYC",
+      "@qrimeCapital",
+      "@MrMetaMask",
+      "@YatMuseum",
+      "@AshleyDCan",
+      "@Lakoz_",
+      "@ArtOnInternet",
+      "@wallstreetbets",
+      "@topshotfund",
+      "@tonyherrera",
+      "@rekt2160",
+      "@Zaptio",
+      "@deltasauce",
+      "@allodev",
+      "@beautyandpunk",
+      "@halecar2",
+      "@alexmccurryo",
+      "@racs_o",
+      "@AaronHaber",
+      "@slimesunday",
+      "@IDerech",
+      "@NaughtalieStone",
+      "@NFTignition",
+      "@UnknownCo123",
+      "@Treasure_DAO",
+      "@justinkalland",
+      "@NFTparent",
+      "@bitcoinprophet1",
+      "@hypercryptology",
+      "@jed_131",
+      "@seyong",
+      "@bgarlinghouse",
+      "@degens",
+      "@Foryet2",
+      "@KyleRiggins",
+      "@CrazyCryptoCarl",
+      "@CaballeroAnaMa",
+      "@KRAM_btc",
+      "@aljaparis",
+      "@AndrewAsksHow",
+      "@CNN",
+      "@AzFlin",
+      "@RENGA_inc",
+      "@Ryder3332",
+      "@Bored_Bill_86",
+      "@NFTMillionaire",
+      "@dotjiwa",
+      "@MightyDylanK",
+      "@mutant_cartel",
+      "@Jayism1",
+      "@sicko_ape",
+      "@cryptojeweler",
+      "@leiane1",
+      "@ChartFu",
+      "@jump_",
+      "@jeremyknowsVF",
+      "@0xmozzy",
+      "@PythNetwork",
+      "@dripbitsnft",
+      "@nelsphere",
+      "@Sanza",
+      "@MetaverseWorld",
+      "@kyokill_",
+      "@token2049",
+      "@_VLaaD_",
+      "@22loops",
+      "@LazyLionsNFT",
+      "@wildalps",
+      "@davekebo",
+      "@MoneyPlaneIdol",
+      "@MEXC",
+      "@Lucky1seth",
+      "@vibevibefun",
+      "@pauleta231",
+      "@0x1_0NE"
+    ],
+    "category": "Audience Builder",
+    "accessTier": "free",
+    "description": "Curated list of high-affinity Web3 researchers and alpha accounts."
   },
-  sorsaTier2: {
-    id: 'sorsaTier2',
-    name: 'Tier 2: High-Volume Ecosystem Projects',
-    category: 'Increase Sorsa Score',
-    status: 'published',
-    accessTier: 'free',
-    listUrl: '',
-    targets: [
-      '@ethereum', '@solana', '@base', '@arbitrum', '@ton_blockchain',
-      '@optimism', '@polygon', '@avalancheavax', '@binance', '@coinbase',
-      '@uniswap', '@aave', '@chainlink', '@monad_xyz', '@berachain',
-      '@eigenlayer', '@hyperliquidX', '@JupiterExchange', '@RaydiumProtocol'
-    ]
+  "audienceList2": {
+    "id": "audienceList2",
+    "name": "Tech Founders & Angel VCs",
+    "status": "published",
+    "listUrl": "",
+    "targets": [],
+    "category": "Audience Builder",
+    "accessTier": "paid",
+    "description": "High-tier venture builders and angel investors on X (Pro Plan)."
   },
-  followerList1: {
-    id: 'followerList1',
-    name: 'Viral Community Discussion Hubs',
-    category: 'Followers Increase',
-    status: 'published',
-    accessTier: 'free',
-    listUrl: '',
-    targets: [
-      '@CryptoTownHall', '@web3comm', '@SolanaDaily', '@VitalikButerin',
-      '@cz_binance', '@brian_armstrong', '@aeyakovenko', '@binance',
-      '@coinbase', '@CoinMarketCap', '@coingecko', '@BanklessHQ',
-      '@DefiLlama', '@WatcherGuru', '@tier10k'
-    ]
+  "followerList1": {
+    "id": "followerList1",
+    "name": "Viral Community Discussion Hubs",
+    "status": "published",
+    "listUrl": "",
+    "targets": [
+      "@CryptoTownHall",
+      "@web3comm",
+      "@SolanaDaily",
+      "@VitalikButerin"
+    ],
+    "category": "Followers Increase",
+    "accessTier": "free",
+    "description": "Busy discussion threads for capturing engaged niche followers (Free Plan)."
+  },
+  "custom_1791405854821": {
+    "id": "custom_1791405854821",
+    "name": "Sorsa Free",
+    "status": "published",
+    "listUrl": "",
+    "targets": [
+      "@Parkerxbtc",
+      "@arescoins",
+      "@sabirraza33",
+      "@EErinmez82864",
+      "@Johnyy_bravooo",
+      "@0xRyze",
+      "@Huynhcongduy3",
+      "@xiaoQeth",
+      "@pygroxe",
+      "@Mainmijo",
+      "@EmlexNiSeh",
+      "@Olivelinex",
+      "@AYOMI40",
+      "@suryawanshi_pr",
+      "@GagantuaWEB3",
+      "@johnkelly639934",
+      "@Mark_Swago",
+      "@societyhatemafe",
+      "@fredkaff",
+      "@BearDegen_eth",
+      "@BlackBullweb3",
+      "@needazar",
+      "@Mrho3in1sti",
+      "@MichOkings",
+      "@ofcnewyorkers",
+      "@king_web3g",
+      "@D4rylf",
+      "@noorofweb3",
+      "@wizzybanks26",
+      "@crypto_milu",
+      "@DtCryptoo",
+      "@sykn1977",
+      "@habercimcum",
+      "@NenitoCrypto",
+      "@Lajay99",
+      "@aad2degen",
+      "@Jonny_Gram0X",
+      "@JARMIU9",
+      "@NeverGiveUp868",
+      "@maybach_eth",
+      "@chime1813559",
+      "@QwezhangPlm",
+      "@mdkitchen7",
+      "@Madrii_dd",
+      "@Yasmina_sm",
+      "@justonedave_1",
+      "@vtn1508",
+      "@TweetsbyXV",
+      "@bella_summerss",
+      "@Web3_boss",
+      "@smol244",
+      "@jayjay_md231",
+      "@WombatJin87",
+      "@necheobay",
+      "@Crypt0_Birds",
+      "@ohmahahm",
+      "@Nixiweb3",
+      "@ayhankayan_",
+      "@mahogany0609",
+      "@TessyWeb3",
+      "@NFTANONYMO",
+      "@muhammadatiqim",
+      "@frogmanhaha",
+      "@phamtoi678",
+      "@Damos20820110",
+      "@tamonex2000",
+      "@hunt14008",
+      "@whoiswannie",
+      "@HaykinsTaiwo",
+      "@MehmetBerkErgin",
+      "@VaultWatcher",
+      "@Pgreat120",
+      "@bachkhoabnb",
+      "@Geta_Boshi_",
+      "@BlessedPharm",
+      "@_owletto",
+      "@bethelO723",
+      "@nakoshisss",
+      "@kaswizofficial",
+      "@dominicsol_",
+      "@_OneOrTwo",
+      "@CryptoKrexxt",
+      "@DannyP1333",
+      "@0xJoseDinero",
+      "@mel_sol1",
+      "@JessyPineault",
+      "@servermonk15",
+      "@shalom_web3",
+      "@CoinTivars",
+      "@Manazrealfact",
+      "@Raven0nX",
+      "@sirkparaka",
+      "@omotolarideon",
+      "@DeNostradameX",
+      "@Sana_pht",
+      "@Zahra_udaw",
+      "@AMBASSADOR10X",
+      "@0xUzman",
+      "@Jvstheman",
+      "@Doppelganger_OX",
+      "@WTF_Rehanuwn",
+      "@abrahamgambler",
+      "@TheGo2Guy",
+      "@CryptoEarner12",
+      "@louieggonx",
+      "@iRalmix",
+      "@OxbigSam",
+      "@0xAstrokid69",
+      "@AJMetaX1",
+      "@Raihan_Offcial1",
+      "@KINGMAROHQ",
+      "@seikolambo19",
+      "@Maidatacrypto",
+      "@pelscrypt",
+      "@0xDenis__",
+      "@fhecat",
+      "@Menionchain",
+      "@0xRallas"
+    ],
+    "category": "Increase Sorsa Score",
+    "rankRange": "Rank 2777–2894",
+    "accessTier": "free",
+    "description": "Admin imported list with 118 verified creators (Rank 2777–2894)."
+  },
+  "audienceList1": {
+    "id": "audienceList1",
+    "name": "High Alpha Web3 Builders List",
+    "category": "Audience Builder",
+    "status": "published",
+    "listUrl": "https://x.com/i/lists/2103557569319219223",
+    "targets": [],
+    "accessTier": "free",
+    "description": "Live Twitter list of active Web3 builders and high-engagement commenters."
+  },
+  "followerList1": {
+    "id": "followerList1",
+    "name": "Crypto Growth & KOLs Active List",
+    "category": "Followers Increase",
+    "status": "published",
+    "listUrl": "https://x.com/i/lists/2103557569319219223",
+    "targets": [],
+    "accessTier": "free",
+    "description": "Curated Twitter list for active organic follower growth."
   }
 };
 
@@ -2479,33 +3578,41 @@ function populateAudienceSelect() {
   select.innerHTML = '';
   const keys = Object.keys(lists);
   let foundAny = false;
+  let firstAccessibleKey = null;
 
   keys.forEach((k) => {
     const item = lists[k];
-    const isPublished = (item.status || 'published') === 'published';
-    if (item.category === 'Audience Builder' && isPublished) {
+    const isPublished = (item.status || 'published') === 'published' || (item.status || '').toLowerCase() === 'live';
+    const isAudience = item.category === 'Audience Builder' || /audience/i.test(item.category || '');
+    const validListUrl = item.listUrl && extractTwitterListUrl(item.listUrl);
+    // STRICT RULE: Audience Builder ONLY accepts Twitter List URLs (no handles or CSV)
+    if (isAudience && isPublished && validListUrl) {
       foundAny = true;
       const reqTier = (item.accessTier || 'free').toLowerCase();
       const userCanAccess = canUserAccessTier(state.userPlan, reqTier);
+      if (userCanAccess && !firstAccessibleKey) {
+        firstAccessibleKey = k;
+      }
       const opt = document.createElement('option');
       opt.value = k;
-      const targetCount = (item.targets || []).length;
-      opt.textContent = `${!userCanAccess ? `🔒 [${reqTier.toUpperCase()} ONLY] ` : '⭐ '}${item.name} (${targetCount} Targets${reqTier !== 'free' ? ` · ${reqTier.toUpperCase()}` : ''})`;
+      const shortName = item.name.replace(/^List \d+:\s*/i, '').replace(/\s*\(Score Multiplier \d+x\)/i, '').trim();
+      const prefix = !userCanAccess ? `🔒 [${reqTier.toUpperCase()}] ` : '⭐ ';
+      opt.textContent = `${prefix}${shortName} (Twitter List URL)`;
       select.appendChild(opt);
     }
   });
 
-  if (!foundAny) {
-    select.innerHTML = `
-      <option value="audienceList1">⭐ Web3 & Crypto Alpha Hunters (Curated)</option>
-      <option value="audienceList2">🔒 [PRO ONLY] Tech Founders & Angel VCs (Curated · Pro)</option>
-    `;
-  }
-
   const customOpt = document.createElement('option');
   customOpt.value = 'custom';
-  customOpt.textContent = '➕ Add Your Own Custom Twitter List URL or Handles';
+  customOpt.textContent = '➕ Custom Twitter List URL...';
   select.appendChild(customOpt);
+
+  const targetToSelect = firstAccessibleKey || (foundAny ? select.options[0]?.value : 'custom');
+  if (targetToSelect) {
+    select.value = targetToSelect;
+    const box = document.getElementById('customListUrlBox');
+    if (box) box.style.display = targetToSelect === 'custom' ? 'block' : 'none';
+  }
 }
 
 async function initAudienceBuilderSystem() {
@@ -2596,6 +3703,9 @@ async function initAudienceBuilderSystem() {
         if (s.delaySec && document.getElementById('audienceDelaySelect')) {
           document.getElementById('audienceDelaySelect').value = s.delaySec;
         }
+        if (typeof s.autoFollow !== 'undefined' && document.getElementById('audienceAutoFollowToggle')) {
+          document.getElementById('audienceAutoFollowToggle').checked = s.autoFollow;
+        }
         if (typeof s.likePosts !== 'undefined' && document.getElementById('audienceLikePostsToggle')) {
           document.getElementById('audienceLikePostsToggle').checked = s.likePosts;
         }
@@ -2610,8 +3720,29 @@ async function initAudienceBuilderSystem() {
   }
 }
 
+function loadSorsaCuratedList(listKey) {
+  const textarea = document.getElementById('sorsaHandlesInput');
+  const badge = document.getElementById('sorsaParsedCountBadge');
+  if (!textarea) return;
+
+  if (!listKey || listKey === 'custom') {
+    return;
+  }
+
+  const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
+  const item = lists[listKey];
+  if (item && Array.isArray(item.targets) && item.targets.length > 0) {
+    textarea.value = item.targets.join(', ');
+    const count = item.targets.length;
+    if (badge) badge.textContent = `${count} accounts ready (${item.name})`;
+    showExtToast(`Loaded ${count} accounts (${item.name})`, '⭐');
+  } else {
+    if (badge) badge.textContent = `0 accounts ready`;
+  }
+}
+
 function initSorsaScoreSystem() {
-  const select = document.getElementById('sorsaTierSelect');
+  const select = document.getElementById('sorsaCuratedListSelect') || document.getElementById('sorsaTierSelect');
   if (!select) return;
 
   const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
@@ -2622,8 +3753,12 @@ function initSorsaScoreSystem() {
   select.innerHTML = '';
   keys.forEach((k) => {
     const item = lists[k];
-    const isPublished = (item.status || 'published') === 'published';
-    if (item.category === 'Increase Sorsa Score' && isPublished) {
+    const isPublished = (item.status || 'published') === 'published' || (item.status || '').toLowerCase() === 'live';
+    const isSorsa = item.category === 'Increase Sorsa Score' || item.category === 'Sorsa Score' || /sorsa/i.test(item.category || '');
+    const hasTargets = Array.isArray(item.targets) && item.targets.length > 0;
+    const hasNoListUrl = !item.listUrl || !extractTwitterListUrl(item.listUrl);
+    // STRICT RULE: Increase Sorsa Score ONLY accepts username targets / CSV (NO Twitter List URLs)
+    if (isSorsa && isPublished && hasTargets && hasNoListUrl) {
       hasPublished = true;
       const reqTier = (item.accessTier || 'free').toLowerCase();
       const userCanAccess = canUserAccessTier(state.userPlan, reqTier);
@@ -2633,21 +3768,22 @@ function initSorsaScoreSystem() {
       const opt = document.createElement('option');
       opt.value = k;
       const targetCount = (item.targets || []).length;
-      opt.textContent = `${!userCanAccess ? `🔒 [${reqTier.toUpperCase()} ONLY] ` : '⭐ '}${item.name} (${targetCount} Targets${reqTier !== 'free' ? ` · ${reqTier.toUpperCase()}` : ''})`;
+      const shortName = item.name.replace(/\s*\(Score Multiplier \d+x\)/i, '').replace(/Admin imported list with \d+ verified creators/i, '').trim();
+      const prefix = !userCanAccess ? `🔒 [${reqTier.toUpperCase()}] ` : '⭐ ';
+      opt.textContent = `${prefix}${shortName} (${targetCount} Accounts)`;
       select.appendChild(opt);
     }
   });
 
-  if (!hasPublished) {
-    select.innerHTML = `
-      <option value="sorsaTier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
-      <option value="sorsaTier1">🔒 [PRO ONLY] Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x · Pro)</option>
-    `;
-    firstAccessibleKey = 'sorsaTier2';
-  }
+  const sorsaCustomOpt = document.createElement('option');
+  sorsaCustomOpt.value = 'custom';
+  sorsaCustomOpt.textContent = '✍️ Custom Input / Upload .CSV';
+  select.appendChild(sorsaCustomOpt);
 
-  if (firstAccessibleKey && (!state.userPlan || state.userPlan.toLowerCase() === 'free')) {
-    select.value = firstAccessibleKey;
+  const targetToSelect = firstAccessibleKey || (hasPublished ? select.options[0]?.value : 'custom');
+  if (targetToSelect && targetToSelect !== 'custom') {
+    select.value = targetToSelect;
+    loadSorsaCuratedList(targetToSelect);
   }
 }
 
@@ -2656,60 +3792,67 @@ function initFollowersListsSystem() {
   if (!select) return;
 
   const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
-  const standardOptions = [
-    { val: 'crypto', text: '🌐 Crypto & Web3 Discussions' },
-    { val: 'ai', text: '🤖 AI Agents & Autonomous Tech' },
-    { val: 'founders', text: '🚀 Startups & Founders (Build in Public)' },
-    { val: 'solana', text: '⚡ Solana Ecosystem Discussions' }
-  ];
-
   select.innerHTML = '';
-  standardOptions.forEach(opt => {
-    const el = document.createElement('option');
-    el.value = opt.val;
-    el.textContent = opt.text;
-    select.appendChild(el);
-  });
+  let foundAny = false;
+  let firstAccessibleKey = null;
 
   Object.keys(lists).forEach((k) => {
     const item = lists[k];
-    const isPublished = (item.status || 'published') === 'published';
-    if (item.category === 'Followers Increase' && isPublished) {
+    const isPublished = (item.status || 'published') === 'published' || (item.status || '').toLowerCase() === 'live';
+    const isFollowers = item.category === 'Followers Increase' || item.category === 'Followers Growth' || /follower/i.test(item.category || '');
+    const validListUrl = item.listUrl && extractTwitterListUrl(item.listUrl);
+    // STRICT RULE: Followers Increase ONLY accepts Twitter List URLs (no handles or CSV)
+    if (isFollowers && isPublished && validListUrl) {
+      foundAny = true;
       const reqTier = (item.accessTier || 'free').toLowerCase();
       const userCanAccess = canUserAccessTier(state.userPlan, reqTier);
+      if (userCanAccess && !firstAccessibleKey) {
+        firstAccessibleKey = k;
+      }
       const el = document.createElement('option');
       el.value = k;
-      const targetCount = (item.targets || []).length;
-      el.textContent = `${!userCanAccess ? `🔒 [${reqTier.toUpperCase()} ONLY] ` : '⭐ '}${item.name} (${targetCount} Targets${reqTier !== 'free' ? ` · ${reqTier.toUpperCase()}` : ''})`;
+      const prefix = !userCanAccess ? `🔒 [${reqTier.toUpperCase()}] ` : '⭐ ';
+      el.textContent = `${prefix}${item.name} (Twitter List URL)`;
       select.appendChild(el);
     }
   });
+
+  const followerCustomOpt = document.createElement('option');
+  followerCustomOpt.value = 'custom';
+  followerCustomOpt.textContent = '➕ Add Your Own Custom Twitter List';
+  select.appendChild(followerCustomOpt);
+
+  const targetToSelect = firstAccessibleKey || (foundAny ? select.options[0]?.value : 'custom');
+  if (targetToSelect) {
+    select.value = targetToSelect;
+    const box = document.getElementById('customFollowerUrlBox');
+    if (box) box.style.display = targetToSelect === 'custom' ? 'block' : 'none';
+  }
 }
 
+// =========================================================================
+// AGENT 1: AUDIENCE BUILDER WORKFLOW ENGINE (A2, GROWTH, LIST ONLY)
+// =========================================================================
 async function startAudienceBuilderWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
 
-  const listSelect = document.getElementById('audienceListSelect')?.value || 'audienceList1';
-  const dateRange = document.getElementById('audienceDateRangeSelect')?.value || '24h';
-  const sortBy = document.getElementById('audienceSortBySelect')?.value || 'replies';
-  const targetCount = Number(document.getElementById('audienceTargetCountSelect')?.value || 10);
-  const delaySelVal = document.getElementById('audienceDelaySelect')?.value || '15';
-  const delaySec = delaySelVal === 'custom'
-    ? (Number(document.getElementById('audienceCustomDelayInput')?.value) || 15)
-    : (Number(delaySelVal) || 15);
-  const likePosts = document.getElementById('audienceLikePostsToggle')?.checked ?? true;
-  const replyPosts = document.getElementById('audienceReplyPostsToggle')?.checked ?? true;
-  const autoUnfollow = document.getElementById('audienceUnfollowToggle')?.checked ?? false;
-
-  // Persist settings immediately
-  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-    chrome.storage.local.set({
-      atomx_audience_settings: { listKey: listSelect, dateRange, sortBy, targetCount, delaySec, likePosts, replyPosts, autoUnfollow }
-    });
+  if (state.credits < 1) {
+    alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to run Audience Builder. Please top up in the Credits tab.`);
+    switchExtTab('credits');
+    return;
   }
 
-  // Check Plan access BEFORE toggling UI
-  if (listSelect !== 'custom') {
+  const listSelect = document.getElementById('audienceListSelect')?.value || 'custom';
+  let targetUrl = '';
+
+  if (listSelect === 'custom') {
+    const rawCustom = (document.getElementById('customListUrlInput')?.value || '').trim();
+    targetUrl = extractTwitterListUrl(rawCustom);
+    if (!targetUrl) {
+      alert('⚠️ Audience Builder ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223).\n\nCSV files and usernames are not supported for this agent.');
+      return;
+    }
+  } else {
     const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect];
     const reqTier = (curated?.accessTier || 'free').toLowerCase();
     if (reqTier !== 'free' && !canUserAccessTier(state.userPlan, reqTier)) {
@@ -2717,363 +3860,102 @@ async function startAudienceBuilderWorkflow() {
       switchExtTab('credits');
       return;
     }
+    targetUrl = extractTwitterListUrl(curated?.listUrl || curated?.url);
+    if (!targetUrl) {
+      alert('⚠️ Selected list does not have a valid Twitter List URL.\n\nAudience Builder ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223). CSV files and usernames are not supported.');
+      return;
+    }
   }
 
-  if (state.credits < 1) {
-    alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to follow active accounts, but you have ${state.credits}.\nPlease top up credits.`);
-    switchExtTab('credits');
+  const freshness = document.getElementById('audienceDateRangeSelect')?.value || '2h';
+  const targetCount = Number(document.getElementById('audienceTargetCountSelect')?.value || 10);
+  const postsPerProfile = document.getElementById('audiencePostsPerProfileSelect')?.value || 'random';
+
+  const likePosts = document.getElementById('audienceLikePostsToggle')?.checked ?? true;
+  const replyPosts = document.getElementById('audienceReplyPostsToggle')?.checked ?? true;
+  const repostPosts = document.getElementById('audienceRepostToggle')?.checked ?? false;
+  const autoFollow = document.getElementById('audienceAutoFollowToggle')?.checked ?? false;
+
+  if (!likePosts && !replyPosts && !repostPosts && !autoFollow) {
+    alert('⚠️ Please select at least one action (❤️ Like, 💬 Comment, 🔁 Repost, or ➕ Follow).');
     return;
+  }
+
+  // Persist settings
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({
+      atomx_audience_settings: {
+        listSelect,
+        targetUrl,
+        freshness,
+        targetCount,
+        postsPerProfile,
+        likePosts,
+        replyPosts,
+        repostPosts,
+        autoFollow
+      }
+    });
   }
 
   const startBtn = document.getElementById('runAudienceBuilderBtn');
   const stopBtn = document.getElementById('stopAudienceBuilderBtn');
   const progressCard = document.getElementById('audienceProgressCard');
   const stateBadge = document.getElementById('audienceStateBadge');
-  const titleEl = document.getElementById('audienceProgressTitle');
-  const queueIndicator = document.getElementById('audienceQueueIndicator');
-  const doneEl = document.getElementById('audienceDoneCount');
-  const colEl = document.getElementById('audienceCollectedCount');
-  const skipEl = document.getElementById('audienceSkippedCount');
-  const barEl = document.getElementById('audienceProgressBar');
   const statusText = document.getElementById('audienceLiveStatusText');
-  const countdownEl = document.getElementById('audienceCountdownText');
 
   state.isAborted = false;
   state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
+  if (stateBadge) stateBadge.textContent = 'SCANNING';
+  if (statusText) statusText.textContent = 'Opening Twitter List to discover top engaged tweets & commenters...';
 
   syncFloatingHud(null, {
     title: 'Audience Builder',
-    stateBadge: 'COLLECTING',
-    indicator: `Profile 0/${targetCount}`,
+    stateBadge: 'SCANNING',
+    indicator: `0/${targetCount}`,
     done: 0,
-    collected: 0,
+    collected: targetCount,
     skipped: 0,
     progressPercent: 5,
-    statusText: 'Resolving target accounts for audience collection...'
+    statusText: 'Opening Twitter List to discover top engaged tweets & commenters...'
   });
 
-  // Load existing followed IDs & counters
-  const storageData = await new Promise(r => {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      chrome.storage.local.get(['atomx_audience_followed_ids', 'atomx_audience_counters'], r);
-    } else {
-      r({});
-    }
-  });
-
-  const followedSet = new Set((storageData.atomx_audience_followed_ids || []).map(h => h.toLowerCase()));
-  let doneCount = 0;
-  let skippedCount = 0;
-  let collectedCount = 0;
-
-  if (doneEl) doneEl.textContent = '0';
-  if (colEl) colEl.textContent = '0';
-  if (skipEl) skipEl.textContent = '0';
-  if (barEl) barEl.style.width = '0%';
-  if (countdownEl) countdownEl.style.display = 'none';
-
-  if (stateBadge) stateBadge.textContent = 'LIST_SELECTED';
-  if (titleEl) titleEl.textContent = 'Audience Builder';
-  if (statusText) statusText.textContent = `Resolving target accounts for audience collection...`;
-  if (barEl) barEl.style.width = '10%';
-
-  let shouldCloseWorkingTab = false;
-
-  try {
-    let collectedProfiles = [];
-    const collectedHandles = new Set();
-    const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
-
-    // 1. If user entered explicit comma-separated handles in custom mode, use them directly
-    if (listSelect === 'custom') {
-      const rawCustomUrl = document.getElementById('customListUrlInput')?.value.trim() || '';
-      if (rawCustomUrl && !rawCustomUrl.includes('x.com') && !rawCustomUrl.includes('twitter.com') && !rawCustomUrl.includes('/')) {
-        const extractedHandles = rawCustomUrl
-          .split(/[\s,]+/)
-          .map(h => h.replace(/^@/, '').trim())
-          .filter(h => h && /^[A-Za-z0-9_]{1,25}$/.test(h));
-        for (const h of extractedHandles) {
-          if (collectedProfiles.length >= targetCount) break;
-          const lower = h.toLowerCase();
-          if (lower !== loggedInHandle && !collectedHandles.has(lower) && !followedSet.has(lower)) {
-            collectedHandles.add(lower);
-            collectedProfiles.push({
-              cleanHandle: h,
-              handle: `@${h}`,
-              name: h
-            });
-          }
-        }
-      }
-    }
-
-    if (colEl) colEl.textContent = collectedProfiles.length;
-
-    // 2. Resolve from curated list targets
-    if (collectedProfiles.length < targetCount) {
-      const curated = state.curatedLists?.[listSelect] || FALLBACK_CURATED_LISTS[listSelect] || FALLBACK_CURATED_LISTS.audienceList1;
-      const rawTargets = curated?.targets || FALLBACK_CURATED_LISTS.audienceList1.targets || [];
-      const cleanTargets = rawTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
-      for (const h of cleanTargets) {
-        if (collectedProfiles.length >= targetCount) break;
-        const lower = h.toLowerCase();
-        if (lower !== loggedInHandle && !collectedHandles.has(lower) && !followedSet.has(lower)) {
-          collectedHandles.add(lower);
-          collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
-        }
-      }
-    }
-
-    collectedCount = collectedProfiles.length;
-    if (colEl) colEl.textContent = collectedCount;
-
-    if (collectedCount === 0) {
-      alert('⚠️ Could not find active creator profiles for Audience Builder. Please try another list.');
-      return;
-    }
-
-    if (stateBadge) stateBadge.textContent = 'RUNNING';
-    if (barEl) barEl.style.width = '10%';
-    if (statusText) statusText.textContent = `Starting Audience Builder for ${collectedCount} accounts in background...`;
-    if (queueIndicator) queueIndicator.textContent = `Profile 1/${collectedCount}`;
-
-    syncFloatingHud(null, {
-      title: 'Audience Builder',
-      stateBadge: 'ENGAGING',
-      indicator: `Profile 0/${collectedCount}`,
-      done: 0,
-      collected: collectedCount,
-      skipped: 0,
-      progressPercent: 5,
-      statusText: `Starting Audience Builder for ${collectedCount} accounts...`
-    });
-
-    // Delegate immediately to background service worker — survives extension popup closing!
-    const backendUrl = await getBackendUrl();
-    chrome.runtime.sendMessage({
-      type: 'BG_START_AGENT_WORKFLOW',
-      agentId: 'audience',
-      title: 'Audience Builder',
-      items: collectedProfiles,
-      options: {
-        delaySec,
-        likePosts,
-        replyPosts,
-        autoUnfollow,
-        style: state.selectedTone,
-        stylePrompt: state.selectedTonePrompt,
-        backendUrl
-      }
-    });
-    return;
-
-    async function runLocalAudienceLoop() {
-    // Phase D: Per-Profile Loop (CHECK_FOLLOWED → (LIKE → REPLY)? → FOLLOW → COUNTDOWN → next)
-    for (let i = 0; i < collectedCount; i++) {
-      if (state.isAborted) break;
-
-      const profile = collectedProfiles[i];
-      const progPercent = Math.round(40 + ((i + 1) / collectedCount) * 60);
-      if (barEl) barEl.style.width = `${progPercent}%`;
-      if (queueIndicator) queueIndicator.textContent = `Profile ${i + 1}/${collectedCount}`;
-
-      // Check if already followed in history
-      if (followedSet.has(profile.cleanHandle.toLowerCase())) {
-        skippedCount++;
-        if (skipEl) skipEl.textContent = skippedCount;
-        if (stateBadge) stateBadge.textContent = 'SKIPPED';
-        if (statusText) statusText.textContent = `@${profile.cleanHandle} already in followed history (Skipped).`;
-
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-          chrome.storage.local.set({
-            atomx_audience_queue_pos: i + 1,
-            atomx_audience_counters: { done: doneCount, collected: collectedCount, skipped: skippedCount }
-          });
-        }
-        await sleep(600);
-        continue;
-      }
-
-      // STATE: CHECK_FOLLOWED
-      if (stateBadge) stateBadge.textContent = 'CHECK_FOLLOWED';
-      if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
-
-      syncFloatingHud(audienceWorkingTabId, {
-        title: 'Audience Builder',
-        stateBadge: 'VISITING',
-        indicator: `Profile ${i + 1}/${collectedCount}`,
-        done: doneCount,
-        collected: collectedCount,
-        skipped: skippedCount,
-        progressPercent: progPercent,
-        statusText: `Visiting @${profile.cleanHandle}...`
-      });
-
-      try {
-        if (!audienceWorkingTabId) {
-          const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
-          audienceWorkingTabId = newTab.id;
-          shouldCloseWorkingTab = true;
-        } else {
-          await chrome.tabs.update(audienceWorkingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
-        }
-        await waitForTabComplete(audienceWorkingTabId);
-        await sleep(2000);
-
-        if (state.isAborted) break;
-
-        // Perform engagement and follow on profile page
-        if (likePosts || replyPosts) {
-          if (stateBadge) stateBadge.textContent = 'ENGAGING';
-          if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Engaging @${profile.cleanHandle}'s recent posts...`;
-          syncFloatingHud(audienceWorkingTabId, {
-            title: 'Audience Builder',
-            stateBadge: 'ENGAGING',
-            indicator: `Profile ${i + 1}/${collectedCount}`,
-            done: doneCount,
-            collected: collectedCount,
-            skipped: skippedCount,
-            progressPercent: progPercent,
-            statusText: `Engaging @${profile.cleanHandle}...`
-          });
-        }
-
-        const backendUrl = await getBackendUrl();
-        const actionRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(audienceWorkingTabId, {
-            type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
-            handle: profile.cleanHandle,
-            likePosts,
-            replyPosts,
-            style: state.selectedTone,
-            stylePrompt: state.selectedTonePrompt,
-            backendUrl,
-            verifiedXHandle: state.verifiedXHandle
-          }, (res) => resolve(res || { success: false }));
-        });
-
-        if (actionRes?.rateLimited) {
-          state.isAborted = true;
-          break;
-        }
-
-        if (actionRes?.alreadyFollowing) {
-          skippedCount++;
-          if (skipEl) skipEl.textContent = skippedCount;
-          if (stateBadge) stateBadge.textContent = 'SKIPPED';
-          if (statusText) statusText.textContent = `Already following @${profile.cleanHandle} (Skipped).`;
-          followedSet.add(profile.cleanHandle.toLowerCase());
-          syncFloatingHud(audienceWorkingTabId, {
-            title: 'Audience Builder',
-            stateBadge: 'SKIPPED',
-            indicator: `Profile ${i + 1}/${collectedCount}`,
-            done: doneCount,
-            collected: collectedCount,
-            skipped: skippedCount,
-            progressPercent: progPercent,
-            statusText: `Already following @${profile.cleanHandle} (Skipped)`
-          });
-        } else if (actionRes?.followed) {
-          doneCount++;
-          if (doneEl) doneEl.textContent = doneCount;
-          if (stateBadge) stateBadge.textContent = 'FOLLOWED';
-          followedSet.add(profile.cleanHandle.toLowerCase());
-          deductCredits(1);
-          if (statusText) statusText.textContent = `✓ Followed @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
-          syncFloatingHud(audienceWorkingTabId, {
-            title: 'Audience Builder',
-            stateBadge: 'FOLLOWED',
-            indicator: `Profile ${i + 1}/${collectedCount}`,
-            done: doneCount,
-            collected: collectedCount,
-            skipped: skippedCount,
-            progressPercent: progPercent,
-            statusText: `✓ Followed @${profile.cleanHandle}!`
-          });
-        } else {
-          if (statusText) statusText.textContent = `Could not follow @${profile.cleanHandle}: ${actionRes?.error || 'Button not available'}`;
-        }
-
-        // Persist progress to local storage
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-          chrome.storage.local.set({
-            atomx_audience_followed_ids: Array.from(followedSet),
-            atomx_audience_queue_pos: i + 1,
-            atomx_audience_counters: { done: doneCount, collected: collectedCount, skipped: skippedCount }
-          });
-        }
-
-      } catch (pErr) {
-        console.warn('Error on profile action:', pErr);
-      }
-
-      // COUNTDOWN between profiles
-      if (i < collectedCount - 1 && !state.isAborted) {
-        if (stateBadge) stateBadge.textContent = 'COUNTDOWN';
-        if (countdownEl) countdownEl.style.display = 'inline-block';
-
-        for (let s = delaySec; s > 0; s--) {
-          if (state.isAborted) break;
-          const pad = s < 10 ? '0' + s : s;
-          if (countdownEl) countdownEl.textContent = `Next profile in 0:${pad}`;
-          syncFloatingHud(audienceWorkingTabId, {
-            statusText: `Next profile in 0:${pad}...`
-          });
-          await sleep(1000);
-        }
-        if (countdownEl) countdownEl.style.display = 'none';
-      }
-    }
-
-    // STATE: DONE
-    if (!state.isAborted) {
-      if (stateBadge) stateBadge.textContent = 'DONE';
-      if (barEl) barEl.style.width = '100%';
-      if (countdownEl) countdownEl.style.display = 'none';
-      if (statusText) statusText.textContent = `✓ Audience Builder Completed! Followed: ${doneCount}, Skipped: ${skippedCount}, Collected: ${collectedCount}.`;
-      syncFloatingHud(audienceWorkingTabId, {
-        title: 'Audience Builder',
-        stateBadge: 'DONE',
-        indicator: `Profile ${collectedCount}/${collectedCount}`,
-        done: doneCount,
-        collected: collectedCount,
-        skipped: skippedCount,
-        progressPercent: 100,
-        statusText: `✓ Audience Builder Completed!`,
-        isStopped: true
-      });
-      alert(`👥 Audience Builder Cycle Complete!\n\n• Profiles Collected: ${collectedCount}\n• New Accounts Followed: ${doneCount}\n• Accounts Skipped (Already Following): ${skippedCount}`);
-    }
-    }
-  } catch (err) {
-    console.error('Audience Builder error:', err);
-    alert('Audience Builder error: ' + err.message);
-  } finally {
-    if (startBtn) startBtn.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && audienceWorkingTabId) {
-      chrome.tabs?.remove(audienceWorkingTabId).catch(() => null);
-    }
-    audienceWorkingTabId = null;
+  const listId = extractTwitterListId(targetUrl);
+  let feedUrl = targetUrl;
+  if (listId) {
+    feedUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`;
   }
+
+  const backendUrl = await getBackendUrl();
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'audience',
+    title: 'Audience Builder',
+    items: [],
+    options: {
+      feedUrl,
+      targetListUrl: targetUrl,
+      listId,
+      targetCount,
+      freshness,
+      postsCount: postsPerProfile,
+      likePosts,
+      replyPosts,
+      repostPosts,
+      autoFollow,
+      backendUrl
+    }
+  });
 }
 
 // =========================================================================
-// AGENT 3: INCREASE SORSA SCORE WORKFLOW ENGINE (A3, POST-AUTHORS ONLY)
+// AGENT 3: INCREASE SORSA SCORE WORKFLOW ENGINE (CSV & USERNAMES ONLY)
 // =========================================================================
 async function startSorsaScoreBoosterWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
-
-  const tier = document.getElementById('sorsaTierSelect')?.value || 'tier1';
-  const tone = document.getElementById('sorsaToneSelect')?.value || 'technical';
-  const targetCount = Number(document.getElementById('sorsaCountSelect')?.value || 5);
-  const likePosts = document.getElementById('sorsaOptLike')?.checked ?? true;
-  const replyPosts = document.getElementById('sorsaOptComment')?.checked ?? true;
-  const followPosts = document.getElementById('sorsaOptFollow')?.checked ?? true;
 
   if (state.credits < 1) {
     alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to boost your Sorsa Score.`);
@@ -3081,587 +3963,233 @@ async function startSorsaScoreBoosterWorkflow() {
     return;
   }
 
-  const selectedListKey = document.getElementById('sorsaTierSelect')?.value || 'sorsaTier2';
-  const tierKey = (selectedListKey === 'tier1' ? 'sorsaTier1' : (selectedListKey === 'tier2' ? 'sorsaTier2' : selectedListKey));
-  const tierData = state.curatedLists?.[tierKey] || FALLBACK_CURATED_LISTS?.[tierKey];
+  const rawInput = (document.getElementById('sorsaHandlesInput')?.value || '').trim();
 
-  // Check Plan access BEFORE toggling UI
-  const reqTier = (tierData?.accessTier || 'free').toLowerCase();
-  if (reqTier !== 'free' && !canUserAccessTier(state.userPlan, reqTier)) {
-    alert(`🔒 ${reqTier.toUpperCase()} Plan Required!\n\n"${tierData?.name || 'Selected Tier'}" is reserved for ${reqTier.toUpperCase()} subscribers.\n\nYour current plan: ${state.userPlan || 'Free Plan'}.\nPlease upgrade your subscription in the Credits tab or select a free tier.`);
-    switchExtTab('credits');
+  // Strict check: Block Twitter list URLs
+  if (extractTwitterListUrl(rawInput)) {
+    alert('⚠️ Increase Sorsa Score ONLY accepts .CSV file uploads or usernames (e.g. @cz_binance, @vitalikbuterin).\n\nTwitter List URLs are NOT supported here. Please use Audience Builder or Followers Increase for List URLs.');
     return;
+  }
+
+  const rawItems = rawInput.split(/[\n,]+/).map(s => s.trim().replace(/^@/, '')).filter(Boolean);
+  const seen = new Set();
+  const cleanHandles = [];
+  for (const h of rawItems) {
+    const lower = h.toLowerCase();
+    if (lower.includes('/') || lower.includes('http') || lower.includes('.com')) continue;
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      cleanHandles.push(h);
+    }
+  }
+
+  if (cleanHandles.length === 0) {
+    alert('⚠️ Please enter target usernames (e.g. @cz_binance) or upload a .CSV file.');
+    return;
+  }
+
+  const mode = document.getElementById('sorsaModeSelect')?.value || 'sequential';
+  const cooloffVal = document.getElementById('sorsaCooloffSelect')?.value || '24';
+  const cooloffHours = cooloffVal === 'custom'
+    ? (Number(document.getElementById('sorsaCustomCooloffInput')?.value) || 24)
+    : (Number(cooloffVal) || 24);
+  const targetCount = Number(document.getElementById('sorsaCountSelect')?.value || 10);
+  const postsPerProfile = document.getElementById('sorsaPostsPerProfileSelect')?.value || 'random';
+  const autoUnfollow = document.getElementById('sorsaUnfollowNonFollowersToggle')?.checked ?? false;
+
+  const likePosts = document.getElementById('sorsaOptLike')?.checked ?? true;
+  const replyPosts = document.getElementById('sorsaOptComment')?.checked ?? true;
+  const repostPosts = document.getElementById('sorsaOptRepost')?.checked ?? false;
+  const autoFollow = document.getElementById('sorsaOptFollow')?.checked ?? true;
+
+  if (!likePosts && !replyPosts && !repostPosts && !autoFollow) {
+    alert('⚠️ Please select at least one action (❤️ Like, 💬 Comment, 🔁 Repost, or ➕ Follow).');
+    return;
+  }
+
+  // Persist settings
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({
+      atomx_sorsa_settings: {
+        mode,
+        cooloffHours,
+        targetCount,
+        postsPerProfile,
+        autoUnfollow,
+        likePosts,
+        replyPosts,
+        repostPosts,
+        autoFollow
+      }
+    });
   }
 
   const startBtn = document.getElementById('runSorsaBoosterBtn');
   const stopBtn = document.getElementById('stopSorsaBoosterBtn');
   const progressCard = document.getElementById('sorsaProgressCard');
   const stateBadge = document.getElementById('sorsaStateBadge');
-  const titleEl = document.getElementById('sorsaProgressTitle');
-  const queueIndicator = document.getElementById('sorsaQueueIndicator');
-  const doneEl = document.getElementById('sorsaDoneCount');
-  const colEl = document.getElementById('sorsaCollectedCount');
-  const skipEl = document.getElementById('sorsaSkippedCount');
-  const barEl = document.getElementById('sorsaProgressBar');
   const statusText = document.getElementById('sorsaLiveStatusText');
-  const countdownEl = document.getElementById('sorsaCountdownText');
 
   state.isAborted = false;
   state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
+  if (stateBadge) stateBadge.textContent = 'RUNNING';
+  if (statusText) statusText.textContent = `Starting Sorsa Booster (${mode === 'sequential' ? 'Mode 1: Sequential' : 'Mode 2: Deduplication Window'})...`;
 
+  const totalEffective = Math.min(cleanHandles.length, targetCount);
   syncFloatingHud(null, {
     title: 'Sorsa Booster',
-    stateBadge: 'BOOSTING',
-    indicator: `Account 0/${targetCount}`,
+    stateBadge: 'RUNNING',
+    indicator: `0/${totalEffective}`,
     done: 0,
-    collected: 0,
+    collected: totalEffective,
     skipped: 0,
     progressPercent: 5,
-    statusText: 'Connecting to X.com & finding high-weight KOLs...'
+    statusText: `Starting Sorsa Booster (${mode === 'sequential' ? 'Mode 1: Sequential' : 'Mode 2: Deduplication Window'})...`
   });
 
-  let doneCount = 0;
-  let skippedCount = 0;
-  let collectedCount = 0;
-
-  if (doneEl) doneEl.textContent = '0';
-  if (colEl) colEl.textContent = '0';
-  if (skipEl) skipEl.textContent = '0';
-  if (barEl) barEl.style.width = '0%';
-  if (countdownEl) countdownEl.style.display = 'none';
-
-  let rawCustomTargets = [];
-  if (selectedListKey === 'custom') {
-    const rawInput = document.getElementById('customSorsaListUrlInput')?.value.trim() || '';
-    if (!rawInput) {
-      alert('⚠️ Please enter a Twitter List URL or account handles for your custom Sorsa target list.');
-      return;
+  const backendUrl = await getBackendUrl();
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'sorsa',
+    title: 'Sorsa Booster',
+    items: cleanHandles.map(h => ({ handle: `@${h}`, cleanHandle: h })),
+    options: {
+      mode,
+      cooloffHours,
+      targetCount,
+      postsCount: postsPerProfile,
+      autoUnfollow,
+      likePosts,
+      replyPosts,
+      repostPosts,
+      autoFollow,
+      backendUrl
     }
-    const cleanMatches = rawInput.match(/@?([a-zA-Z0-9_]{1,15})/g) || [];
-    const validHandles = cleanMatches.filter(w => !['https', 'http', 'twitter', 'com', 'lists', 'i'].includes(w.toLowerCase()));
-    if (validHandles.length > 0) {
-      rawCustomTargets = validHandles;
-    } else {
-      rawCustomTargets = FALLBACK_CURATED_LISTS.sorsaTier1.targets;
-    }
-  } else {
-    rawCustomTargets = (tierData?.targets && tierData.targets.length > 0)
-      ? tierData.targets
-      : (FALLBACK_CURATED_LISTS[tierKey]?.targets || FALLBACK_CURATED_LISTS.sorsaTier1.targets);
-  }
-
-  const cooloffSelVal = document.getElementById('sorsaCooloffSelect')?.value || '24';
-  const cooloffHours = cooloffSelVal === 'custom'
-    ? (Number(document.getElementById('sorsaCustomCooloffInput')?.value) || 24)
-    : (Number(cooloffSelVal) || 24);
-
-  const sorsaDelaySelVal = document.getElementById('sorsaDelaySelect')?.value || '15';
-  const delaySec = sorsaDelaySelVal === 'custom'
-    ? (Number(document.getElementById('sorsaCustomDelayInput')?.value) || 15)
-    : (Number(sorsaDelaySelVal) || 15);
-
-  try {
-    const storedHistory = await new Promise(resolve => {
-      chrome.storage.local.get(['atomx_sorsa_engaged_history'], res => {
-        resolve((res?.atomx_sorsa_engaged_history && typeof res.atomx_sorsa_engaged_history === 'object') ? res.atomx_sorsa_engaged_history : {});
-      });
-    });
-
-    let collectedProfiles = [];
-    const collectedHandles = new Set();
-    const loggedInHandle = (state.verifiedXHandle || '').replace(/^@/, '').toLowerCase();
-    const now = Date.now();
-    const cooloffMs = cooloffHours * 3600 * 1000;
-
-    const cleanTargets = rawCustomTargets.map(h => h.replace(/^@/, '').trim()).filter(Boolean);
-    for (const h of cleanTargets) {
-      if (collectedProfiles.length >= targetCount) break;
-      const lower = h.toLowerCase();
-      if (lower === loggedInHandle || collectedHandles.has(lower)) continue;
-
-      // Deduplication / 24h Cool-Off check: Skip if engaged recently
-      const lastEngaged = storedHistory[lower];
-      if (lastEngaged && (now - lastEngaged < cooloffMs)) {
-        continue;
-      }
-
-      collectedHandles.add(lower);
-      collectedProfiles.push({ cleanHandle: h, handle: `@${h}`, name: h });
-    }
-
-    collectedCount = collectedProfiles.length;
-    if (colEl) colEl.textContent = collectedCount;
-
-    if (collectedCount === 0) {
-      alert(`⚠️ All accounts in this list have already been engaged within your ${cooloffHours}h cool-off window!\n\nYou can reduce the cool-off window in the dropdown or use a different list.`);
-      if (startBtn) startBtn.style.display = 'block';
-      if (stopBtn) stopBtn.style.display = 'none';
-      if (progressCard) progressCard.style.display = 'none';
-      return;
-    }
-
-    if (stateBadge) stateBadge.textContent = 'RUNNING';
-    if (barEl) barEl.style.width = '10%';
-    if (statusText) statusText.textContent = `Starting Sorsa Score Boost for ${collectedCount} fresh accounts in background...`;
-    if (queueIndicator) queueIndicator.textContent = `Account 1/${collectedCount}`;
-
-    syncFloatingHud(null, {
-      title: 'Sorsa Score Booster',
-      stateBadge: 'ENGAGING',
-      indicator: `Account 0/${collectedCount}`,
-      done: 0,
-      collected: collectedCount,
-      skipped: 0,
-      progressPercent: 5,
-      statusText: `Starting Sorsa Score Boost for ${collectedCount} fresh accounts...`
-    });
-
-    const activeTone = state.selectedTone || 'Bullish (5-10 words)';
-    const activePrompt = state.selectedTonePrompt || '';
-
-    // Delegate immediately to background service worker — survives extension popup closing!
-    const backendUrl = await getBackendUrl();
-    chrome.runtime.sendMessage({
-      type: 'BG_START_AGENT_WORKFLOW',
-      agentId: 'sorsa',
-      title: 'Sorsa Booster',
-      items: collectedProfiles,
-      options: {
-        delaySec: delaySec,
-        likePosts,
-        replyPosts,
-        followPosts,
-        style: activeTone,
-        stylePrompt: activePrompt,
-        backendUrl
-      }
-    });
-    return;
-
-    async function runLocalSorsaLoop() {
-    // Per-profile engagement loop
-    for (let i = 0; i < collectedCount; i++) {
-      if (state.isAborted) break;
-
-      const profile = collectedProfiles[i];
-      const progPercent = Math.round(40 + ((i + 1) / collectedCount) * 60);
-      if (barEl) barEl.style.width = `${progPercent}%`;
-      if (queueIndicator) queueIndicator.textContent = `Account ${i + 1}/${collectedCount}`;
-
-      if (stateBadge) stateBadge.textContent = 'ENGAGING';
-      if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
-
-      syncFloatingHud(sorsaWorkingTabId, {
-        title: 'Sorsa Booster',
-        stateBadge: 'ENGAGING',
-        indicator: `Account ${i + 1}/${collectedCount}`,
-        done: doneCount,
-        collected: collectedCount,
-        skipped: skippedCount,
-        progressPercent: progPercent,
-        statusText: `Visiting @${profile.cleanHandle}...`
-      });
-
-      try {
-        if (!sorsaWorkingTabId) {
-          const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
-          sorsaWorkingTabId = newTab.id;
-          shouldCloseWorkingTab = true;
-        } else {
-          await chrome.tabs.update(sorsaWorkingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
-        }
-        await waitForTabComplete(sorsaWorkingTabId);
-        await sleep(2000);
-
-        if (state.isAborted) break;
-
-        const backendUrl = await getBackendUrl();
-        const actionRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(sorsaWorkingTabId, {
-            type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
-            handle: profile.cleanHandle,
-            likePosts,
-            replyPosts,
-            style: `Sorsa ${tone}`,
-            stylePrompt: customTonePrompt,
-            backendUrl,
-            verifiedXHandle: state.verifiedXHandle
-          }, (res) => resolve(res || { success: false }));
-        });
-
-        if (actionRes?.rateLimited) {
-          state.isAborted = true;
-          break;
-        }
-
-        if (actionRes?.alreadyFollowing && !replyPosts && !likePosts) {
-          skippedCount++;
-          if (skipEl) skipEl.textContent = skippedCount;
-          if (stateBadge) stateBadge.textContent = 'SKIPPED';
-          syncFloatingHud(sorsaWorkingTabId, {
-            title: 'Sorsa Booster',
-            stateBadge: 'SKIPPED',
-            indicator: `Account ${i + 1}/${collectedCount}`,
-            done: doneCount,
-            collected: collectedCount,
-            skipped: skippedCount,
-            progressPercent: progPercent,
-            statusText: `Already following @${profile.cleanHandle}`
-          });
-        } else {
-          doneCount++;
-          if (doneEl) doneEl.textContent = doneCount;
-          if (stateBadge) stateBadge.textContent = 'BOOSTED';
-          deductCredits(1);
-          if (statusText) statusText.textContent = `⚡ Boosted @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
-          syncFloatingHud(sorsaWorkingTabId, {
-            title: 'Sorsa Booster',
-            stateBadge: 'BOOSTED',
-            indicator: `Account ${i + 1}/${collectedCount}`,
-            done: doneCount,
-            collected: collectedCount,
-            skipped: skippedCount,
-            progressPercent: progPercent,
-            statusText: `⚡ Boosted @${profile.cleanHandle}!`
-          });
-        }
-      } catch (pErr) {
-        console.warn('Error on Sorsa profile action:', pErr);
-      }
-
-      if (i < collectedCount - 1 && !state.isAborted) {
-        if (stateBadge) stateBadge.textContent = 'COUNTDOWN';
-        if (countdownEl) countdownEl.style.display = 'inline-block';
-        for (let s = 15; s > 0; s--) {
-          if (state.isAborted) break;
-          if (countdownEl) countdownEl.textContent = `Next KOL in 0:${s < 10 ? '0' : ''}${s}`;
-          syncFloatingHud(sorsaWorkingTabId, {
-            statusText: `Next KOL in 0:${s < 10 ? '0' : ''}${s}...`
-          });
-          await sleep(1000);
-        }
-        if (countdownEl) countdownEl.style.display = 'none';
-      }
-    }
-
-    if (!state.isAborted) {
-      if (stateBadge) stateBadge.textContent = 'DONE';
-      if (barEl) barEl.style.width = '100%';
-      if (statusText) statusText.textContent = `✓ Sorsa Score Booster Completed! Engaged ${doneCount} ecosystem accounts.`;
-      syncFloatingHud(sorsaWorkingTabId, {
-        title: 'Sorsa Booster',
-        stateBadge: 'DONE',
-        indicator: `Account ${collectedCount}/${collectedCount}`,
-        done: doneCount,
-        collected: collectedCount,
-        skipped: skippedCount,
-        progressPercent: 100,
-        statusText: `✓ Sorsa Score Booster Completed!`,
-        isStopped: true
-      });
-      alert(`⚡ Sorsa Score Booster Cycle Complete!\n\n• High-Weight Accounts Engaged: ${doneCount}\n• Sorsa Multiplier Accelerated!`);
-    }
-    }
-  } catch (err) {
-    console.error('Sorsa Booster error:', err);
-    alert('Sorsa Booster error: ' + err.message);
-  } finally {
-    if (startBtn) startBtn.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && sorsaWorkingTabId) {
-      chrome.tabs?.remove(sorsaWorkingTabId).catch(() => null);
-    }
-    sorsaWorkingTabId = null;
-  }
+  });
 }
 
 // =========================================================================
-// AGENT 4: FOLLOWERS INCREASE WORKFLOW ENGINE (A4, THREAD REPLIERS COLLECTION)
+// AGENT 4: FOLLOWERS INCREASE WORKFLOW ENGINE (LIST ONLY)
 // =========================================================================
 async function startFollowersIncreaseWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
 
-  const niche = document.getElementById('followerNicheSelect')?.value || 'crypto';
-  const strategy = document.getElementById('followerStratSelect')?.value || 'High-Resonance Insights';
-  const targetCount = Number(document.getElementById('followerDailyTargetSelect')?.value || 8);
-  const followerDelaySelVal = document.getElementById('followerDelaySelect')?.value || '15';
-  const delaySec = followerDelaySelVal === 'custom'
-    ? (Number(document.getElementById('followerCustomDelayInput')?.value) || 15)
-    : (Number(followerDelaySelVal) || 15);
-
   if (state.credits < 1) {
-    alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to run Follower Growth.`);
+    alert(`⚠️ Insufficient credits!\nYou need at least 1 credit to run Followers Increase. Please top up in the Credits tab.`);
     switchExtTab('credits');
     return;
   }
 
-  const curatedFollower = state.curatedLists?.[niche];
-  if (curatedFollower) {
-    const reqTier = (curatedFollower.accessTier || 'free').toLowerCase();
+  const nicheVal = document.getElementById('followerNicheSelect')?.value || 'followerList1';
+  let targetUrl = '';
+
+  if (nicheVal === 'custom') {
+    const rawCustom = (document.getElementById('customFollowerUrlInput')?.value || '').trim();
+    targetUrl = extractTwitterListUrl(rawCustom);
+    if (!targetUrl) {
+      alert('⚠️ Followers Increase ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223).\n\nCSV files and usernames are not supported for this agent.');
+      return;
+    }
+  } else {
+    const curated = state.curatedLists?.[nicheVal] || FALLBACK_CURATED_LISTS[nicheVal];
+    const reqTier = (curated?.accessTier || 'free').toLowerCase();
     if (reqTier !== 'free' && !canUserAccessTier(state.userPlan, reqTier)) {
-      alert(`🔒 ${reqTier.toUpperCase()} Plan Required!\n\n"${curatedFollower.name}" is reserved for ${reqTier.toUpperCase()} subscribers.\n\nYour current plan: ${state.userPlan || 'Free Plan'}.\nPlease upgrade your subscription in the Credits tab.`);
+      alert(`🔒 ${reqTier.toUpperCase()} Plan Required!\n\n"${curated?.name || 'Selected List'}" is reserved for ${reqTier.toUpperCase()} subscribers.\n\nYour current plan: ${state.userPlan || 'Free Plan'}.\nPlease upgrade your subscription in the Credits tab.`);
       switchExtTab('credits');
       return;
     }
+    targetUrl = extractTwitterListUrl(curated?.listUrl || curated?.url);
+    if (!targetUrl) {
+      alert('⚠️ Selected list does not have a valid Twitter List URL.\n\nFollowers Increase ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223). CSV files and usernames are not supported.');
+      return;
+    }
+  }
+
+  const freshness = document.getElementById('followerFreshnessSelect')?.value || '1h';
+  const sortPriority = document.getElementById('followerSortSelect')?.value || 'active';
+  const targetCount = Number(document.getElementById('followerDailyTargetSelect')?.value || 8);
+
+  const likePosts = document.getElementById('followerOptLike')?.checked ?? true;
+  const replyPosts = document.getElementById('followerOptComment')?.checked ?? true;
+  const repostPosts = document.getElementById('followerOptRepost')?.checked ?? false;
+  const autoFollow = document.getElementById('followerOptFollow')?.checked ?? true;
+
+  if (!likePosts && !replyPosts && !repostPosts && !autoFollow) {
+    alert('⚠️ Please select at least one action (❤️ Like, 💬 Comment, 🔁 Repost, or ➕ Follow).');
+    return;
+  }
+
+  // Persist settings
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    chrome.storage.local.set({
+      atomx_follower_settings: {
+        nicheVal,
+        targetUrl,
+        freshness,
+        sortPriority,
+        targetCount,
+        likePosts,
+        replyPosts,
+        repostPosts,
+        autoFollow
+      }
+    });
   }
 
   const startBtn = document.getElementById('runFollowerIncreaseBtn');
   const stopBtn = document.getElementById('stopFollowerIncreaseBtn');
   const progressCard = document.getElementById('followerProgressCard');
   const stateBadge = document.getElementById('followerStateBadge');
-  const titleEl = document.getElementById('followerProgressTitle');
-  const queueIndicator = document.getElementById('followerQueueIndicator');
-  const doneEl = document.getElementById('followerDoneCount');
-  const colEl = document.getElementById('followerCollectedCount');
-  const skipEl = document.getElementById('followerSkippedCount');
-  const barEl = document.getElementById('followerProgressBar');
   const statusText = document.getElementById('followerLiveStatusText');
-  const countdownEl = document.getElementById('followerCountdownText');
 
   state.isAborted = false;
   state.isWorkflowRunning = true;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
+  if (stateBadge) stateBadge.textContent = 'SCANNING';
+  if (statusText) statusText.textContent = 'Opening Twitter List to engage recent posts...';
 
   syncFloatingHud(null, {
-    title: 'Followers Growth',
-    stateBadge: 'GROWING',
-    indicator: `Profile 0/${targetCount}`,
+    title: 'Followers Increase',
+    stateBadge: 'SCANNING',
+    indicator: `0/${targetCount}`,
     done: 0,
-    collected: 0,
+    collected: targetCount,
     skipped: 0,
     progressPercent: 5,
-    statusText: 'Opening niche discussion feed & finding active repliers...'
+    statusText: 'Opening Twitter List to engage recent posts...'
   });
 
-  let doneCount = 0;
-  let skippedCount = 0;
-  let collectedCount = 0;
-
-  if (doneEl) doneEl.textContent = '0';
-  if (colEl) colEl.textContent = '0';
-  if (skipEl) skipEl.textContent = '0';
-  if (barEl) barEl.style.width = '0%';
-  if (countdownEl) countdownEl.style.display = 'none';
-
-  let targetUrl = '';
-  if (niche === 'custom') {
-    const rawVal = document.getElementById('customFollowerUrlInput')?.value.trim() || '';
-    if (!rawVal) {
-      alert('⚠️ Please enter a Twitter List URL, Search URL, or account handles for your Custom Target Community.');
-      if (startBtn) startBtn.style.display = 'block';
-      if (stopBtn) stopBtn.style.display = 'none';
-      if (progressCard) progressCard.style.display = 'none';
-      return;
-    }
-    if (rawVal.startsWith('http://') || rawVal.startsWith('https://')) {
-      targetUrl = rawVal;
-    } else {
-      const handles = rawVal.match(/@([a-zA-Z0-9_]{1,15})/g) || rawVal.split(/[\s,;\n\r]+/).map(w => w.replace(/^@/, '')).filter(w => /^[a-zA-Z0-9_]{1,15}$/.test(w));
-      if (handles.length > 0) {
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent(handles.slice(0, 5).map(h => `from:${h}`).join(' OR ')) + '&f=live';
-      } else {
-        targetUrl = 'https://x.com/search?q=' + encodeURIComponent(rawVal) + '&f=live';
-      }
-    }
-  } else if (curatedFollower) {
-    if (curatedFollower.listUrl) {
-      targetUrl = curatedFollower.listUrl;
-    } else {
-      targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3 OR solana) -filter:retweets -filter:replies') + '&f=live';
-    }
-  } else if (niche === 'ai') {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(ai agents OR autonomous agents) -filter:retweets -filter:replies') + '&f=live';
-  } else if (niche === 'founders') {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(startups OR founders OR "building in public") -filter:retweets -filter:replies') + '&f=live';
-  } else if (niche === 'solana') {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(solana OR sol) -filter:retweets -filter:replies') + '&f=live';
-  } else {
-    targetUrl = 'https://x.com/search?q=' + encodeURIComponent('(crypto OR web3) -filter:retweets -filter:replies') + '&f=live';
+  const listId = extractTwitterListId(targetUrl);
+  let feedUrl = targetUrl;
+  if (listId) {
+    feedUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`;
   }
 
-  try {
-    if (stateBadge) stateBadge.textContent = 'SCANNING';
-    if (barEl) barEl.style.width = '10%';
-    if (statusText) statusText.textContent = `Connecting to feed and analyzing most engaging posts in background...`;
-    if (queueIndicator) queueIndicator.textContent = `Scanning Niche Feed...`;
-
-    syncFloatingHud(null, {
-      title: 'Followers Growth',
-      stateBadge: 'SCANNING',
-      indicator: `Analyzing Niche Feed`,
-      done: 0,
-      collected: targetCount,
-      skipped: 0,
-      progressPercent: 5,
-      statusText: `Discovering top engaging posts and accounts in ${niche} feed...`
-    });
-
-    const activeStyle = state.selectedTone || 'Bullish (5-10 words)';
-    const activePrompt = state.selectedTonePrompt || '';
-
-    // Delegate immediately to background service worker — discovers top engaging accounts dynamically!
-    const backendUrl = await getBackendUrl();
-    chrome.runtime.sendMessage({
-      type: 'BG_START_AGENT_WORKFLOW',
-      agentId: 'followers',
-      title: 'Followers Growth',
-      items: [],
-      options: {
-        feedUrl: targetUrl,
-        targetCount,
-        delaySec,
-        likePosts: true,
-        replyPosts: true,
-        followPosts: true,
-        style: activeStyle,
-        stylePrompt: activePrompt,
-        backendUrl
-      }
-    });
-    return;
-
-    async function runLocalFollowersLoop() {
-    // Per-profile engagement loop
-    for (let i = 0; i < collectedCount; i++) {
-      if (state.isAborted) break;
-
-      const profile = collectedProfiles[i];
-      const progPercent = Math.round(40 + ((i + 1) / collectedCount) * 60);
-      if (barEl) barEl.style.width = `${progPercent}%`;
-      if (queueIndicator) queueIndicator.textContent = `Profile ${i + 1}/${collectedCount}`;
-
-      if (stateBadge) stateBadge.textContent = 'ENGAGING';
-      if (statusText) statusText.textContent = `[${i + 1}/${collectedCount}] Visiting @${profile.cleanHandle}...`;
-
-      syncFloatingHud(followerWorkingTabId, {
-        title: 'Followers Growth',
-        stateBadge: 'ENGAGING',
-        indicator: `Profile ${i + 1}/${collectedCount}`,
-        done: doneCount,
-        collected: collectedCount,
-        skipped: skippedCount,
-        progressPercent: progPercent,
-        statusText: `Visiting @${profile.cleanHandle}...`
-      });
-
-      try {
-        if (!followerWorkingTabId) {
-          const newTab = await chrome.tabs.create({ url: `https://x.com/${profile.cleanHandle}`, active: true });
-          followerWorkingTabId = newTab.id;
-          shouldCloseWorkingTab = true;
-        } else {
-          await chrome.tabs.update(followerWorkingTabId, { url: `https://x.com/${profile.cleanHandle}`, active: true });
-        }
-        await waitForTabComplete(followerWorkingTabId);
-        await sleep(2000);
-
-        if (state.isAborted) break;
-
-        const backendUrl = await getBackendUrl();
-        const actionRes = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(followerWorkingTabId, {
-            type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
-            handle: profile.cleanHandle,
-            likePosts: true,
-            replyPosts: true,
-            style: activeStyle,
-            stylePrompt: activePrompt,
-            backendUrl,
-            verifiedXHandle: state.verifiedXHandle
-          }, (res) => resolve(res || { success: false }));
-        });
-
-        if (actionRes?.rateLimited) {
-          state.isAborted = true;
-          break;
-        }
-
-        if (actionRes?.alreadyFollowing) {
-          skippedCount++;
-          if (skipEl) skipEl.textContent = skippedCount;
-          if (stateBadge) stateBadge.textContent = 'SKIPPED';
-          syncFloatingHud(followerWorkingTabId, {
-            title: 'Followers Growth',
-            stateBadge: 'SKIPPED',
-            indicator: `Profile ${i + 1}/${collectedCount}`,
-            done: doneCount,
-            collected: collectedCount,
-            skipped: skippedCount,
-            progressPercent: progPercent,
-            statusText: `Already following @${profile.cleanHandle}`
-          });
-        } else if (actionRes?.followed) {
-          doneCount++;
-          if (doneEl) doneEl.textContent = doneCount;
-          if (stateBadge) stateBadge.textContent = 'FOLLOWED';
-          deductCredits(1);
-          if (statusText) statusText.textContent = `✓ Followed @${profile.cleanHandle}! (Likes: ${actionRes.likesDone || 0}, Reply: ${actionRes.replyDone ? '✓' : 'None'})`;
-          syncFloatingHud(followerWorkingTabId, {
-            title: 'Followers Growth',
-            stateBadge: 'FOLLOWED',
-            indicator: `Profile ${i + 1}/${collectedCount}`,
-            done: doneCount,
-            collected: collectedCount,
-            skipped: skippedCount,
-            progressPercent: progPercent,
-            statusText: `✓ Followed @${profile.cleanHandle}!`
-          });
-        }
-      } catch (pErr) {
-        console.warn('Error on follower profile action:', pErr);
-      }
-
-      if (i < collectedCount - 1 && !state.isAborted) {
-        if (stateBadge) stateBadge.textContent = 'COUNTDOWN';
-        if (countdownEl) countdownEl.style.display = 'inline-block';
-        for (let s = delaySec; s > 0; s--) {
-          if (state.isAborted) break;
-          if (countdownEl) countdownEl.textContent = `Next profile in 0:${s < 10 ? '0' : ''}${s}`;
-          syncFloatingHud(followerWorkingTabId, {
-            statusText: `Next profile in 0:${s < 10 ? '0' : ''}${s}...`
-          });
-          await sleep(1000);
-        }
-        if (countdownEl) countdownEl.style.display = 'none';
-      }
+  const backendUrl = await getBackendUrl();
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'followers',
+    title: 'Followers Increase',
+    items: [],
+    options: {
+      feedUrl,
+      targetListUrl: targetUrl,
+      listId,
+      targetCount,
+      freshness,
+      sortPriority,
+      likePosts,
+      replyPosts,
+      repostPosts,
+      autoFollow,
+      backendUrl
     }
-
-    if (!state.isAborted) {
-      if (stateBadge) stateBadge.textContent = 'DONE';
-      if (barEl) barEl.style.width = '100%';
-      if (statusText) statusText.textContent = `✓ Follower Growth Completed! Followed: ${doneCount}, Skipped: ${skippedCount}.`;
-      syncFloatingHud(followerWorkingTabId, {
-        title: 'Followers Growth',
-        stateBadge: 'DONE',
-        indicator: `Profile ${collectedCount}/${collectedCount}`,
-        done: doneCount,
-        collected: collectedCount,
-        skipped: skippedCount,
-        progressPercent: 100,
-        statusText: `✓ Follower Growth Completed!`,
-        isStopped: true
-      });
-      alert(`📈 Follower Growth Cycle Complete!\n\n• Profiles Engaged: ${doneCount}\n• Accounts Skipped: ${skippedCount}`);
-    }
-    }
-  } catch (err) {
-    console.error('Follower Growth error:', err);
-    alert('Follower Growth error: ' + err.message);
-  } finally {
-    if (startBtn) startBtn.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && followerWorkingTabId) {
-      chrome.tabs?.remove(followerWorkingTabId).catch(() => null);
-    }
-    followerWorkingTabId = null;
-  }
+  });
 }
 
 // =========================================================================
@@ -3773,14 +4301,7 @@ async function startReplyBackLoopWorkflow() {
       if (statusText) statusText.textContent = `[${postNumberStr}] Opening your post: ${currentPostUrl}...`;
       updateAgentConsole('Reply Loop Running', `Accessing ${postNumberStr}: ${currentPostUrl}`);
 
-      if (!replyBackWorkingTabId) {
-        const tab = await chrome.tabs.create({ url: currentPostUrl, active: true });
-        replyBackWorkingTabId = tab.id;
-        shouldCloseWorkingTab = true;
-      } else {
-        await chrome.tabs.update(replyBackWorkingTabId, { url: currentPostUrl, active: true });
-      }
-
+      replyBackWorkingTabId = await getOrCreateReusedTab(replyBackWorkingTabId, currentPostUrl);
       await waitForTabComplete(replyBackWorkingTabId);
       await sleep(3000);
 
@@ -3912,10 +4433,6 @@ async function startReplyBackLoopWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && replyBackWorkingTabId) {
-      safeRemoveTab(replyBackWorkingTabId);
-    }
-    replyBackWorkingTabId = null;
     }
   }
 }
@@ -3993,9 +4510,7 @@ async function startAutoUnfollowWorkflow() {
 
   try {
     if (statusText) statusText.textContent = `Opening following list: ${followingUrl}...`;
-    const tab = await chrome.tabs.create({ url: followingUrl, active: false });
-    autoUnfollowWorkingTabId = tab.id;
-    shouldCloseWorkingTab = true;
+    autoUnfollowWorkingTabId = await getOrCreateReusedTab(autoUnfollowWorkingTabId, followingUrl);
     await waitForTabComplete(autoUnfollowWorkingTabId);
     await sleep(3000);
 
@@ -4120,19 +4635,10 @@ async function startAutoUnfollowWorkflow() {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (countdownEl) countdownEl.style.display = 'none';
-    if (shouldCloseWorkingTab && autoUnfollowWorkingTabId) {
-      chrome.tabs?.remove(autoUnfollowWorkingTabId).catch(() => null);
-    }
-    autoUnfollowWorkingTabId = null;
   }
 }
 
 function openAgentDetailView(agentId) {
-  if (agentId === 'replystudio') {
-    switchExtTab('reply');
-    return;
-  }
-
   const meta = AGENT_META[agentId] || { title: agentId, icon: '⚡', badge: 'AUTO', desc: '' };
   const titleEl = document.getElementById('detailAgentTitle');
   const iconEl = document.getElementById('detailAgentIcon');
@@ -5395,7 +5901,19 @@ async function handleExtLogin() {
       body: JSON.stringify({ identifier, password })
     });
 
-    const data = await safeParseApiResponse(res);
+    let data;
+    try {
+      if (typeof safeParseApiResponse === 'function') {
+        data = await safeParseApiResponse(res);
+      } else if (typeof window !== 'undefined' && typeof window.safeParseApiResponse === 'function') {
+        data = await window.safeParseApiResponse(res);
+      } else {
+        data = await res.json().catch(() => ({}));
+      }
+    } catch (parseErr) {
+      data = await res.json().catch(() => ({}));
+    }
+
     if (!res.ok) {
       throw new Error(data.error || data.message || 'Invalid credentials. Please request access if not registered.');
     }
@@ -5429,9 +5947,19 @@ async function handleExtLogin() {
 }
 
 async function handleExtLogout() {
-  if (!confirm('Are you sure you want to log out from this extension?')) return;
+  const confirmed = await showExtConfirm('Are you sure you want to log out from this extension?', {
+    title: 'Confirm Log Out',
+    icon: '🚪',
+    confirmText: 'Log Out',
+    cancelText: 'Cancel',
+    danger: true
+  });
+  if (!confirmed) return;
   await purgeExtLocalUserSession();
-  alert('You have logged out. All cached user data has been cleared.');
+  showExtToast('Logged out successfully', '✓');
+  showAccessSubView('login');
+  updateCreditUI();
+  await checkAccountVerificationLock();
 }
 
 function updateTgParseSummaryUI() {
@@ -6026,7 +6554,6 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
           state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
           if (chrome.storage?.local) chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
 
-          if (outcome.shouldClose && outcome.targetTabId) chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
 
           syncFloatingHud(tgWorkingTabId, {
             title: 'Telegram Group Engage', stateBadge: 'ENGAGING',
@@ -6052,11 +6579,6 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
           body: JSON.stringify({ tweets: [{ tweet_id: t.tweetId, handle: t.handle, canonical_url: t.canonicalUrl, action_type: 'autonomous_raid' }] })
         }).catch(() => null);
 
-        if (outcome.shouldClose && outcome.targetTabId) {
-          await sleep(1500);
-          chrome.tabs?.remove(outcome.targetTabId).catch(() => null);
-        }
-        tgWorkingTabId = null;
 
         updateTgParseSummaryUI();
 
@@ -6136,34 +6658,21 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
 // Opens tab (or targets active tab) and sends command to content script
 async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
   let targetTabId = null;
-  let shouldClose = false;
 
-  const currentTabs = await chrome.tabs?.query({ active: true, currentWindow: true });
-  const activeTab = currentTabs && currentTabs[0];
-
-  if (!tweetUrl && activeTab && (activeTab.url?.includes('twitter.com') || activeTab.url?.includes('x.com'))) {
-    targetTabId = activeTab.id;
-  } else if (tweetUrl && activeTab && activeTab.url && activeTab.url.includes(tweetUrl.split('?')[0])) {
-    targetTabId = activeTab.id;
-  } else if (tweetUrl) {
-    if (activeTab && activeTab.id) {
-      // User request: DO NOT open in new tab! Navigate in CURRENT TAB!
-      await chrome.tabs.update(activeTab.id, { url: tweetUrl });
+  if (!tweetUrl) {
+    const currentTabs = await chrome.tabs?.query({ active: true, currentWindow: true });
+    const activeTab = currentTabs && currentTabs[0];
+    if (activeTab && (activeTab.url?.includes('twitter.com') || activeTab.url?.includes('x.com'))) {
       targetTabId = activeTab.id;
-      tgWorkingTabId = activeTab.id;
-      shouldClose = false;
-      await waitForTabComplete(targetTabId);
-      await sleep(2500); // Wait for React hydration
     } else {
-      const newTab = await chrome.tabs.create({ url: tweetUrl, active: true });
-      targetTabId = newTab.id;
-      tgWorkingTabId = newTab.id;
-      shouldClose = false;
-      await waitForTabComplete(targetTabId);
-      await sleep(2500);
+      throw new Error('No valid tweet URL or active Twitter tab found.');
     }
   } else {
-    throw new Error('No valid tweet URL or active Twitter tab found.');
+    // Reuses ONE single tab/window throughout the entire workflow!
+    targetTabId = await getOrCreateReusedTab(tgWorkingTabId, tweetUrl);
+    tgWorkingTabId = targetTabId;
+    await waitForTabComplete(targetTabId);
+    await sleep(2500); // Wait for React hydration
   }
 
   const replyText = typeof options === 'string' ? options : (options.replyText || '');
@@ -6214,7 +6723,32 @@ function waitForTabComplete(tabId, timeout = 12000) {
 }
 
 function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise(resolve => {
+    const start = Date.now();
+    let accumulatedPauseTime = 0;
+    let pauseStart = 0;
+
+    const interval = setInterval(() => {
+      if (state.isAborted || state.skipCurrent) {
+        clearInterval(interval);
+        resolve();
+        return;
+      }
+
+      if (state.isPaused) {
+        if (!pauseStart) pauseStart = Date.now();
+        return;
+      } else if (pauseStart) {
+        accumulatedPauseTime += (Date.now() - pauseStart);
+        pauseStart = 0;
+      }
+
+      if (Date.now() - start - accumulatedPauseTime >= ms) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 50);
+  });
 }
 
 async function getBackendUrl() {

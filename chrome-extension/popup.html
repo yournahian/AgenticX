@@ -82,8 +82,8 @@
         <span class="tab-text">Agents</span>
       </button>
       <button class="tab-btn" data-tab="reply">
-        <span class="tab-icon">💬</span>
-        <span class="tab-text">Reply</span>
+        <span class="tab-icon">✨</span>
+        <span class="tab-text">AI Voice</span>
       </button>
       <button class="tab-btn" data-tab="safety">
         <span class="tab-icon">🛡️</span>
@@ -112,7 +112,7 @@
           <div class="section-intro">
             <div style="font-weight:700; font-size:13px; color:var(--text-primary); display:flex; align-items:center; justify-content:space-between;">
               <span>Autonomous Agents (100% Auto)</span>
-              <span class="badge-mini popular">12 SUITE</span>
+              <span class="badge-mini popular">11 SUITE</span>
             </div>
             <div style="font-size:11px; color:var(--text-secondary);">Click any agent below to launch its dedicated automation workspace.</div>
           </div>
@@ -162,16 +162,7 @@
               <div class="bento-action">Configure & Run ➔</div>
             </button>
 
-            <!-- 5. Post Generator -->
-            <button type="button" class="bento-card" data-agent-id="postgen">
-              <div class="bento-top">
-                <span class="bento-emoji">✍️</span>
-                <span class="badge-mini ready">AI STUDIO</span>
-              </div>
-              <div class="bento-title">Post Generator</div>
-              <div class="bento-desc">Turn rough notes into Medium, Long or Threads</div>
-              <div class="bento-action">Configure & Run ➔</div>
-            </button>
+
 
             <!-- 6. Reply Back Loop -->
             <button type="button" class="bento-card" data-agent-id="replyback">
@@ -195,16 +186,7 @@
               <div class="bento-action">Configure & Run ➔</div>
             </button>
 
-            <!-- 8. Picture & Voice Match -->
-            <button type="button" class="bento-card" data-agent-id="match">
-              <div class="bento-top">
-                <span class="bento-emoji">🎨</span>
-                <span class="badge-mini ai">PERSONA</span>
-              </div>
-              <div class="bento-title">Voice & Image Match</div>
-              <div class="bento-desc">Match @evanjawadx voice & generate visuals</div>
-              <div class="bento-action">Configure & Run ➔</div>
-            </button>
+
 
             <!-- 9. Favorite Creators -->
             <button type="button" class="bento-card" data-agent-id="creators">
@@ -217,18 +199,7 @@
               <div class="bento-action">Configure & Run ➔</div>
             </button>
 
-            <!-- 10. AI Reply Assistant -->
-            <button type="button" class="bento-card" data-agent-id="replystudio">
-              <div class="bento-top">
-                <span class="bento-emoji">💬</span>
-                <span class="badge-mini popular">1-CLICK</span>
-              </div>
-              <div class="bento-title">1-Click Reply</div>
-              <div class="bento-desc">Open dedicated AI reply studio with live page detect</div>
-              <div class="bento-action">Open Studio ➔</div>
-            </button>
-
-            <!-- 11. Find Defaulter -->
+            <!-- 10. Find Defaulter -->
             <button type="button" class="bento-card" data-agent-id="defaulter">
               <div class="bento-top">
                 <span class="bento-emoji">🔍</span>
@@ -320,10 +291,6 @@
                     <input type="checkbox" id="actionOptFollow" style="accent-color: var(--blue-primary);">
                     <span>➕ Auto-Follow Creator</span>
                   </label>
-                  <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; grid-column: span 2;">
-                    <input type="checkbox" id="actionOptScroll" checked style="accent-color: var(--blue-primary);">
-                    <span>📜 Smooth Scroll & Hydrate</span>
-                  </label>
                 </div>
               </div>
 
@@ -383,96 +350,97 @@
 
               <div style="display:flex; gap:6px; margin-top:8px;">
                 <button class="primary-btn mini-btn" id="runTgEngageBtn" style="flex:2; margin-top:0;">▶ Launch Auto Engage</button>
+                <button class="secondary-btn mini-btn" id="cleanTgInputBtn" style="flex:1; margin-top:0;" title="Filter text to only show fresh canonical links">⚡ Clean Text</button>
+                <button class="secondary-btn mini-btn" id="resetTelegramQueueBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Queue & Counters">🔄 Reset</button>
                 <button class="secondary-btn mini-btn" id="pauseTgEngageBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow">⏸️ Pause</button>
                 <button class="secondary-btn mini-btn" id="skipTgEngageBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current link and advance">⏭️ Skip</button>
                 <button class="secondary-btn mini-btn" id="stopTgEngageBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Completely stop workflow">⏹ Stop</button>
-                <button class="secondary-btn mini-btn" id="cleanTgInputBtn" style="flex:1; margin-top:0;" title="Filter text to only show fresh canonical links">⚡ Clean Text</button>
               </div>
             </div>
 
             <!-- Workspace 2: Audience Builder (Follower Growth) -->
             <div class="agent-panel-content" id="panel-agent-audience" style="display:none; flex-direction:column; gap:8px;">
-              <!-- Target List Selection -->
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>Engaged Commenter Reach:</strong> Scans active Twitter Lists for top-engaged posts, extracts active commenters, and engages on their recent posts.
+              </div>
+
+              <!-- Target Twitter List URL (ONLY Twitter List URL supported!) -->
               <div>
                 <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
-                  <span>Target Twitter / X Feed</span>
-                  <span class="badge-mini growth" style="font-size:9px;">CURATED</span>
+                  <span>Target Twitter List URL</span>
+                  <span class="badge-mini growth" style="font-size:9px;">LIST ONLY</span>
                 </label>
                 <select id="audienceListSelect" class="ext-select">
-                  <option value="audienceList1">⭐ List 1: Web3 & Crypto Alpha Hunters</option>
-                  <option value="audienceList2">⭐ List 2: Tech Founders & Angel VCs</option>
-                  <option value="custom">➕ Add Your Own Custom Twitter List URL</option>
+                  <option value="" disabled selected>Loading Admin Lists...</option>
                 </select>
-                <div id="customListUrlBox" style="display:none; margin-top:6px;">
-                  <input type="text" id="customListUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...)">
-                </div>
-              </div>
-
-              <!-- Tweet Hunting Controls -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Tweet Freshness</label>
-                  <select id="audienceDateRangeSelect" class="ext-select">
-                    <option value="1h">⚡ Last 1 Hour (Freshest)</option>
-                    <option value="2h" selected>🔥 Last 2 Hours (Active)</option>
-                    <option value="4h">Last 4 Hours</option>
-                    <option value="12h">Last 12 Hours</option>
-                    <option value="24h">Past 24 Hours</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="opt-label">Sort By</label>
-                  <select id="audienceSortBySelect" class="ext-select">
-                    <option value="replies" selected>🔥 Most Active Replies</option>
-                    <option value="newest">⚡ Newest Posts First</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Phase C: Queue Target & Pacing Controls -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Profiles to Collect</label>
-                  <select id="audienceTargetCountSelect" class="ext-select">
-                    <option value="10" selected>10 Profiles (Recommended)</option>
-                    <option value="25">25 Profiles</option>
-                    <option value="50">50 Profiles</option>
-                    <option value="100">100 Profiles (Bulk Queue)</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="opt-label">Safety Delay Between Profiles</label>
-                  <select id="audienceDelaySelect" class="ext-select">
-                    <option value="15" selected>15s (Safe & Human)</option>
-                    <option value="8">8s (Fast)</option>
-                    <option value="25">25s (Ultra Safe)</option>
-                    <option value="custom">⏱️ Custom Delay (Seconds)...</option>
-                  </select>
-                  <div id="audienceCustomDelayBox" style="display:none; margin-top:6px;">
-                    <input type="number" id="audienceCustomDelayInput" class="ext-input" placeholder="Enter delay (e.g. 20s)" min="3" value="15">
+                <div id="customListUrlBox" style="display:none; margin-top:8px; padding:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px;">
+                  <label class="opt-label" style="margin-bottom:4px; font-weight:700;">Custom Twitter / X List URL:</label>
+                  <input type="text" id="customListUrlInput" class="ext-input" placeholder="https://x.com/i/lists/2103557569319219223" value="https://x.com/i/lists/2103557569319219223">
+                  <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:var(--text-secondary); margin-top:4px;">
+                    <span id="audienceCustomCountBadge" style="font-weight:700; color:var(--blue-primary);">Enter List URL (e.g. x.com/i/lists/...)</span>
+                    <span style="color:var(--text-muted);">Auto-scrapes list commenters</span>
                   </div>
                 </div>
               </div>
 
-              <!-- Phase D: Per-Profile Actions -->
+              <!-- Tweet Freshness & Profiles to Collect -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Tweet Freshness</label>
+                  <select id="audienceDateRangeSelect" class="ext-select">
+                    <option value="15m">⚡ Last 15 Minutes</option>
+                    <option value="30m">⚡ Last 30 Minutes</option>
+                    <option value="1h">Last 1 Hour</option>
+                    <option value="2h" selected>🔥 Last 2 Hours</option>
+                    <option value="6h">Last 6 Hours</option>
+                    <option value="12h">Last 12 Hours</option>
+                    <option value="24h">Past 24 Hours</option>
+                    <option value="3d">Past 3 Days</option>
+                    <option value="7d">Past 7 Days</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Profiles to Collect (N)</label>
+                  <select id="audienceTargetCountSelect" class="ext-select">
+                    <option value="5">5 Profiles</option>
+                    <option value="10" selected>10 Profiles</option>
+                    <option value="25">25 Profiles</option>
+                    <option value="50">50 Profiles</option>
+                    <option value="100">100 Profiles</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Posts to Engage per Profile -->
+              <div>
+                <label class="opt-label">Posts to Engage per Profile</label>
+                <select id="audiencePostsPerProfileSelect" class="ext-select">
+                  <option value="random" selected>🎲 Random 1 or 2 Posts (Recommended)</option>
+                  <option value="1">1 Recent Post</option>
+                  <option value="2">2 Recent Posts</option>
+                  <option value="3">3 Recent Posts</option>
+                </select>
+              </div>
+
+              <!-- Action Checkboxes (all 4 requested) -->
               <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
-                <div style="font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">PROFILE ENGAGEMENT ACTIONS:</div>
+                <div style="font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">ACTIONS ON EACH PROFILE'S RECENT POSTS:</div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11px;">
                   <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
-                    <input type="checkbox" id="audienceAutoFollowToggle" checked disabled>
+                    <input type="checkbox" id="audienceLikePostsToggle" checked style="accent-color:var(--blue-primary);">
+                    <span>❤️ Auto-Like</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="audienceReplyPostsToggle" checked style="accent-color:var(--blue-primary);">
+                    <span>💬 Auto-Comment</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="audienceRepostToggle" style="accent-color:var(--blue-primary);">
+                    <span>🔁 Auto-Repost</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="audienceAutoFollowToggle" style="accent-color:var(--blue-primary);">
                     <span>➕ Auto-Follow</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
-                    <input type="checkbox" id="audienceLikePostsToggle" checked>
-                    <span>❤️ Like posts (max 2)</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
-                    <input type="checkbox" id="audienceReplyPostsToggle" checked>
-                    <span>💬 Reply (max 2)</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
-                    <input type="checkbox" id="audienceUnfollowToggle">
-                    <span>🧹 Auto-Unfollow non-followers</span>
                   </label>
                 </div>
               </div>
@@ -517,97 +485,147 @@
               </div>
 
               <!-- Action Buttons -->
-              <div style="display:flex; gap:6px; margin-top:4px;">
+              <div style="display:flex; gap:6px; margin-top:6px;">
                 <button class="primary-btn mini-btn" id="runAudienceBuilderBtn" style="flex:2; margin-top:0;">▶ START AUDIENCE BUILDER</button>
-                <button class="secondary-btn mini-btn" id="stopAudienceBuilderBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
-                <button class="secondary-btn mini-btn" id="resetAudienceQueueBtn" style="padding:4px 8px; margin-top:0; font-size:11px;" title="Reset Queue & History">🔄</button>
+                <button class="secondary-btn mini-btn" id="resetAudienceQueueBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Queue & History">🔄 Reset</button>
+                <button class="secondary-btn mini-btn" id="pauseAudienceBuilderBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow">⏸️ Pause</button>
+                <button class="secondary-btn mini-btn" id="skipAudienceBuilderBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current profile">⏭️ Skip</button>
+                <button class="secondary-btn mini-btn" id="stopAudienceBuilderBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Stop workflow">⏹ STOP</button>
               </div>
             </div>
 
             <!-- Workspace 3: Sorsa Score Booster (A3, Airdrop ROI, Auto) -->
             <div class="agent-panel-content" id="panel-agent-sorsa" style="display:none; flex-direction:column; gap:10px;">
               <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-                <strong>Airdrop & Reputation Engine:</strong> Interacts with verified high-weight ecosystem accounts to maximize your Sorsa ranking multiplier for airdrop tiers and paid promotions.
+                <strong>Airdrop & Reputation Engine:</strong> Target high-weight crypto KOLs and ecosystem profiles to elevate your Sorsa ranking score. Only accepts <strong>.csv file upload</strong> or <strong>usernames</strong> (no Twitter list URLs).
               </div>
 
-              <!-- Tier / Source Selection -->
+              <!-- Source Input: CSV File or Handles Textarea -->
               <div>
                 <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
-                  <span>Target Ecosystem Tier / Custom List</span>
-                  <span class="badge-mini popular" style="font-size:9px;">3X MULTIPLIER</span>
+                  <span>Target Accounts (Admin List, .CSV, or Handles)</span>
+                  <span class="badge-mini popular" style="font-size:9px;">CSV / ADMIN / HANDLES</span>
                 </label>
-                <select id="sorsaTierSelect" class="ext-select">
-                  <option value="sorsaTier1" selected>⭐ Tier 1: Top 100 Crypto KOLs (Score Multiplier 3x)</option>
-                  <option value="sorsaTier2">⭐ Tier 2: High-Volume Ecosystem Projects (Multiplier 2x)</option>
-                  <option value="custom">➕ Add Your Own Custom Twitter List or Accounts</option>
-                </select>
-                <div id="customSorsaListUrlBox" style="display:none; margin-top:6px;">
-                  <input type="text" id="customSorsaListUrlInput" class="ext-input" placeholder="Paste Twitter List URL (https://x.com/i/lists/...) or @handles...">
+
+                <!-- Curated Sorsa List Selector (from Admin Panel) -->
+                <div style="margin-bottom:6px;">
+                  <label class="opt-label" style="font-size:10px; color:var(--text-secondary); margin-bottom:3px; display:flex; justify-content:space-between; align-items:center;">
+                    <span>Curated Sorsa List (from Admin):</span>
+                    <span class="badge-mini growth" id="sorsaListCountBadge" style="font-size:8.5px;">ADMIN LIVE</span>
+                  </label>
+                  <select id="sorsaCuratedListSelect" class="ext-select">
+                    <option value="" disabled selected>Loading Admin Lists...</option>
+                  </select>
                 </div>
-                <div style="font-size:10.5px; color:var(--text-muted); margin-top:4px;">
-                  Includes: @cz_binance, @brian_armstrong, @aeyakovenko, @vitalikbuterin, @ethereum
+
+                <!-- File Upload & Load List Action Buttons -->
+                <div style="display:flex; gap:6px; margin-bottom:6px;">
+                  <input type="file" id="sorsaCsvFileInput" accept=".csv" style="display:none;">
+                  <button type="button" class="secondary-btn mini-btn" id="sorsaUploadCsvBtn" style="flex:1; margin-top:0; display:flex; align-items:center; justify-content:center; gap:5px; font-weight:700;">
+                    📁 Upload .CSV File
+                  </button>
+                  <button type="button" class="secondary-btn mini-btn" id="sorsaLoadCuratedBtn" style="flex:1; margin-top:0; display:flex; align-items:center; justify-content:center; gap:5px; font-weight:700; color:var(--blue-primary);">
+                    ⭐ Load List Accounts
+                  </button>
+                </div>
+
+                <!-- Handles Textarea -->
+                <textarea id="sorsaHandlesInput" class="ext-textarea" style="height:60px; font-size:11px; font-family:monospace; resize:none;" placeholder="@cz_binance, @vitalikbuterin, @brian_armstrong, @aeyakovenko..."></textarea>
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:var(--text-secondary); margin-top:3px;">
+                  <span id="sorsaParsedCountBadge" style="font-weight:700; color:var(--blue-primary);">0 accounts ready</span>
+                  <span style="color:var(--text-muted);">Separate by comma or new lines</span>
                 </div>
               </div>
 
-              <!-- Pacing, Deduplication & Accounts Controls -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Deduplication / Cool-Off</label>
-                  <select id="sorsaCooloffSelect" class="ext-select">
-                    <option value="24" selected>24 Hours (Skip engaged)</option>
-                    <option value="12">12 Hours</option>
-                    <option value="48">48 Hours</option>
-                    <option value="168">7 Days</option>
-                    <option value="99999">Always Skip (Permanent)</option>
-                    <option value="custom">⏱️ Custom Cool-Off Hours...</option>
-                  </select>
-                  <div id="sorsaCustomCooloffBox" style="display:none; margin-top:6px;">
-                    <input type="number" id="sorsaCustomCooloffInput" class="ext-input" placeholder="Enter hours (e.g. 6, 36)" min="1" value="24">
+              <!-- Execution Mode: Mode 1 vs Mode 2 -->
+              <div>
+                <label class="opt-label">Execution Strategy</label>
+                <select id="sorsaModeSelect" class="ext-select">
+                  <option value="sequential" selected>📑 Mode 1: Sequential Resume (Resumes from last index)</option>
+                  <option value="deduplication">🔄 Mode 2: Rolling Deduplication Window (Cool-off per account)</option>
+                </select>
+                <div id="sorsaModeDescription" style="font-size:10px; color:var(--text-muted); margin-top:3px;">
+                  Remembers your last processed account index and picks up where it left off on every run.
+                </div>
+              </div>
+
+              <!-- Mode 2 Window Settings (shown only if Mode 2 selected) -->
+              <div id="sorsaDeduplicationWindowBox" style="display:none; padding:8px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px;">
+                <label class="opt-label">Mode 2 Deduplication Cool-Off Window</label>
+                <select id="sorsaCooloffSelect" class="ext-select">
+                  <option value="24" selected>24 Hours</option>
+                  <option value="12">12 Hours</option>
+                  <option value="48">48 Hours</option>
+                  <option value="168">7 Days</option>
+                  <option value="custom">⏱️ Custom Hours...</option>
+                </select>
+                <div id="sorsaCustomCooloffBox" style="display:none; margin-top:6px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                    <span style="font-size:10px; font-weight:700; color:var(--text-secondary);">Custom Cool-Off:</span>
+                    <span style="font-size:9.5px; font-weight:700; color:var(--blue-primary); background:rgba(59,130,246,0.1); padding:1px 5px; border-radius:4px;">Hours (hrs)</span>
+                  </div>
+                  <div style="position:relative; display:flex; align-items:center;">
+                    <input type="number" id="sorsaCustomCooloffInput" class="ext-input" placeholder="e.g. 24" min="1" value="24" style="padding-right:45px;">
+                    <span style="position:absolute; right:8px; font-size:11px; font-weight:600; color:var(--text-muted); pointer-events:none;">hours</span>
                   </div>
                 </div>
+              </div>
+
+              <!-- Target Count & Posts per Profile -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div>
                   <label class="opt-label">Accounts Per Cycle</label>
                   <select id="sorsaCountSelect" class="ext-select">
-                    <option value="5" selected>5 Accounts</option>
-                    <option value="10">10 Accounts</option>
-                    <option value="15">15 Accounts (Max)</option>
+                    <option value="5">5 Accounts</option>
+                    <option value="10" selected>10 Accounts</option>
+                    <option value="15">15 Accounts</option>
+                    <option value="25">25 Accounts</option>
+                    <option value="50">50 Accounts</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Posts per Profile</label>
+                  <select id="sorsaPostsPerProfileSelect" class="ext-select">
+                    <option value="random" selected>🎲 Random 1 or 2</option>
+                    <option value="1">1 Recent Post</option>
+                    <option value="2">2 Recent Posts</option>
                   </select>
                 </div>
               </div>
 
-              <!-- Safety Delay Between Accounts -->
-              <div>
-                <label class="opt-label">Safety Delay Between Accounts</label>
-                <select id="sorsaDelaySelect" class="ext-select">
-                  <option value="15" selected>15s (Safe & Human)</option>
-                  <option value="10">10s (Faster)</option>
-                  <option value="25">25s (Ultra Safe)</option>
-                  <option value="custom">⏱️ Custom Delay (Seconds)...</option>
-                </select>
-                <div id="sorsaCustomDelayBox" style="display:none; margin-top:6px;">
-                  <input type="number" id="sorsaCustomDelayInput" class="ext-input" placeholder="Enter delay (e.g. 20s)" min="3" value="15">
+              <!-- Smart Unfollow Non-Followers Toggle -->
+              <div style="padding:8px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="flex:1; padding-right:8px;">
+                  <div style="font-weight:700; font-size:11.5px; color:var(--text-primary);">Unfollow Non-Followers First</div>
+                  <div style="font-size:10px; color:var(--text-secondary);">If target doesn't follow back: unfollows, engages on recent posts, then re-follows.</div>
                 </div>
+                <label class="switch">
+                  <input type="checkbox" id="sorsaUnfollowNonFollowersToggle" checked>
+                  <span class="slider-round"></span>
+                </label>
               </div>
 
-              <div style="padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px; display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:700; color:var(--text-primary);">AI Comment Style:</span>
-                <span id="sorsaActiveToneLabel" style="color:var(--blue-primary); font-weight:700;">Global Voice Active</span>
-              </div>
-
-              <!-- Action Checkboxes -->
-              <div style="display:flex; gap:12px; font-size:11px; padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px;">
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                  <input type="checkbox" id="sorsaOptLike" checked style="accent-color:var(--blue-primary);">
-                  <span>❤️ Auto-Like</span>
-                </label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                  <input type="checkbox" id="sorsaOptComment" checked style="accent-color:var(--blue-primary);">
-                  <span>💬 Value Reply</span>
-                </label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                  <input type="checkbox" id="sorsaOptFollow" style="accent-color:var(--blue-primary);">
-                  <span>➕ Follow KOL</span>
-                </label>
+              <!-- 4 Action Checkboxes -->
+              <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">ACTIONS ON EACH PROFILE'S RECENT POSTS:</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11px;">
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="sorsaOptLike" checked style="accent-color:var(--blue-primary);">
+                    <span>❤️ Auto-Like</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="sorsaOptComment" checked style="accent-color:var(--blue-primary);">
+                    <span>💬 Auto-Comment</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="sorsaOptRepost" style="accent-color:var(--blue-primary);">
+                    <span>🔁 Auto-Repost</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="sorsaOptFollow" checked style="accent-color:var(--blue-primary);">
+                    <span>➕ Auto-Follow</span>
+                  </label>
+                </div>
               </div>
 
               <!-- Live Progress Card for Sorsa Score Booster -->
@@ -642,64 +660,106 @@
                 </div>
               </div>
 
-              <div style="display:flex; gap:6px; margin-top:4px;">
+              <div style="display:flex; gap:6px; margin-top:6px;">
                 <button class="primary-btn mini-btn" id="runSorsaBoosterBtn" style="flex:2; margin-top:0;">▶ LAUNCH SORSA BOOSTER</button>
-                <button class="secondary-btn mini-btn" id="stopSorsaBoosterBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+                <button class="secondary-btn mini-btn" id="resetSorsaQueueBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Queue & History">🔄 Reset</button>
+                <button class="secondary-btn mini-btn" id="pauseSorsaBoosterBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow">⏸️ Pause</button>
+                <button class="secondary-btn mini-btn" id="skipSorsaBoosterBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current KOL">⏭️ Skip</button>
+                <button class="secondary-btn mini-btn" id="stopSorsaBoosterBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Stop workflow">⏹ STOP</button>
               </div>
             </div>
 
             <!-- Workspace 4: Followers Increase (A4, 100% Auto Growth) -->
             <div class="agent-panel-content" id="panel-agent-followers" style="display:none; flex-direction:column; gap:10px;">
               <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-                <strong>100% Autonomous Organic Growth:</strong> Zero manual links needed. The bot identifies busy discussion threads in your niche, extracts engaged commenters, and engages to maximize follow-backs.
+                <strong>Autonomous Organic Growth:</strong> Engages directly on recent posts from the selected Twitter List within your timeframe. Skips weak/short or spam tweets. Auto-refreshes list if 5-6 scrolls have no new tweets. <strong>Only accepts Twitter List URLs</strong>.
               </div>
 
-              <!-- Niche / List Source Selection -->
+              <!-- Twitter List Source Selection -->
               <div>
-                <label class="opt-label">Target Niche Feed or Twitter List</label>
+                <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
+                  <span>Target Twitter List URL</span>
+                  <span class="badge-mini popular" style="font-size:9px;">LIST ONLY</span>
+                </label>
                 <select id="followerNicheSelect" class="ext-select">
-                  <option value="crypto" selected>🌐 Crypto & Web3 Discussions (Live Feed)</option>
-                  <option value="ai">🤖 AI Agents & Tech (Live Feed)</option>
-                  <option value="founders">🚀 Startups & Founders (Live Feed)</option>
-                  <option value="solana">⚡ Solana Ecosystem (Live Feed)</option>
-                  <option value="followerList1">⭐ List 1: Web3 & Crypto Alpha Hunters (Curated List)</option>
-                  <option value="followerList2">⭐ List 2: Tech Founders & Angel VCs (Curated List)</option>
-                  <option value="custom">➕ Add Your Own Custom Twitter List or Accounts</option>
+                  <option value="" disabled selected>Loading Admin Lists...</option>
                 </select>
-                <div id="customFollowerUrlBox" style="display:none; margin-top:6px;">
-                  <input type="text" id="customFollowerUrlInput" class="ext-input" placeholder="Paste Twitter List URL, Search URL, or @handles...">
-                </div>
-              </div>
-
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Accounts to Target (N)</label>
-                  <select id="followerDailyTargetSelect" class="ext-select">
-                    <option value="5">5 Accounts</option>
-                    <option value="8" selected>8 Accounts (Safe Pacing)</option>
-                    <option value="15">15 Accounts</option>
-                    <option value="25">25 Accounts</option>
-                    <option value="50">50 Accounts (Bulk)</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="opt-label">Safety Pacing Delay</label>
-                  <select id="followerDelaySelect" class="ext-select">
-                    <option value="15" selected>15s (Human Pacing)</option>
-                    <option value="10">10s (Faster)</option>
-                    <option value="25">25s (Ultra Safe)</option>
-                    <option value="custom">⏱️ Custom Delay (Seconds)...</option>
-                  </select>
-                  <div id="followerCustomDelayBox" style="display:none; margin-top:6px;">
-                    <input type="number" id="followerCustomDelayInput" class="ext-input" placeholder="Enter delay (e.g. 20s)" min="3" value="15">
+                <div id="customFollowerUrlBox" style="display:none; margin-top:8px; padding:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px;">
+                  <label class="opt-label" style="margin-bottom:4px; font-weight:700;">Custom Twitter / X List URL:</label>
+                  <input type="text" id="customFollowerUrlInput" class="ext-input" placeholder="https://x.com/i/lists/2103557569319219223">
+                  <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px; color:var(--text-secondary); margin-top:4px;">
+                    <span id="followerCustomCountBadge" style="font-weight:700; color:var(--blue-primary);">Enter List URL (e.g. x.com/i/lists/...)</span>
+                    <span style="color:var(--text-muted);">Auto-scrapes list tweets</span>
                   </div>
                 </div>
               </div>
 
-              <!-- Global AI Tone indicator -->
-              <div style="padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px; display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:700; color:var(--text-primary);">AI Comment Style:</span>
-                <span id="followerActiveToneLabel" style="color:var(--blue-primary); font-weight:700;">Global Voice Active</span>
+              <!-- Freshness & Sort Strategy -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                  <label class="opt-label">Tweet Freshness</label>
+                  <select id="followerFreshnessSelect" class="ext-select">
+                    <option value="15m">Last 15 Minutes</option>
+                    <option value="30m">Last 30 Minutes</option>
+                    <option value="1h" selected>Last 1 Hour</option>
+                    <option value="2h">Last 2 Hours</option>
+                    <option value="6h">Last 6 Hours</option>
+                    <option value="12h">Last 12 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                    <option value="3d">Last 3 Days</option>
+                    <option value="7d">Last 7 Days</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="opt-label">Sort & Priority</label>
+                  <select id="followerSortSelect" class="ext-select">
+                    <option value="active" selected>🔥 Most Active (Highest Replies)</option>
+                    <option value="recent">⏱️ Newest Tweets First</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Recent Posts / Targets to Engage -->
+              <div>
+                <label class="opt-label">Recent Posts to Engage (Target Count)</label>
+                <select id="followerDailyTargetSelect" class="ext-select">
+                  <option value="5">5 Recent Posts</option>
+                  <option value="8" selected>8 Recent Posts (Safe)</option>
+                  <option value="15">15 Recent Posts</option>
+                  <option value="25">25 Recent Posts</option>
+                  <option value="50">50 Recent Posts</option>
+                </select>
+              </div>
+
+              <!-- Built-in Safety Schedule Notice -->
+              <div style="padding:8px 10px; background:rgba(59,130,246,0.06); border:1px solid rgba(59,130,246,0.25); border-radius:6px; font-size:10.5px; color:var(--text-secondary); line-height:1.4;">
+                <div style="font-weight:700; color:var(--blue-primary); margin-bottom:2px; display:flex; align-items:center; gap:4px;">
+                  <span>🛡️ Natural Safety Schedule Active</span>
+                </div>
+                <div>Auto-takes <strong>10-15m break every 30m</strong> | <strong>30m long pause after 2 hours</strong>. Auto-refreshes page if no fresh posts after 5-6 scrolls.</div>
+              </div>
+
+              <!-- 4 Action Checkboxes -->
+              <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">ACTIONS ON DISCOVERED TWEETS & AUTHORS:</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11px;">
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="followerOptLike" checked style="accent-color:var(--blue-primary);">
+                    <span>❤️ Auto-Like</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="followerOptComment" checked style="accent-color:var(--blue-primary);">
+                    <span>💬 Auto-Comment</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="followerOptRepost" style="accent-color:var(--blue-primary);">
+                    <span>🔁 Auto-Repost</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="followerOptFollow" checked style="accent-color:var(--blue-primary);">
+                    <span>➕ Auto-Follow</span>
+                  </label>
+                </div>
               </div>
 
               <!-- Live Progress Card for Followers Increase -->
@@ -734,52 +794,16 @@
                 </div>
               </div>
 
-              <div style="display:flex; gap:6px; margin-top:4px;">
+              <div style="display:flex; gap:6px; margin-top:6px;">
                 <button class="primary-btn mini-btn" id="runFollowerIncreaseBtn" style="flex:2; margin-top:0;">▶ START AUTO FOLLOWER GROWTH</button>
-                <button class="secondary-btn mini-btn" id="stopFollowerIncreaseBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+                <button class="secondary-btn mini-btn" id="resetFollowerQueueBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Queue & Counters">🔄 Reset</button>
+                <button class="secondary-btn mini-btn" id="pauseFollowerIncreaseBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow">⏸️ Pause</button>
+                <button class="secondary-btn mini-btn" id="skipFollowerIncreaseBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current profile">⏭️ Skip</button>
+                <button class="secondary-btn mini-btn" id="stopFollowerIncreaseBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Stop workflow">⏹ STOP</button>
               </div>
             </div>
 
-            <!-- Workspace 5: Post Generator (A5, AI Studio) -->
-            <div class="agent-panel-content" id="panel-agent-postgen" style="display:none; flex-direction:column; gap:10px;">
-              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-                <strong>AI Content Studio:</strong> Turn raw thoughts, bullet points, or reference articles into viral, high-engagement X posts and multi-tweet threads.
-              </div>
 
-              <div>
-                <label class="opt-label">Raw Notes, Thoughts, or Reference Links</label>
-                <textarea id="rawNotesInput" class="ext-textarea mini" style="min-height:75px;" placeholder="Paste ideas, bullet points, alpha, or article summary here..."></textarea>
-              </div>
-
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Post Format</label>
-                  <select id="postFormatSelect" class="ext-select">
-                    <option value="medium" selected>Medium Post (180 chars)</option>
-                    <option value="long">Deep Analysis (280 chars)</option>
-                    <option value="thread">Viral Thread (4 Tweets)</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="opt-label">Style / Voice</label>
-                  <select id="postToneSelect" class="ext-select">
-                    <option value="founder" selected>Founder / Operator</option>
-                    <option value="contrarian">Bold & Contrarian</option>
-                    <option value="data">Data-Driven Alpha</option>
-                  </select>
-                </div>
-              </div>
-
-              <button class="primary-btn mini-btn" id="generatePostBtn" style="margin-top:2px;">✨ GENERATE HIGH-ENGAGEMENT POST</button>
-
-              <div id="postOutputContainer" style="display:none; flex-direction:column; gap:6px; margin-top:6px;">
-                <label class="opt-label" style="display:flex; justify-content:space-between; align-items:center;">
-                  <span>Generated Post Draft</span>
-                  <span style="font-size:10px; color:var(--blue-primary); cursor:pointer;" id="copyPostDraftBtn">📋 Copy Text</span>
-                </label>
-                <textarea id="postOutputArea" class="ext-textarea mini" style="min-height:90px; font-family:inherit; line-height:1.4;" readonly></textarea>
-              </div>
-            </div>
 
             <!-- Workspace 6: Reply Back (A6, Posts, Fully Auto) -->
             <div class="agent-panel-content" id="panel-agent-replyback" style="display:none; flex-direction:column; gap:10px;">
@@ -883,7 +907,10 @@
               <!-- Action Buttons -->
               <div style="display:flex; gap:6px; margin-top:2px;">
                 <button class="primary-btn mini-btn" id="runReplyBackBtn" style="flex:2; margin-top:0;">▶ START AUTO REPLY BACK</button>
-                <button class="secondary-btn mini-btn" id="stopReplyBackBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+                <button class="secondary-btn mini-btn" id="resetReplyBackQueueBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Queue & Counters">🔄 Reset</button>
+                <button class="secondary-btn mini-btn" id="pauseReplyBackBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow">⏸️ Pause</button>
+                <button class="secondary-btn mini-btn" id="skipReplyBackBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current reply">⏭️ Skip</button>
+                <button class="secondary-btn mini-btn" id="stopReplyBackBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Stop workflow">⏹ STOP</button>
               </div>
             </div>
 
@@ -996,41 +1023,11 @@
               <!-- Action Buttons -->
               <div style="display:flex; gap:6px; margin-top:2px;">
                 <button class="secondary-btn mini-btn" id="runAutoUnfollowBtn" style="flex:2; margin-top:0; background:rgba(239,68,68,0.08); color:#DC2626; border-color:rgba(239,68,68,0.3);">🧹 SCAN & SAFE UNFOLLOW</button>
-                <button class="secondary-btn mini-btn" id="stopAutoUnfollowBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+                <button class="secondary-btn mini-btn" id="resetUnfollowQueueBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Counters & Queue">🔄 Reset</button>
+                <button class="secondary-btn mini-btn" id="pauseAutoUnfollowBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow">⏸️ Pause</button>
+                <button class="secondary-btn mini-btn" id="skipAutoUnfollowBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current account">⏭️ Skip</button>
+                <button class="secondary-btn mini-btn" id="stopAutoUnfollowBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Stop workflow">⏹ STOP</button>
               </div>
-            </div>
-
-            <!-- Workspace 8: Picture & Voice Match (A8, Persona) -->
-            <div class="agent-panel-content" id="panel-agent-match" style="display:none; flex-direction:column; gap:10px;">
-              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-                <strong>Aesthetic & Tone Calibration:</strong> Replicates your signature writing voice while generating matched high-resolution imagery for maximum visual resonance.
-              </div>
-
-              <div>
-                <label class="opt-label">Persona Tonality</label>
-                <select class="ext-select" id="personaVoiceSelect">
-                  <option selected>Crisp High-Alpha Founder (@evanjawadx tone)</option>
-                  <option>Minimalist Web3 Operator & Systems Builder</option>
-                  <option>Analytical Researcher (Deep Signal & Logic)</option>
-                  <option>Witty Tech Maverick</option>
-                </select>
-              </div>
-
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Visual Concept Topic</label>
-                  <input type="text" id="imagePromptTopic" class="ext-input" placeholder="e.g. Autonomous AI Swarms" style="font-size:11px;">
-                </div>
-                <div>
-                  <label class="opt-label">Image Aspect Ratio</label>
-                  <select id="personaAspectSelect" class="ext-select">
-                    <option value="16:9" selected>16:9 Landscape (Twitter Post)</option>
-                    <option value="1:1">1:1 Square (Feed Card)</option>
-                  </select>
-                </div>
-              </div>
-
-              <button class="primary-btn mini-btn" id="runPictureVoiceBtn" style="margin-top:2px;">🎨 CALIBRATE PERSONA & GENERATE CONCEPT</button>
             </div>
 
             <!-- Workspace 9: Favorite Creators Radar (A9, Radar) -->
@@ -1053,10 +1050,10 @@
                   <span style="font-size:10px; color:var(--text-muted);">Click to track</span>
                 </div>
                 <div style="display:flex; flex-wrap:wrap; gap:4px;">
-                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@vitalikbuterin'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @vitalikbuterin</button>
-                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@brian_armstrong'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @brian_armstrong</button>
-                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@elonmusk'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @elonmusk</button>
-                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@sama'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">+ @sama</button>
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@vitalikbuterin'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; background:rgba(59,130,246,0.22); border:1px solid rgba(59,130,246,0.6); color:#38BDF8; font-weight:700; padding:4px 9px; border-radius:5px; font-size:10.5px; display:inline-flex; align-items:center;">+ @vitalikbuterin</button>
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@brian_armstrong'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; background:rgba(59,130,246,0.22); border:1px solid rgba(59,130,246,0.6); color:#38BDF8; font-weight:700; padding:4px 9px; border-radius:5px; font-size:10.5px; display:inline-flex; align-items:center;">+ @brian_armstrong</button>
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@elonmusk'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; background:rgba(59,130,246,0.22); border:1px solid rgba(59,130,246,0.6); color:#38BDF8; font-weight:700; padding:4px 9px; border-radius:5px; font-size:10.5px; display:inline-flex; align-items:center;">+ @elonmusk</button>
+                  <button type="button" class="badge-mini" onclick="document.getElementById('addCreatorInput').value='@sama'; document.getElementById('addCreatorBtn').click();" style="cursor:pointer; background:rgba(59,130,246,0.22); border:1px solid rgba(59,130,246,0.6); color:#38BDF8; font-weight:700; padding:4px 9px; border-radius:5px; font-size:10.5px; display:inline-flex; align-items:center;">+ @sama</button>
                 </div>
               </div>
 
@@ -1080,7 +1077,9 @@
               <div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <label class="opt-label" style="margin-bottom:0;">Your Tweet Post Link</label>
-                  <button type="button" class="badge-mini" id="defaulterUseCurrentTabBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">⚡ Current Tab</button>
+                  <button type="button" class="badge-mini" id="defaulterUseCurrentTabBtn" style="cursor:pointer; background:rgba(59,130,246,0.22); border:1px solid rgba(59,130,246,0.6); color:#38BDF8; font-weight:700; padding:3px 9px; border-radius:5px; font-size:10px; display:inline-flex; align-items:center; gap:3px;">
+                    <span>⚡</span> Current Tab
+                  </button>
                 </div>
                 <input type="text" id="defaulterPostUrl" class="ext-input" placeholder="https://x.com/yourhandle/status/18420958...">
               </div>
@@ -1088,13 +1087,13 @@
               <!-- Expected Usernames List -->
               <div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <label class="opt-label" style="margin-bottom:0;">Expected Group Usernames / Members</label>
+                  <label class="opt-label" style="margin-bottom:0;">Expected Group Members / Raid Logs</label>
                   <span id="defaulterExpectedCountBadge" style="font-size:10px; color:var(--blue-primary); font-weight:700;">0 Members</span>
                 </div>
-                <textarea id="defaulterExpectedUsers" class="ext-textarea" rows="4" placeholder="Paste telegram group list, e.g.:&#10;@elonmusk, @vitalikbuterin, @cz_binance&#10;or raw text with @handles..."></textarea>
+                <textarea id="defaulterExpectedUsers" class="ext-textarea" rows="4" placeholder="Paste Telegram raid logs, chat messages, or X links, e.g.:&#10;x.com/reduansheikh11/status/2101233...&#10;x.com/AyomideO75201/status/2101398...&#10;@reduansheikh11, @Bharnij, @fepz_..."></textarea>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-                  <button type="button" class="badge-mini" id="defaulterCleanListBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">🧹 Clean & Extract @handles</button>
-                  <span style="font-size:10px; color:var(--text-muted);">Cost: 5 Credits / audit scan</span>
+                  <button type="button" class="badge-mini" id="defaulterCleanListBtn" style="cursor:pointer; background:rgba(59,130,246,0.22); border:1px solid rgba(59,130,246,0.6); color:#38BDF8; font-weight:700; padding:4px 10px; border-radius:5px; font-size:10.5px; display:inline-flex; align-items:center; gap:4px;">🧹 Clean & Extract @handles</button>
+                  <span style="font-size:10px; color:var(--text-muted);">Auto-cleans raw links & chat logs</span>
                 </div>
               </div>
 
@@ -1124,8 +1123,20 @@
                     <div style="font-weight:800; font-size:14px; color:#EF4444;" id="defaulterStatDefaulters">0</div>
                   </div>
                 </div>
-                <div style="font-size:11px; font-weight:700; margin-bottom:4px; color:#EF4444;">Defaulters List (Did not comment):</div>
-                <div id="defaulterChipsContainer" style="display:flex; flex-wrap:wrap; gap:4px; max-height:120px; overflow-y:auto; padding:4px; background:var(--bg-canvas); border-radius:6px; border:1px solid var(--border-subtle);">
+                <!-- Audit Summary Breakdown -->
+                <div id="defaulterSummaryText" style="font-size:11px; color:var(--text-secondary); margin-bottom:8px; line-height:1.4;"></div>
+
+                <!-- Copy Box with 1-Click Copy -->
+                <div id="defaulterCopyBoxContainer" style="display:none; flex-direction:column; gap:4px; margin-bottom:8px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:10.5px; font-weight:700; color:#EF4444;">Defaulter Usernames (Click box or button to copy):</span>
+                  </div>
+                  <textarea id="defaulterCopyBox" readonly class="ext-textarea" rows="3" style="font-size:11px; font-family:monospace; cursor:pointer; background:rgba(239, 68, 68, 0.08); border-color:rgba(239, 68, 68, 0.3); color:#F87171;" title="Click anywhere to copy"></textarea>
+                  <button type="button" class="primary-btn mini-btn" id="copyDefaultersMainBtn" style="margin-top:2px; background:#EF4444;">📋 COPY DEFAULTERS LIST</button>
+                </div>
+
+                <div style="font-size:11px; font-weight:700; margin-bottom:4px; color:#EF4444;">Defaulter Members:</div>
+                <div id="defaulterChipsContainer" style="display:flex; flex-wrap:wrap; gap:4px; max-height:100px; overflow-y:auto; padding:4px; background:var(--bg-canvas); border-radius:6px; border:1px solid var(--border-subtle);">
                 </div>
               </div>
             </div>
@@ -1193,7 +1204,8 @@
 
               <!-- Action Controls -->
               <div style="display:flex; gap:6px; margin-top:2px;">
-                <button type="button" class="primary-btn mini-btn" id="startTgLiveRaidBtn" style="flex:1; margin-top:0; background:linear-gradient(135deg, #DC2626, #B91C1C);">🔴 START LIVE RAID RECORDING</button>
+                <button type="button" class="primary-btn mini-btn" id="startTgLiveRaidBtn" style="flex:2; margin-top:0; background:linear-gradient(135deg, #DC2626, #B91C1C);">🔴 START LIVE RAID RECORDING</button>
+                <button type="button" class="secondary-btn mini-btn" id="resetTgLiveLikerBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Counters">🔄 Reset</button>
                 <button type="button" class="secondary-btn mini-btn" id="stopTgLiveRaidBtn" style="display:none; flex:1; margin-top:0; color:#EF4444; border-color:#EF4444;">⏹️ Stop Raid</button>
               </div>
 
@@ -1237,9 +1249,12 @@
               <div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <label class="opt-label" style="margin-bottom:0;">Your Tweet Post Link</label>
-                  <button type="button" class="badge-mini" id="reciprocatorUseCurrentTabBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">⚡ Current Tab</button>
+                  <button type="button" class="badge-mini" id="reciprocatorUseCurrentTabBtn" style="cursor:pointer; background:rgba(59,130,246,0.22); border:1px solid rgba(59,130,246,0.6); color:#38BDF8; font-weight:700; padding:3px 9px; border-radius:5px; font-size:10px; display:inline-flex; align-items:center; gap:3px;">
+                    <span>⚡</span> Current Tab
+                  </button>
                 </div>
                 <input type="text" id="reciprocatorPostUrl" class="ext-input" placeholder="https://x.com/yourhandle/status/18420958...">
+                <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">Auto-likes unliked comments & skips already liked comments as deduplication.</div>
               </div>
 
               <!-- Phase 2: Controls & Options -->
@@ -1247,6 +1262,7 @@
                 <div>
                   <label class="opt-label">Target Commenters Limit</label>
                   <select id="reciprocatorMaxCount" class="ext-select">
+                    <option value="5">5 Commenters</option>
                     <option value="10" selected>10 Commenters</option>
                     <option value="25">25 Commenters</option>
                     <option value="50">50 Commenters</option>
@@ -1255,37 +1271,68 @@
                   </select>
                 </div>
                 <div>
-                  <label class="opt-label">Delay Between Profiles</label>
-                  <select id="reciprocatorDelaySelect" class="ext-select">
-                    <option value="15" selected>15 - 20s (Recommended)</option>
-                    <option value="12">10 - 15s (Faster)</option>
-                    <option value="25">20 - 30s (Ultra Safe)</option>
+                  <label class="opt-label">Posts per Profile</label>
+                  <select id="reciprocatorPostsPerProfileSelect" class="ext-select">
+                    <option value="random" selected>🎲 Random 1 or 2 (Recommended)</option>
+                    <option value="1">1 Recent Post</option>
+                    <option value="2">2 Recent Posts</option>
+                    <option value="3">3 Recent Posts</option>
                   </select>
                 </div>
               </div>
 
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Active AI Voice</label>
-                  <div style="padding:6px 8px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px; color:var(--blue-primary); font-weight:700;" id="reciprocatorActiveToneLabel">
-                    Global Voice Active
-                  </div>
+              <!-- Special Pre-Scan Delay Between Comment Likes (Commenter Reciprocator Exclusive) -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Delay Between Comment Likes</label>
+                  <span style="font-size:10px; color:var(--blue-primary); font-weight:700;">Special Delay</span>
                 </div>
-                <div style="display:flex; flex-direction:column; gap:4px; margin-top:14px;">
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
-                    <input type="checkbox" id="reciprocatorOptLike" checked>
-                    <span>❤️ Auto-Like their post</span>
+                <select id="reciprocatorLikeDelaySelect" class="ext-select">
+                  <option value="2500">Fast (2 - 3s per like)</option>
+                  <option value="4000" selected>🛡️ Recommended (3 - 5s per like)</option>
+                  <option value="6000">Organic (5 - 7s per like)</option>
+                  <option value="10000">Ultra Safe (8 - 12s per like)</option>
+                </select>
+                <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">Special pause between liking comments on your post before profile collection.</div>
+              </div>
+
+              <!-- Global AI Voice & Centralized Safety indicator -->
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <div>
+                  <span style="color:var(--text-secondary);">Active AI Voice: </span>
+                  <span id="reciprocatorActiveToneLabel" style="color:var(--blue-primary); font-weight:700;">Global Voice Active</span>
+                </div>
+                <div style="font-size:9.5px; color:var(--text-muted); display:flex; align-items:center; gap:4px;">
+                  <span>🛡️ Global Safety Governed</span>
+                </div>
+              </div>
+
+              <!-- 4 Action Checkboxes (Like, Comment, Repost, Follow) -->
+              <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">ACTIONS ON EACH COMMENTER'S RECENT POSTS:</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11px;">
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="reciprocatorOptLike" checked style="accent-color:var(--blue-primary);">
+                    <span>❤️ Auto-Like</span>
                   </label>
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
-                    <input type="checkbox" id="reciprocatorOptFollow">
-                    <span>➕ Follow commenter</span>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="reciprocatorOptComment" checked style="accent-color:var(--blue-primary);">
+                    <span>💬 Auto-Comment</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="reciprocatorOptRepost" style="accent-color:var(--blue-primary);">
+                    <span>🔁 Auto-Repost</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="reciprocatorOptFollow" style="accent-color:var(--blue-primary);">
+                    <span>➕ Auto-Follow</span>
                   </label>
                 </div>
               </div>
 
               <!-- Cost Notice -->
               <div style="font-size:10.5px; color:var(--text-muted); background:var(--bg-canvas); padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle);">
-                💳 <strong>Cost:</strong> 1 credit per reciprocal comment posted. Skips self and previously engaged accounts.
+                💳 <strong>Cost:</strong> 1 credit per reciprocal comment posted. Skips self, already liked comments, and previously engaged accounts.
               </div>
 
               <!-- Progress & State Machine Card -->
@@ -1321,7 +1368,10 @@
               <!-- Action Controls -->
               <div style="display:flex; gap:6px; margin-top:2px;">
                 <button type="button" class="primary-btn mini-btn" id="runReciprocatorBtn" style="flex:2; margin-top:0;">🤝 START RECIPROCAL COMMENTING</button>
-                <button type="button" class="secondary-btn mini-btn" id="stopReciprocatorBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;">⏹ STOP</button>
+                <button type="button" class="secondary-btn mini-btn" id="resetReciprocatorQueueBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Queue & History">🔄 Reset</button>
+                <button type="button" class="secondary-btn mini-btn" id="pauseReciprocatorBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow">⏸️ Pause</button>
+                <button type="button" class="secondary-btn mini-btn" id="skipReciprocatorBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current commenter">⏭️ Skip</button>
+                <button type="button" class="secondary-btn mini-btn" id="stopReciprocatorBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Stop workflow">⏹ STOP</button>
               </div>
             </div>
 
@@ -1418,26 +1468,57 @@
       <section id="panel-safety" class="tab-panel">
         <div class="card" style="padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
           <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--text-primary);">Anti-Ban Safety Controls</div>
-          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:14px;">Humanized pacing prevents Twitter rate-limits, shadowbans, and bot-detection.</p>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:14px;">Humanized pacing across all agents protects your Twitter account from rate-limits and shadowbans.</p>
 
-          <div class="setting-item" style="margin-bottom:14px;">
-            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
-              <span>Action Delay (Randomized)</span>
-              <span id="valExtDelay" style="color:var(--blue-primary);">5 - 10 sec</span>
+          <!-- Automatic Batching Protocol Info Box -->
+          <div style="padding:10px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:6px; font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom:14px;">
+            <div style="font-weight:700; color:var(--blue-primary); margin-bottom:2px; display:flex; align-items:center; gap:5px;">
+              <span>⚡</span> Automatic Batching Protocol Active
             </div>
-            <input type="range" min="3" max="25" value="8" id="extDelaySlider" class="ext-slider">
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Adds randomized sleep between likes, comments, and follows.</div>
+            <div>Whenever your target count exceeds <strong>10 profiles</strong>, AtomX automatically processes in batches of <strong>5 profiles</strong> with a cooldown break between batches.</div>
           </div>
 
+          <!-- 1. Reply Delay -->
+          <div class="setting-item" style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
+              <span>Reply Delay (After Comment)</span>
+              <span id="valExtReplyDelay" style="color:var(--blue-primary);">8 - 14 sec</span>
+            </div>
+            <input type="range" min="5" max="30" value="10" id="extReplyDelaySlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Pause after each reply before executing follow, like, or next action.</div>
+          </div>
+
+          <!-- 2. Profile Wait -->
+          <div class="setting-item" style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
+              <span>Profile Wait (Between Accounts)</span>
+              <span id="valExtProfileWait" style="color:var(--blue-primary);">15 - 25 sec</span>
+            </div>
+            <input type="range" min="10" max="60" value="20" id="extProfileWaitSlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Pacing wait time before navigating to the next target profile.</div>
+          </div>
+
+          <!-- 3. Break After Actions -->
           <div class="setting-item" style="margin-bottom:14px;">
             <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
               <span>Take Break After</span>
-              <span id="valExtBreak" style="color:var(--blue-primary);">20 actions</span>
+              <span id="valExtBreakActions" style="color:var(--blue-primary);">15 actions</span>
             </div>
-            <input type="range" min="10" max="60" step="5" value="20" id="extBreakSlider" class="ext-slider">
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Pauses automation for 5-10 minutes to reset session state.</div>
+            <input type="range" min="5" max="40" step="5" value="15" id="extBreakActionsSlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Triggers a restorative cooldown pause after N combined actions.</div>
           </div>
 
+          <!-- 4. Batch Rest Duration -->
+          <div class="setting-item" style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
+              <span>Batch Rest Duration</span>
+              <span id="valExtRestDuration" style="color:var(--blue-primary);">5 minutes</span>
+            </div>
+            <input type="range" min="2" max="20" step="1" value="5" id="extRestDurationSlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">How long the bot rests during batch intervals and action breaks.</div>
+          </div>
+
+          <!-- Background Mode Toggle -->
           <div class="setting-toggle-row" style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid var(--border-subtle);">
             <div>
               <div style="font-weight:600; font-size:13px; color:var(--text-primary);">Background Mode</div>
@@ -1637,17 +1718,17 @@
 
           <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Your Full Name <span style="color:#EF4444; font-size:10px;">* Required</span></label>
-            <input type="text" id="extReqFullNameInput" class="ext-input" placeholder="e.g. Evan Jawad" value="">
+            <input type="text" id="extReqFullNameInput" class="ext-input" placeholder="e.g. mythopair" value="">
           </div>
 
           <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Email Address <span style="color:#EF4444; font-size:10px;">* Required</span></label>
-            <input type="email" id="extReqEmailInput" class="ext-input" placeholder="e.g. evan@atomx.io" value="">
+            <input type="email" id="extReqEmailInput" class="ext-input" placeholder="e.g. mythopair@atomx.io" value="">
           </div>
 
           <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Telegram ID / Username <span style="color:#EF4444; font-size:10px;">* Required</span></label>
-            <input type="text" id="extReqTelegramInput" class="ext-input" placeholder="e.g. @evanjawad" value="">
+            <input type="text" id="extReqTelegramInput" class="ext-input" placeholder="e.g. @mythopair" value="">
           </div>
 
           <div style="margin-bottom:8px;">
@@ -1694,7 +1775,7 @@
 
           <div style="margin-bottom:12px; text-align:left;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:4px;">Your Twitter / X ID (Handle) or Email</label>
-            <input type="text" id="extLookupHandleInput" class="ext-input" placeholder="e.g. @yournahian or email@atomx.io" value="">
+            <input type="text" id="extLookupHandleInput" class="ext-input" placeholder="e.g. @mythopair or mythopair@atomx.io" value="">
           </div>
 
           <div id="extLookupStatusAlert" style="display:none; margin-bottom:12px; padding:8px 10px; border-radius:6px; font-size:11px; text-align:left; line-height:1.4;"></div>
@@ -1837,7 +1918,7 @@
 
           <div style="margin-bottom:8px;">
             <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Twitter / X ID or Email</label>
-            <input type="text" id="extLoginHandleInput" class="ext-input" placeholder="e.g. @yourhandle or your@email.com" value="">
+            <input type="text" id="extLoginHandleInput" class="ext-input" placeholder="e.g. @mythopair or mythopair@atomx.io" value="">
           </div>
 
           <div style="margin-bottom:8px;">
@@ -1883,12 +1964,12 @@
 
             <div style="margin-bottom:8px;">
               <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Registered Email <span style="color:#EF4444; font-size:10px;">* Required</span></label>
-              <input type="email" id="extForgotEmailInput" class="ext-input" placeholder="e.g. user@email.com">
+              <input type="email" id="extForgotEmailInput" class="ext-input" placeholder="e.g. mythopair@atomx.io">
             </div>
 
             <div style="margin-bottom:12px;">
               <label class="opt-label" style="color:var(--text-secondary); margin-bottom:3px;">Telegram Username / ID <span style="color:#EF4444; font-size:10px;">* Required</span></label>
-              <input type="text" id="extForgotTelegramInput" class="ext-input" placeholder="e.g. @username">
+              <input type="text" id="extForgotTelegramInput" class="ext-input" placeholder="e.g. @mythopair">
               <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">Your registered Telegram ID for account verification.</div>
             </div>
 
@@ -1963,7 +2044,8 @@
           <button type="button" class="ext-notify-close-btn" id="extNotifyCloseBtn">✕</button>
         </div>
         <div class="ext-notify-body" id="extNotifyBody"></div>
-        <div class="ext-notify-footer">
+        <div class="ext-notify-footer" id="extNotifyFooter" style="display:flex; justify-content:flex-end; gap:8px;">
+          <button type="button" class="secondary-btn mini-btn" id="extNotifyCancelBtn" style="display:none; margin:0; padding:8px 14px; font-weight:600; border-radius:6px; cursor:pointer;">Cancel</button>
           <button type="button" class="ext-notify-ok-btn" id="extNotifyOkBtn">Got It</button>
         </div>
       </div>

@@ -24,6 +24,45 @@ function safeRemoveTab(tabId) {
   }
 }
 
+// Reuses a SINGLE browser tab/window for all links/actions instead of opening/closing repeatedly
+async function getOrCreateReusedTab(existingTabId, targetUrl) {
+  // 1. If an existing working tab is known, verify it is still open and update it in-place
+  if (existingTabId && typeof existingTabId === 'number' && existingTabId > 0) {
+    try {
+      const existingTab = await chrome.tabs.get(existingTabId);
+      if (existingTab && existingTab.id) {
+        await chrome.tabs.update(existingTab.id, { url: targetUrl, active: true });
+        return existingTab.id;
+      }
+    } catch (e) {
+      // Tab was closed by user
+    }
+  }
+
+  // 2. Check for active tab in current window if already on X / Twitter
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (activeTab && activeTab.id && activeTab.url && (activeTab.url.includes('x.com') || activeTab.url.includes('twitter.com'))) {
+      await chrome.tabs.update(activeTab.id, { url: targetUrl, active: true });
+      return activeTab.id;
+    }
+  } catch (e) {}
+
+  // 3. Check for ANY open Twitter / X tab in any window so we reuse it instead of opening new windows/tabs
+  try {
+    const openTwitterTabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] });
+    if (openTwitterTabs && openTwitterTabs.length > 0 && openTwitterTabs[0]?.id) {
+      const tabToUse = openTwitterTabs[0];
+      await chrome.tabs.update(tabToUse.id, { url: targetUrl, active: true });
+      return tabToUse.id;
+    }
+  } catch (e) {}
+
+  // 4. Fallback: only if no Twitter tab exists anywhere, open a single tab in the current window and reuse it
+  const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
+  return newTab.id;
+}
+
 // ─────────────────────────────────────────────
 // LIFECYCLE
 // ─────────────────────────────────────────────
@@ -46,18 +85,29 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'atomx_popup_lifecycle') {
     chrome.storage.local.set({ atomx_popup_open: true }).catch(() => null);
+    // When popup opens, instantly hide Floating HUD on tabs so they don't overlap
+    try {
+      chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+        if (tabs && tabs.length > 0) {
+          for (const t of tabs) {
+            if (t.id) chrome.tabs.sendMessage(t.id, { type: 'POPUP_OPENED' }).catch(() => null);
+          }
+        }
+      });
+    } catch (e) {}
+
     port.onDisconnect.addListener(() => {
       chrome.storage.local.set({ atomx_popup_open: false }).catch(() => null);
-      // Immediately notify active tabs that popup closed so Floating HUD displays
+      // When popup closes, instantly show Floating HUD on tabs if a workflow is running
       try {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          if (tabs && tabs[0]?.id) {
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'POPUP_CLOSED' }).catch(() => null);
+        chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+          if (tabs && tabs.length > 0) {
+            for (const t of tabs) {
+              if (t.id) chrome.tabs.sendMessage(t.id, { type: 'POPUP_CLOSED' }).catch(() => null);
+            }
           }
         });
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     });
   }
 });
@@ -152,12 +202,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'TOGGLE_WORKFLOW_PAUSE') {
-    chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused'], (res) => {
+    chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow', 'atomx_workflow_paused'], (res) => {
       const isPaused = (request.isPaused !== undefined) ? request.isPaused : !res?.atomx_workflow_paused;
       chrome.storage.local.set({ atomx_workflow_paused: isPaused });
       if (res?.atomx_tg_raid) {
         chrome.storage.local.set({ atomx_tg_raid: { ...res.atomx_tg_raid, isPaused } });
       }
+      if (res?.atomx_agent_workflow) {
+        chrome.storage.local.set({ atomx_agent_workflow: { ...res.atomx_agent_workflow, isPaused } });
+      }
+      // Broadcast pause state to all tabs
+      chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+        if (tabs) {
+          for (const t of tabs) {
+            if (t.id) chrome.tabs.sendMessage(t.id, { type: 'TOGGLE_WORKFLOW_PAUSE', isPaused }).catch(() => null);
+          }
+        }
+      });
       sendResponse({ ok: true, isPaused });
     });
     return true;
@@ -165,16 +226,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.type === 'SKIP_WORKFLOW_ITEM') {
     chrome.storage.local.set({ atomx_skip_current: true });
-    chrome.storage.local.get(['atomx_tg_raid'], (res) => {
+    // Tell current active working tab to abort current tweet action
+    if (tgRaidWorkingTabId) {
+      chrome.tabs.sendMessage(tgRaidWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+    }
+    if (agentWorkflowWorkingTabId) {
+      chrome.tabs.sendMessage(agentWorkflowWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+    }
+
+    chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow'], (res) => {
       if (res?.atomx_tg_raid?.active) {
         const raid = res.atomx_tg_raid;
         const updatedRaid = {
           ...raid,
           currentIndex: raid.currentIndex + 1,
-          ignoredCount: raid.ignoredCount + 1
+          ignoredCount: (raid.ignoredCount || 0) + 1
         };
         chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
-        chrome.alarms.create('atomx_tg_raid_step', { when: Date.now() + 300 });
+        // Immediately advance to next step without waiting on an alarm!
+        setTimeout(() => processTgRaidStep(), 150);
+      } else if (res?.atomx_agent_workflow?.active) {
+        const wf = res.atomx_agent_workflow;
+        const updatedWf = {
+          ...wf,
+          currentIndex: wf.currentIndex + 1,
+          ignoredCount: (wf.ignoredCount || 0) + 1
+        };
+        chrome.storage.local.set({ atomx_agent_workflow: updatedWf, atomx_skip_current: false });
+        // Immediately advance to next step without waiting on an alarm!
+        setTimeout(() => processAgentWorkflowStep(), 150);
       }
     });
     sendResponse({ ok: true });
@@ -313,12 +393,24 @@ async function handleStartTgRaid(request, sendResponse) {
 }
 
 async function processTgRaidStep() {
-  const stored = await chrome.storage.local.get(['atomx_tg_raid']).catch(() => ({}));
+  const stored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
   const raid = stored?.atomx_tg_raid;
 
   if (!raid || !raid.active) {
     console.log('[ATOMX BG] TG Raid: no active raid found, stopping.');
     return;
+  }
+
+  // Handle pause: wait if paused
+  if (stored?.atomx_workflow_paused || raid.isPaused) {
+    console.log('[ATOMX BG] TG Raid is paused. Waiting for user to resume...');
+    await syncTgHud(raid, '⏸️ Workflow Paused by User', 'PAUSED', raid.progressPercent || 0, '', 'Paused', '⏸️ Paused');
+    while (true) {
+      await delay(500);
+      const recheck = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused']).catch(() => ({}));
+      if (!recheck?.atomx_tg_raid?.active) return;
+      if (!recheck?.atomx_workflow_paused && !recheck?.atomx_tg_raid?.isPaused) break;
+    }
   }
 
   const { tweets, actions, options, currentIndex, total, successCount, ignoredCount } = raid;
@@ -330,38 +422,45 @@ async function processTgRaidStep() {
   }
 
   const tweet = tweets[currentIndex];
+  const nextTweet = tweets[currentIndex + 1];
   const indexStr = `[${currentIndex + 1}/${total}]`;
+  const nextInfo = nextTweet
+    ? `Tweet ${currentIndex + 2}/${total} (@${nextTweet.handle || 'user'})`
+    : 'Completion';
+
   console.log(`[ATOMX BG] TG Raid step ${indexStr}: ${tweet.canonicalUrl}`);
 
-  await syncTgHud(raid,
+  await syncTgHud(
+    raid,
     `${indexStr} Visiting @${tweet.handle || 'user'}...`,
     'ENGAGING',
-    Math.round((currentIndex / total) * 100)
+    Math.round((currentIndex / total) * 100),
+    '',
+    `Visiting @${tweet.handle || 'user'}`,
+    '⚡ Active'
   );
 
   try {
-    // Navigate in current tab instead of opening new tab
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    let tab = tabs && tabs[0];
-    let isNewTab = false;
-    if (tab && tab.id) {
-      await chrome.tabs.update(tab.id, { url: tweet.canonicalUrl });
-      tgRaidWorkingTabId = tab.id;
-    } else {
-      tab = await chrome.tabs.create({ url: tweet.canonicalUrl, active: true });
-      tgRaidWorkingTabId = tab.id;
-      isNewTab = true;
+    // Navigate in single reused tab/window across all tweets
+    const tabId = await getOrCreateReusedTab(tgRaidWorkingTabId, tweet.canonicalUrl);
+    tgRaidWorkingTabId = tabId;
+
+    // Wait for tab to load
+    await waitForTabLoad(tabId, 10000);
+    await delay(2000); // React hydration
+
+    // Re-check abort or skip after tab load
+    const recheckStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_skip_current']).catch(() => ({}));
+    if (!recheckStored?.atomx_tg_raid?.active) {
+      tgRaidWorkingTabId = null;
+      return;
     }
 
-    // Wait for tab to fully load (max 12s)
-    await waitForTabLoad(tab.id, 12000);
-    await delay(2500); // React hydration
-
-    // Re-check abort after tab load
-    const recheckStored = await chrome.storage.local.get(['atomx_tg_raid']).catch(() => ({}));
-    if (!recheckStored?.atomx_tg_raid?.active) {
-      if (isNewTab) safeRemoveTab(tab.id);
-      tgRaidWorkingTabId = null;
+    if (recheckStored?.atomx_skip_current) {
+      console.log(`[ATOMX BG] TG Raid ${indexStr}: Skipped by user!`);
+      const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1 };
+      await chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
+      setTimeout(() => processTgRaidStep(), 150);
       return;
     }
 
@@ -369,8 +468,18 @@ async function processTgRaidStep() {
     const localData = await chrome.storage.local.get(['backendUrl', 'selectedTone', 'selectedTonePrompt', 'verifiedXHandle']).catch(() => ({}));
     const backendUrl = (options.backendUrl || localData.backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
 
+    await syncTgHud(
+      raid,
+      `${indexStr} Executing actions on @${tweet.handle || 'user'}...`,
+      'ENGAGING',
+      Math.round((currentIndex / total) * 100),
+      '',
+      `Like & Comment @${tweet.handle || 'user'}`,
+      '⚡ Active'
+    );
+
     // Send engagement command to content script
-    const result = await sendMessageToTab(tab.id, {
+    const result = await sendMessageToTab(tabId, {
       type: 'EXECUTE_AUTONOMOUS_ENGAGEMENT',
       actions,
       replyText: '',
@@ -386,7 +495,6 @@ async function processTgRaidStep() {
     // Re-check abort after engagement
     const recheckStored2 = await chrome.storage.local.get(['atomx_tg_raid']).catch(() => ({}));
     if (!recheckStored2?.atomx_tg_raid?.active) {
-      if (isNewTab) safeRemoveTab(tab.id);
       tgRaidWorkingTabId = null;
       return;
     }
@@ -403,17 +511,14 @@ async function processTgRaidStep() {
       console.log(`[ATOMX BG] TG Raid ${indexStr}: Auto-ignored — ${result.reason || 'already done'}`);
     } else {
       newSuccessCount++;
-      // Deduct credit via storage
       const credData = await chrome.storage.local.get(['credits']).catch(() => ({}));
       const newCredits = Math.max(0, (credData.credits || 0) - 1);
       await chrome.storage.local.set({ credits: newCredits }).catch(() => null);
 
-      // Persist engaged tweet ID
       const engData = await chrome.storage.local.get(['engagedTweetIds']).catch(() => ({}));
       const engIds = Array.from(new Set([...(engData.engagedTweetIds || []), tweet.tweetId].filter(Boolean)));
       await chrome.storage.local.set({ engagedTweetIds: engIds }).catch(() => null);
 
-      // Mark engaged on backend (fire-and-forget)
       fetch(`${backendUrl}/api/tweets/mark-engaged`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -421,12 +526,7 @@ async function processTgRaidStep() {
       }).catch(() => null);
     }
 
-    // Only close tab if it was newly opened (never close user's current tab)
-    if (isNewTab) {
-      await delay(1500);
-      safeRemoveTab(tab.id);
-      tgRaidWorkingTabId = null;
-    }
+    // Keep tgRaidWorkingTabId open so subsequent tweets reuse the exact same tab/window!
 
     // Update raid state
     const updatedRaid = {
@@ -442,12 +542,21 @@ async function processTgRaidStep() {
     const statusLabel = isIgnored
       ? `${indexStr} Skipped @${tweet.handle || 'user'} (already done)`
       : `${indexStr} ✓ Engaged @${tweet.handle || 'user'}`;
-    await syncTgHud(updatedRaid, statusLabel, 'ENGAGING', Math.round(((currentIndex + 1) / total) * 100));
+
+    await syncTgHud(
+      updatedRaid,
+      statusLabel,
+      'ENGAGING',
+      Math.round(((currentIndex + 1) / total) * 100),
+      '',
+      nextInfo,
+      'Ready'
+    );
 
     // Schedule anti-ban pacing delay before next tweet
     if (updatedRaid.currentIndex < total) {
       const delaySec = Math.max(3, (options.delaySeconds || 7) + Math.floor(Math.random() * 4 - 2));
-      await schedulePacingCountdown(delaySec, updatedRaid, currentIndex + 1, total);
+      await schedulePacingCountdown(delaySec, updatedRaid, currentIndex + 1, total, nextInfo);
     } else {
       // Last tweet — finish immediately
       await finishTgRaid(updatedRaid);
@@ -456,43 +565,63 @@ async function processTgRaidStep() {
   } catch (err) {
     console.warn(`[ATOMX BG] TG Raid error on ${tweet.canonicalUrl}:`, err);
     if (tgRaidWorkingTabId) {
-      // Don't kill active tab on error, just clear tracking
       tgRaidWorkingTabId = null;
     }
-    // Skip this tweet and move to next
-    const updatedRaid = { ...raid, currentIndex: currentIndex + 1 };
+    const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1 };
     await chrome.storage.local.set({ atomx_tg_raid: updatedRaid });
-    chrome.alarms.create('atomx_tg_raid_step', { when: Date.now() + 2000 });
+    setTimeout(() => processTgRaidStep(), 1500);
   }
 }
 
-async function schedulePacingCountdown(delaySec, raid, completedIndex, total) {
-  // Update HUD each second during the pacing delay
+async function schedulePacingCountdown(delaySec, raid, completedIndex, total, nextActionText = '') {
   for (let sec = delaySec; sec > 0; sec--) {
     let recheckStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
-    if (!recheckStored?.atomx_tg_raid?.active) return; // Aborted during pacing
-    if (recheckStored?.atomx_skip_current) return; // Skipped
+    if (!recheckStored?.atomx_tg_raid?.active) return; // Aborted
 
-    // If workflow is paused, hold and wait here until resumed!
+    if (recheckStored?.atomx_skip_current) {
+      // Skip clicked during pacing delay!
+      await chrome.storage.local.set({ atomx_skip_current: false });
+      setTimeout(() => processTgRaidStep(), 100);
+      return;
+    }
+
+    // If workflow is paused, freeze and hold here until resumed
     while (recheckStored?.atomx_workflow_paused || recheckStored?.atomx_tg_raid?.isPaused) {
+      await syncTgHud(
+        recheckStored.atomx_tg_raid,
+        '⏸️ Workflow Paused by User',
+        'PAUSED',
+        Math.round((completedIndex / total) * 100),
+        '',
+        nextActionText,
+        '⏸️ Paused'
+      );
       await delay(400);
-      recheckStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused']).catch(() => ({}));
+      recheckStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
       if (!recheckStored?.atomx_tg_raid?.active) return;
+      if (recheckStored?.atomx_skip_current) {
+        await chrome.storage.local.set({ atomx_skip_current: false });
+        setTimeout(() => processTgRaidStep(), 100);
+        return;
+      }
       if (!recheckStored?.atomx_workflow_paused && !recheckStored?.atomx_tg_raid?.isPaused) break;
     }
 
+    const timeStr = `0:${String(sec).padStart(2, '0')}`;
     await syncTgHud(
       recheckStored.atomx_tg_raid,
-      `Anti-ban delay: ${sec}s before tweet ${completedIndex + 1}/${total}...`,
+      `Anti-ban delay: ${sec}s before ${nextActionText || ('tweet ' + (completedIndex + 1) + '/' + total)}...`,
       'PACING',
       Math.round((completedIndex / total) * 100),
-      `Next tweet in 0:${String(sec).padStart(2, '0')}`
+      `Next tweet in ${timeStr}`,
+      nextActionText || `Tweet ${completedIndex + 1}/${total}`,
+      `⏱️ ${timeStr}`
     );
     await delay(1000);
   }
 
-  // Schedule next step via alarm (allows service worker to rest between steps)
-  chrome.alarms.create('atomx_tg_raid_step', { when: Date.now() + 500 });
+  // PACING FINISHED: DIRECTLY CALL processTgRaidStep() so it continues without getting stuck!
+  setTimeout(() => processTgRaidStep(), 200);
 }
 
 async function finishTgRaid(raid) {
@@ -505,6 +634,8 @@ async function finishTgRaid(raid) {
     stateBadge: 'DONE',
     progressPercent: 100,
     countdownText: '',
+    nextAction: 'Complete',
+    timerBadge: '✓ Done',
     statusText: `✓ Raid complete! ${successCount} engaged, ${ignoredCount} skipped.`,
     finishedAt: Date.now()
   };
@@ -521,6 +652,8 @@ async function finishTgRaid(raid) {
       progressPercent: 100,
       statusText: `✓ Raid complete! ${successCount} engaged, ${ignoredCount} skipped.`,
       countdownText: '',
+      nextAction: 'Completed',
+      timerBadge: '✓ Done',
       isStopped: true,
       active: false
     }
@@ -537,7 +670,7 @@ async function abortTgRaid() {
 
   if (raid) {
     await chrome.storage.local.set({
-      atomx_tg_raid: { ...raid, active: false, stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.', countdownText: '' },
+      atomx_tg_raid: { ...raid, active: false, stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.', countdownText: '', nextAction: 'Stopped', timerBadge: '⏹️ Stopped' },
       atomx_active_hud: {
         title: 'Telegram Group Engage',
         stateBadge: 'STOPPED',
@@ -547,6 +680,8 @@ async function abortTgRaid() {
         progressPercent: Math.round(((raid.currentIndex || 0) / (raid.total || 1)) * 100),
         statusText: 'Workflow stopped by user.',
         countdownText: '',
+        nextAction: 'Stopped',
+        timerBadge: '⏹️ Stopped',
         isStopped: true,
         active: false
       }
@@ -555,7 +690,7 @@ async function abortTgRaid() {
 
   if (tgRaidWorkingTabId) {
     chrome.tabs.sendMessage(tgRaidWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    await delay(500);
+    await delay(300);
     safeRemoveTab(tgRaidWorkingTabId);
     tgRaidWorkingTabId = null;
   }
@@ -570,7 +705,13 @@ function broadcastHudToTabs(hudPayload) {
     chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
       if (tabs && tabs.length > 0) {
         for (const t of tabs) {
-          if (t.id) chrome.tabs.sendMessage(t.id, { type: 'UPDATE_FLOATING_HUD', hud: hudPayload }).catch(() => null);
+          if (t.id) {
+            chrome.tabs.sendMessage(t.id, {
+              type: 'UPDATE_FLOATING_HUD',
+              data: hudPayload,
+              hud: hudPayload
+            }).catch(() => null);
+          }
         }
       }
     });
@@ -578,14 +719,16 @@ function broadcastHudToTabs(hudPayload) {
 }
 
 // Sync floating HUD state and Telegram raid state to chrome.storage.local
-async function syncTgHud(raid, statusText, stateBadge = 'ENGAGING', progressPercent = 0, countdownText = '') {
+async function syncTgHud(raid, statusText, stateBadge = 'ENGAGING', progressPercent = 0, countdownText = '', nextAction = '', timerBadge = '') {
   const { successCount = 0, ignoredCount = 0, total = 0, currentIndex = 0 } = raid;
   const updatedRaid = {
     ...raid,
     statusText,
     stateBadge,
     progressPercent,
-    countdownText
+    countdownText,
+    nextAction,
+    timerBadge
   };
   const activeHud = {
     title: 'Telegram Group Engage',
@@ -597,8 +740,10 @@ async function syncTgHud(raid, statusText, stateBadge = 'ENGAGING', progressPerc
     progressPercent,
     statusText,
     countdownText,
-    isStopped: false,
-    active: true
+    nextAction: nextAction || (currentIndex < total ? `Tweet ${currentIndex + 1}/${total}` : 'Completed'),
+    timerBadge: timerBadge || (countdownText ? countdownText.replace('Next tweet in ', '⏱️ ') : '⚡ Active'),
+    isStopped: stateBadge === 'STOPPED' || stateBadge === 'DONE',
+    active: stateBadge !== 'STOPPED' && stateBadge !== 'DONE'
   };
   await chrome.storage.local.set({
     atomx_tg_raid: updatedRaid,
@@ -616,17 +761,42 @@ let agentWorkflowWorkingTabId = null;
 
 async function handleStartAgentWorkflow(request, sendResponse) {
   const { agentId, title, items = [], options = {} } = request;
-  if ((!items || items.length === 0) && !(agentId === 'reciprocator' && options.postUrl)) {
+  if ((!items || items.length === 0) && !(agentId === 'reciprocator' && options.postUrl) && !(options.feedUrl) && !(agentId === 'followers') && !(agentId === 'audience')) {
     sendResponse({ ok: false, error: 'No targets/items provided.' });
     return;
   }
 
-  const total = items.length;
+  let workflowItems = items;
+  if (agentId === 'sorsa' && items && items.length > 0) {
+    const targetCount = Number(options.targetCount) || 10;
+    if (options.mode === 'sequential') {
+      const idxRes = await chrome.storage.local.get(['atomx_sorsa_last_index']).catch(() => ({}));
+      let lastIdx = Number(idxRes?.atomx_sorsa_last_index) || 0;
+      if (lastIdx >= items.length) lastIdx = 0;
+      workflowItems = items.slice(lastIdx, lastIdx + targetCount);
+      const nextIdx = (lastIdx + workflowItems.length) % items.length;
+      await chrome.storage.local.set({ atomx_sorsa_last_index: nextIdx });
+    } else {
+      // Mode 2: Rolling Deduplication Window
+      const cooloffHours = Number(options.cooloffHours) || 24;
+      const cooloffMs = cooloffHours * 3600 * 1000;
+      const now = Date.now();
+      const histRes = await chrome.storage.local.get(['atomx_sorsa_engaged_history']).catch(() => ({}));
+      const history = (histRes?.atomx_sorsa_engaged_history && typeof histRes.atomx_sorsa_engaged_history === 'object') ? histRes.atomx_sorsa_engaged_history : {};
+      workflowItems = items.filter(it => {
+        const h = (it.cleanHandle || it.handle || '').replace(/^@/, '').toLowerCase();
+        const last = history[h];
+        return !last || (now - last >= cooloffMs);
+      }).slice(0, targetCount);
+    }
+  }
+
+  const total = workflowItems.length;
   const workflowState = {
     active: true,
     agentId,
     title: title || 'AtomX Agent',
-    items,
+    items: workflowItems,
     options,
     currentIndex: 0,
     successCount: 0,
@@ -650,14 +820,16 @@ async function handleStartAgentWorkflow(request, sendResponse) {
   sendResponse({ ok: true });
 }
 
-async function syncAgentHud(workflow, statusText, stateBadge = 'RUNNING', progressPercent = 0, countdownText = '') {
+async function syncAgentHud(workflow, statusText, stateBadge = 'RUNNING', progressPercent = 0, countdownText = '', nextAction = '', timerBadge = '') {
   const { title, successCount = 0, ignoredCount = 0, total = 0, currentIndex = 0 } = workflow;
   const updated = {
     ...workflow,
     statusText,
     stateBadge,
     progressPercent,
-    countdownText
+    countdownText,
+    nextAction,
+    timerBadge
   };
   const activeHud = {
     title,
@@ -669,8 +841,10 @@ async function syncAgentHud(workflow, statusText, stateBadge = 'RUNNING', progre
     progressPercent,
     statusText,
     countdownText,
-    isStopped: false,
-    active: true
+    nextAction: nextAction || (currentIndex < total ? `Target ${currentIndex + 1}/${total}` : 'Completed'),
+    timerBadge: timerBadge || (countdownText ? countdownText.replace(/.*?(\d+:\d+|\d+s)/, '⏱️ $1') : '⚡ Active'),
+    isStopped: stateBadge === 'STOPPED' || stateBadge === 'DONE',
+    active: stateBadge !== 'STOPPED' && stateBadge !== 'DONE'
   };
   await chrome.storage.local.set({
     atomx_agent_workflow: updated,
@@ -696,19 +870,22 @@ async function processAgentWorkflowStep() {
       await finishAgentWorkflow(workflow);
       return;
     }
-    await syncAgentHud(workflow, `Opening post to scan commenters...`, 'COLLECTING', 10);
+    await syncAgentHud(workflow, `Opening post to scan commenters & auto-like unliked comments...`, 'COLLECTING', 10);
     try {
-      const tab = await chrome.tabs.create({ url: options.postUrl, active: false });
-      agentWorkflowWorkingTabId = tab.id;
-      await waitForTabLoad(tab.id, 15000);
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, options.postUrl);
+      agentWorkflowWorkingTabId = tabId;
+      await waitForTabLoad(tabId, 15000);
       await delay(3000);
 
-      const auditRes = await sendMessageToTab(tab.id, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 15 }, 45000);
-      safeRemoveTab(tab.id);
-      agentWorkflowWorkingTabId = null;
+      const scanRes = await sendMessageToTab(tabId, {
+        type: 'COLLECT_RECIPROCATOR_COMMENTERS',
+        targetCount: options.maxCount || 10,
+        maxScrolls: Math.max(30, (options.maxCount || 10) * 4),
+        commentLikeDelayMs: options.commentLikeDelayMs || 4000
+      }, 90000);
 
-      const rawCommenters = Array.isArray(auditRes?.commenters) ? auditRes.commenters : [];
-      const mainAuthor = (auditRes?.mainAuthor || '').toLowerCase();
+      const rawCommenters = Array.isArray(scanRes?.commenters) ? scanRes.commenters : [];
+      const mainAuthor = (scanRes?.mainAuthor || '').toLowerCase();
 
       let persistedReciprocated = [];
       try {
@@ -731,7 +908,7 @@ async function processAgentWorkflowStep() {
 
       if (uniqueCommenters.length === 0) {
         workflow.active = false;
-        await syncAgentHud(workflow, `No new commenters found on post.`, 'DONE', 100);
+        await syncAgentHud(workflow, `No new unliked commenters found on post.`, 'DONE', 100);
         await finishAgentWorkflow(workflow);
         return;
       }
@@ -742,14 +919,14 @@ async function processAgentWorkflowStep() {
         items: newItems,
         total: newItems.length,
         currentIndex: 0,
-        statusText: `Found ${newItems.length} commenters. Beginning reciprocation...`
+        statusText: `Liked comments & collected ${newItems.length} profiles. Beginning reciprocation...`
       };
       await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
       await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 15);
       setTimeout(() => processAgentWorkflowStep(), 1000);
       return;
     } catch (auditErr) {
-      console.warn('[ATOMX BG] Error auditing commenters:', auditErr);
+      console.warn('[ATOMX BG] Error scanning commenters:', auditErr);
       if (agentWorkflowWorkingTabId) {
         safeRemoveTab(agentWorkflowWorkingTabId);
         agentWorkflowWorkingTabId = null;
@@ -759,42 +936,171 @@ async function processAgentWorkflowStep() {
     }
   }
 
-  // Followers Increase dynamic live scan phase
-  if (agentId === 'followers' && (!items || items.length === 0)) {
-    const feedUrl = options.feedUrl || 'https://x.com/search?q=(crypto OR web3) -filter:retweets -filter:replies&f=live';
-    const targetCount = options.targetCount || 8;
-    await syncAgentHud(workflow, `Opening niche feed to discover top engaging accounts...`, 'SCANNING', 10);
+  // Dynamic live scan phase (Followers Increase, Sorsa Booster custom list, Audience Builder custom list)
+  // =========================================================================
+  // AGENT 4: FOLLOWERS INCREASE (Direct List Timeline Engagement)
+  // Engages directly on the List's recent posts (not comments) within timeframe.
+  // Skips weak tweets (< 15 chars, < 4 words, spam). Auto-refreshes on 5-6 scrolls.
+  // =========================================================================
+  if (agentId === 'followers') {
+    const rawFeedUrl = options.feedUrl || (options.listId
+      ? `https://x.com/search?q=${encodeURIComponent(`list:${options.listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`
+      : 'https://x.com');
+    const targetCount = Number(options.targetCount) || 8;
+
+    await syncAgentHud(workflow, `Opening Twitter List timeline to engage recent posts...`, 'ENGAGING', 10);
     try {
-      const tab = await chrome.tabs.create({ url: feedUrl, active: false });
-      agentWorkflowWorkingTabId = tab.id;
-      await waitForTabLoad(tab.id, 15000);
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, rawFeedUrl);
+      agentWorkflowWorkingTabId = tabId;
+      await waitForTabLoad(tabId, 15000);
       await delay(3000);
 
-      const scanRes = await sendMessageToTab(tab.id, { type: 'COLLECT_ENGAGING_NICHE_PROFILES', targetCount }, 40000);
-      safeRemoveTab(tab.id);
-      agentWorkflowWorkingTabId = null;
+      const cycleRes = await sendMessageToTab(tabId, {
+        type: 'EXECUTE_FOLLOWERS_LIST_CYCLE',
+        targetCount,
+        freshness: options.freshness || '1h',
+        likePosts: options.likePosts !== false,
+        replyPosts: options.replyPosts !== false,
+        repostPosts: options.repostPosts === true,
+        autoFollow: options.autoFollow !== false,
+        style: options.style || 'Natural & Concise',
+        stylePrompt: options.stylePrompt || null,
+        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
+      }, 900000);
 
-      const discoveredProfiles = Array.isArray(scanRes?.profiles) ? scanRes.profiles : [];
-      if (discoveredProfiles.length === 0) {
+      const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+      if (cycleRes?.aborted || chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
+        console.log('[ATOMX BG] Followers Increase cycle stopped/aborted by user.');
+        return;
+      }
+
+      workflow.active = false;
+      workflow.successCount = cycleRes?.engagedCount || targetCount;
+      workflow.total = targetCount;
+      await syncAgentHud(workflow, `Completed engagement on ${cycleRes?.engagedCount || targetCount} recent list posts.`, 'DONE', 100);
+      await finishAgentWorkflow(workflow);
+      return;
+    } catch (fErr) {
+      console.warn('[ATOMX BG] Error in Followers Increase cycle:', fErr);
+      const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+      if (chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
+        return;
+      }
+      if (agentWorkflowWorkingTabId) {
+        safeRemoveTab(agentWorkflowWorkingTabId);
+        agentWorkflowWorkingTabId = null;
+      }
+      await finishAgentWorkflow(workflow);
+      return;
+    }
+  }
+
+  // =========================================================================
+  // AGENT 1: AUDIENCE BUILDER (Most Engaged Tweets -> Collect Commenters -> Profile Engagement)
+  // Finds highest-replied recent tweets from list query, collects commenters who engaged,
+  // then visits each commenter profile to engage on recent posts (random 1-2 or user specified).
+  // =========================================================================
+  if (agentId === 'audience' && (!items || items.length === 0)) {
+    const rawFeedUrl = options.feedUrl || (options.listId
+      ? `https://x.com/search?q=${encodeURIComponent(`list:${options.listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`
+      : options.targetListUrl || 'https://x.com');
+    const targetCount = Number(options.targetCount) || 10;
+
+    await syncAgentHud(workflow, `Finding most engaged recent tweets from Twitter List...`, 'SCANNING', 10);
+    try {
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, rawFeedUrl);
+      agentWorkflowWorkingTabId = tabId;
+      await waitForTabLoad(tabId, 15000);
+      await delay(3000);
+
+      // Step A: Discover top engaged tweets (highest reply counts) in timeframe
+      const topTweetsRes = await sendMessageToTab(tabId, {
+        type: 'DISCOVER_TOP_ENGAGED_LIST_TWEETS',
+        freshness: options.freshness || '2h',
+        targetCount
+      }, 60000);
+
+      const topTweets = Array.isArray(topTweetsRes?.topTweets) ? topTweetsRes.topTweets : [];
+
+      let collectedCommenters = [];
+      const seenHandles = new Set();
+
+      let persistedHistory = {};
+      try {
+        const stored = await chrome.storage.local.get(['atomx_audience_engaged_history']).catch(() => ({}));
+        if (stored?.atomx_audience_engaged_history && typeof stored.atomx_audience_engaged_history === 'object') {
+          persistedHistory = stored.atomx_audience_engaged_history;
+        }
+      } catch (e) {}
+
+      // Step B: For top engaged tweets, navigate to tweet thread and collect commenters
+      if (topTweets.length > 0) {
+        for (const t of topTweets) {
+          if (collectedCommenters.length >= targetCount) break;
+          if (!t.url) continue;
+
+          await syncAgentHud(workflow, `Extracting commenters from top tweet by @${t.author || 'creator'} (${t.repliesCount || 0} replies)...`, 'COLLECTING', 20);
+          await getOrCreateReusedTab(tabId, t.url);
+          await waitForTabLoad(tabId, 15000);
+          await delay(3000);
+
+          const threadRes = await sendMessageToTab(tabId, {
+            type: 'COLLECT_REPLIERS_FROM_TWEET_THREAD',
+            targetCount: targetCount - collectedCommenters.length
+          }, 60000);
+
+          const repliers = Array.isArray(threadRes?.profiles) ? threadRes.profiles : (Array.isArray(threadRes) ? threadRes : []);
+          for (const rep of repliers) {
+            const clean = (rep.cleanHandle || rep.handle || '').toLowerCase().replace(/^@/, '').trim();
+            if (!clean || seenHandles.has(clean) || persistedHistory[clean]) continue;
+            seenHandles.add(clean);
+            collectedCommenters.push({
+              cleanHandle: clean,
+              handle: `@${clean}`
+            });
+            if (collectedCommenters.length >= targetCount) break;
+          }
+        }
+      }
+
+      // Fallback: If thread navigation yielded fewer than needed, run timeline fallback
+      if (collectedCommenters.length < targetCount) {
+        const fallbackRes = await sendMessageToTab(tabId, {
+          type: 'COLLECT_AUDIENCE_FROM_LIST',
+          targetCount: targetCount - collectedCommenters.length,
+          freshness: options.freshness || '2h'
+        }, 55000).catch(() => ({ profiles: [] }));
+
+        const moreProfiles = Array.isArray(fallbackRes?.profiles) ? fallbackRes.profiles : [];
+        for (const p of moreProfiles) {
+          const clean = (p.cleanHandle || p.handle || '').toLowerCase().replace(/^@/, '').trim();
+          if (!clean || seenHandles.has(clean) || persistedHistory[clean]) continue;
+          seenHandles.add(clean);
+          collectedCommenters.push({ cleanHandle: clean, handle: `@${clean}` });
+          if (collectedCommenters.length >= targetCount) break;
+        }
+      }
+
+      if (collectedCommenters.length === 0) {
         workflow.active = false;
-        await syncAgentHud(workflow, `No active accounts discovered in feed.`, 'DONE', 100);
+        await syncAgentHud(workflow, `No fresh un-engaged commenters found in chosen timeframe.`, 'DONE', 100);
         await finishAgentWorkflow(workflow);
         return;
       }
 
       const updatedWorkflow = {
         ...workflow,
-        items: discoveredProfiles,
-        total: discoveredProfiles.length,
+        items: collectedCommenters,
+        total: collectedCommenters.length,
         currentIndex: 0,
-        statusText: `Discovered ${discoveredProfiles.length} active niche accounts. Starting engagement...`
+        statusText: `Collected ${collectedCommenters.length} target profiles. Visiting profiles to engage on recent posts...`
       };
       await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
-      await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 15);
+      await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 25);
       setTimeout(() => processAgentWorkflowStep(), 1000);
       return;
-    } catch (scanErr) {
-      console.warn('[ATOMX BG] Error discovering niche profiles:', scanErr);
+    } catch (auditErr) {
+      console.warn('[ATOMX BG] Error discovering audience commenters:', auditErr);
       if (agentWorkflowWorkingTabId) {
         safeRemoveTab(agentWorkflowWorkingTabId);
         agentWorkflowWorkingTabId = null;
@@ -839,26 +1145,31 @@ async function processAgentWorkflowStep() {
     } else if (agentId === 'reciprocator') {
       targetUrl = `https://x.com/${targetHandle}`;
       messagePayload = {
-        type: 'RECIPROCAL_PROFILE_ENGAGEMENT',
+        type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
         handle: targetHandle,
-        likeRecent: options.likeRecent ?? true,
-        commentRecent: options.commentRecent ?? true,
-        followUser: options.followUser ?? false,
-        style: options.style || 'Supportive & Relatable',
+        likePosts: options.likePosts !== false && options.likeRecent !== false,
+        replyPosts: options.replyPosts !== false && options.commentRecent !== false,
+        repostPosts: options.repostPosts === true,
+        followPosts: options.followPosts === true || options.followUser === true,
+        postsCount: options.postsCount || options.postsPerProfile || 'random',
+        style: options.style || 'Bullish (5-10 words)',
         stylePrompt: options.stylePrompt || null,
         backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
       };
       timeoutMs = 45000;
     } else {
-      // audience, sorsa, followers
+      // audience, sorsa
       targetUrl = `https://x.com/${targetHandle}`;
+      const shouldFollow = options.autoFollow !== undefined ? Boolean(options.autoFollow) : (options.followPosts !== false);
       messagePayload = {
         type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
         handle: targetHandle,
-        likePosts: options.likePosts ?? true,
-        replyPosts: options.replyPosts ?? true,
-        followPosts: options.followPosts ?? true,
-        autoUnfollow: options.autoUnfollow ?? false,
+        likePosts: options.likePosts !== false,
+        replyPosts: options.replyPosts !== false,
+        repostPosts: options.repostPosts === true,
+        followPosts: shouldFollow,
+        autoUnfollow: options.autoUnfollow === true,
+        postsCount: options.postsCount || options.postsPerProfile || 'random',
         style: options.style || 'Bullish (5-10 words)',
         stylePrompt: options.stylePrompt || null,
         backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
@@ -866,24 +1177,20 @@ async function processAgentWorkflowStep() {
       timeoutMs = 45000;
     }
 
-    const tab = await chrome.tabs.create({ url: targetUrl, active: true });
-    agentWorkflowWorkingTabId = tab.id;
+    const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, targetUrl);
+    agentWorkflowWorkingTabId = tabId;
 
-    await waitForTabLoad(tab.id, 12000);
+    await waitForTabLoad(tabId, 12000);
     await delay(2500);
 
     const recheck = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
     if (!recheck?.atomx_agent_workflow?.active) {
-      safeRemoveTab(tab.id);
       agentWorkflowWorkingTabId = null;
       return;
     }
 
-    const result = await sendMessageToTab(tab.id, messagePayload, timeoutMs);
-
-    await delay(1200);
-    safeRemoveTab(tab.id);
-    agentWorkflowWorkingTabId = null;
+    const result = await sendMessageToTab(tabId, messagePayload, timeoutMs);
+    // Keep agentWorkflowWorkingTabId open so subsequent accounts/profiles reuse the exact same tab/window!
 
     const isSuccess = result?.success !== false;
     const isIgnored = result?.ignored || result?.alreadyDone;
@@ -903,12 +1210,28 @@ async function processAgentWorkflowStep() {
           chrome.storage.local.set({ atomx_reciprocated_commenters: list }).catch(() => null);
         });
       }
+    }
 
-      if (agentId === 'sorsa' && targetHandle) {
+    // Always record visited timestamp for cool-off and deduplication across all visits
+    if (targetHandle) {
+      const lower = targetHandle.toLowerCase();
+      if (agentId === 'sorsa') {
         chrome.storage.local.get(['atomx_sorsa_engaged_history'], (r) => {
           const history = (r?.atomx_sorsa_engaged_history && typeof r.atomx_sorsa_engaged_history === 'object') ? r.atomx_sorsa_engaged_history : {};
-          history[targetHandle.toLowerCase()] = Date.now();
+          history[lower] = Date.now();
           chrome.storage.local.set({ atomx_sorsa_engaged_history: history }).catch(() => null);
+        });
+      } else if (agentId === 'audience') {
+        chrome.storage.local.get(['atomx_audience_engaged_history'], (r) => {
+          const history = (r?.atomx_audience_engaged_history && typeof r.atomx_audience_engaged_history === 'object') ? r.atomx_audience_engaged_history : {};
+          history[lower] = Date.now();
+          chrome.storage.local.set({ atomx_audience_engaged_history: history }).catch(() => null);
+        });
+      } else if (agentId === 'followers') {
+        chrome.storage.local.get(['atomx_follower_engaged_history'], (r) => {
+          const history = (r?.atomx_follower_engaged_history && typeof r.atomx_follower_engaged_history === 'object') ? r.atomx_follower_engaged_history : {};
+          history[lower] = Date.now();
+          chrome.storage.local.set({ atomx_follower_engaged_history: history }).catch(() => null);
         });
       }
     }
@@ -928,39 +1251,100 @@ async function processAgentWorkflowStep() {
     await syncAgentHud(updatedWorkflow, statusLabel, 'ENGAGING', Math.round(((currentIndex + 1) / total) * 100));
 
     if (updatedWorkflow.currentIndex < total) {
-      const delaySec = Math.max(3, (options.delaySec || 12) + Math.floor(Math.random() * 4 - 2));
-      await scheduleAgentPacingCountdown(delaySec, updatedWorkflow, currentIndex + 1, total);
+      // Read centralized Anti-Ban Safety controls
+      const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+      const safety = safetyRes?.atomx_safety_settings || {};
+      const profileWait = Number(safety.profileWait) || Number(options.delaySec) || 20;
+      const restDurationMin = Number(safety.restDuration) || 5;
+
+      const nextIdx = updatedWorkflow.currentIndex;
+      // Automatic Batching: if total > 10, rest after every batch of 5
+      if (total > 10 && nextIdx % 5 === 0) {
+        const restSec = restDurationMin * 60;
+        await scheduleAgentPacingCountdown(restSec, updatedWorkflow, nextIdx, total, `Batch of 5 complete. Resting ${restDurationMin}m...`);
+      } else if (agentId === 'followers' && Date.now() - (workflow.startedAt || 0) > 2 * 3600 * 1000) {
+        // Followers Increase: 30m recovery pause after 2 hours
+        await scheduleAgentPacingCountdown(30 * 60, updatedWorkflow, nextIdx, total, `Natural Schedule: 30m recovery pause after 2 hours...`);
+      } else if (agentId === 'followers' && Date.now() - (workflow.startedAt || 0) > 30 * 60 * 1000 && !workflow.had30mBreak) {
+        // Followers Increase: 12m rest break every 30 mins
+        workflow.had30mBreak = true;
+        await chrome.storage.local.set({ atomx_agent_workflow: workflow });
+        await scheduleAgentPacingCountdown(12 * 60, updatedWorkflow, nextIdx, total, `Natural Schedule: 12m rest pause after 30 mins...`);
+      } else {
+        const delaySec = Math.max(5, profileWait + Math.floor(Math.random() * 6 - 3));
+        await scheduleAgentPacingCountdown(delaySec, updatedWorkflow, nextIdx, total);
+      }
     } else {
       await finishAgentWorkflow(updatedWorkflow);
     }
 
   } catch (err) {
     console.warn(`[ATOMX BG] Agent workflow error on @${targetHandle}:`, err);
+    if (targetHandle) {
+      const lower = targetHandle.toLowerCase();
+      const historyKey = agentId === 'sorsa' ? 'atomx_sorsa_engaged_history'
+        : agentId === 'followers' ? 'atomx_follower_engaged_history'
+        : agentId === 'audience' ? 'atomx_audience_engaged_history' : null;
+      if (historyKey) {
+        chrome.storage.local.get([historyKey], (r) => {
+          const hist = (r?.[historyKey] && typeof r[historyKey] === 'object') ? r[historyKey] : {};
+          hist[lower] = Date.now();
+          chrome.storage.local.set({ [historyKey]: hist }).catch(() => null);
+        });
+      }
+    }
     if (agentWorkflowWorkingTabId) {
       safeRemoveTab(agentWorkflowWorkingTabId);
       agentWorkflowWorkingTabId = null;
     }
     const updatedWorkflow = { ...workflow, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1 };
     await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
-    chrome.alarms.create('atomx_agent_workflow_step', { when: Date.now() + 2000 });
+    if (updatedWorkflow.currentIndex < total) {
+      const delaySec = Math.max(4, Math.min(options.delaySec || 12, 12));
+      await scheduleAgentPacingCountdown(delaySec, updatedWorkflow, currentIndex + 1, total, 'Safety delay recovering before next target');
+      setTimeout(() => processAgentWorkflowStep(), 100);
+    } else {
+      await finishAgentWorkflow(updatedWorkflow);
+    }
   }
 }
 
-async function scheduleAgentPacingCountdown(delaySec, workflow, completedIndex, total) {
+async function scheduleAgentPacingCountdown(delaySec, workflow, completedIndex, total, nextActionText = '') {
   for (let sec = delaySec; sec > 0; sec--) {
-    const recheck = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+    let recheck = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
     if (!recheck?.atomx_agent_workflow?.active) return;
 
+    if (recheck?.atomx_skip_current) {
+      await chrome.storage.local.set({ atomx_skip_current: false });
+      setTimeout(() => processAgentWorkflowStep(), 100);
+      return;
+    }
+
+    while (recheck?.atomx_workflow_paused || recheck?.atomx_agent_workflow?.isPaused) {
+      await delay(400);
+      recheck = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
+      if (!recheck?.atomx_agent_workflow?.active) return;
+      if (recheck?.atomx_skip_current) {
+        await chrome.storage.local.set({ atomx_skip_current: false });
+        setTimeout(() => processAgentWorkflowStep(), 100);
+        return;
+      }
+      if (!recheck?.atomx_workflow_paused && !recheck?.atomx_agent_workflow?.isPaused) break;
+    }
+
+    const timeStr = `0:${String(sec).padStart(2, '0')}`;
     await syncAgentHud(
       recheck.atomx_agent_workflow,
-      `Safety Delay: ${sec}s before target ${completedIndex + 1}/${total}...`,
+      `Safety Delay: ${sec}s before ${nextActionText || ('target ' + (completedIndex + 1) + '/' + total)}...`,
       'PACING',
       Math.round((completedIndex / total) * 100),
-      `Next target in 0:${String(sec).padStart(2, '0')}`
+      `Next target in ${timeStr}`,
+      nextActionText || `Target ${completedIndex + 1}/${total}`,
+      `⏱️ ${timeStr}`
     );
     await delay(1000);
   }
-  chrome.alarms.create('atomx_agent_workflow_step', { when: Date.now() + 500 });
+  setTimeout(() => processAgentWorkflowStep(), 200);
 }
 
 async function finishAgentWorkflow(workflow) {
@@ -1001,27 +1385,40 @@ async function finishAgentWorkflow(workflow) {
 async function abortAgentWorkflow() {
   const stored = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
   const workflow = stored?.atomx_agent_workflow;
-  if (workflow) {
-    const activeHud = {
-      title: workflow.title || 'AtomX Agent',
-      stateBadge: 'STOPPED',
-      statusText: 'Workflow stopped by user.',
-      countdownText: '',
-      isStopped: true,
-      active: false
-    };
-    await chrome.storage.local.set({
-      atomx_agent_workflow: { ...workflow, active: false, isStopped: true, stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.', countdownText: '' },
-      atomx_active_hud: activeHud
+  const activeHud = {
+    title: workflow?.title || 'AtomX Agent',
+    stateBadge: 'STOPPED',
+    statusText: 'Workflow stopped by user.',
+    countdownText: '',
+    timerBadge: '🛑 Stopped',
+    nextAction: 'Stopped',
+    isStopped: true,
+    active: false
+  };
+  await chrome.storage.local.set({
+    atomx_agent_workflow: { ...workflow, active: false, isStopped: true, stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.', countdownText: '', timerBadge: '🛑 Stopped' },
+    atomx_active_hud: activeHud
+  });
+
+  // Broadcast ABORT_WORKFLOW to all open Twitter/X tabs
+  try {
+    chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        tabs.forEach(t => {
+          if (t.id) chrome.tabs.sendMessage(t.id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+        });
+      }
     });
-    broadcastHudToTabs(activeHud);
-  }
+  } catch (e) {}
+
+  broadcastHudToTabs(activeHud);
   if (agentWorkflowWorkingTabId) {
     chrome.tabs.sendMessage(agentWorkflowWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-    safeRemoveTab(agentWorkflowWorkingTabId);
     agentWorkflowWorkingTabId = null;
   }
   chrome.alarms.clear('atomx_agent_workflow_step').catch(() => null);
+  chrome.alarms.clear('atomx_agent_pacing').catch(() => null);
+  chrome.alarms.clear('atomx_keepalive').catch(() => null);
 }
 
 // ─────────────────────────────────────────────

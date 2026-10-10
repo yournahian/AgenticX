@@ -77,14 +77,14 @@ const AtomXState = {
   
   // User Session & Credits (Server-truth simulation)
   currentUser: {
-    name: 'Evan Jawad',
-    email: 'evan@atomx.io',
-    handle: '@evanjawadx',
+    name: 'mythopair',
+    email: 'mythopair@atomx.io',
+    handle: '@mythopair',
     status: 'ACTIVE', // ACTIVE, PENDING, SUSPENDED
     plan: 'Growth Plan',
     credits: 10000,
     maxCredits: 10000,
-    avatar: 'EJ',
+    avatar: 'MP',
     initialApprovedDate: 'Oct 06, 2026'
   },
 
@@ -164,7 +164,7 @@ const AtomXState = {
       name: 'Web3 & Crypto Alpha Hunters',
       category: 'Audience Builder',
       description: 'Curated list of high-affinity Web3 researchers and alpha accounts.',
-      targets: ['@evanjawadx', '@vitalikbuterin', '@sassal0x', '@cobie', '@inversebrah']
+      targets: ['@mythopair', '@vitalikbuterin', '@sassal0x', '@cobie', '@inversebrah']
     },
     audienceList2: {
       id: 'audienceList2',
@@ -1843,7 +1843,7 @@ function renderAIReply(container) {
                 <div class="tweet-author" style="margin-bottom:10px;">
                   <div class="user-avatar" style="width:36px; height:36px;">@</div>
                   <div style="flex:1;">
-                    <input type="text" id="manualAuthorInput" class="form-input" placeholder="Author handle (e.g. @evanjawadx)" style="font-size:13px; font-weight:600; padding:6px 10px;">
+                    <input type="text" id="manualAuthorInput" class="form-input" placeholder="Author handle (e.g. @mythopair)" style="font-size:13px; font-weight:600; padding:6px 10px;">
                   </div>
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
@@ -5588,45 +5588,67 @@ async function renderAdminCuratedLists(container) {
 
                     <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.4;">${l.description}</p>
 
-                    <!-- Twitter List URL Input -->
-                    <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:14px;">
-                      <label class="form-label" style="font-size:11px; font-weight:700; margin-bottom:4px; display:flex; justify-content:space-between;">
-                        <span>🔗 TWITTER / X LIST URL:</span>
-                        <span style="font-size:10px; color:var(--text-secondary); font-weight:normal;">(Optional)</span>
-                      </label>
-                      <input type="text" id="listurl-${k}" class="form-input" value="${l.listUrl || ''}" placeholder="https://x.com/i/lists/123456789" style="font-size:12px; padding:6px 10px;" oninput="updateListUrl('${k}', this.value)">
-                      <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px; line-height:1.3;">
-                        💡 <em>If left blank, bot uses live search from active targets below (100% reliable, never 404s).</em>
-                      </div>
-                    </div>
+                    ${(() => {
+                      const isListUrlOnly = l.category === 'Audience Builder' || l.category === 'Followers Increase';
+                      if (isListUrlOnly) {
+                        return `
+                          <!-- Twitter List URL Input (STRICTLY REQUIRED FOR AUDIENCE BUILDER & FOLLOWERS GROWTH) -->
+                          <div style="background:var(--bg-canvas); border:1px solid rgba(56, 189, 248, 0.35); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:14px;">
+                            <label class="form-label" style="font-size:11px; font-weight:700; color:var(--blue-primary); margin-bottom:4px; display:flex; justify-content:space-between;">
+                              <span>🔗 TWITTER / X LIST URL:</span>
+                              <span style="font-size:10px; background:rgba(56, 189, 248, 0.15); color:var(--blue-primary); padding:1px 6px; border-radius:4px; font-weight:700;">REQUIRED (URL ONLY)</span>
+                            </label>
+                            <input type="text" id="listurl-${k}" class="form-input" value="${l.listUrl || ''}" placeholder="https://x.com/i/lists/2103557569319219223" style="font-size:12px; padding:6px 10px;" oninput="updateListUrl('${k}', this.value)">
+                            <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px; line-height:1.3;">
+                              🎯 <strong>${l.category} strictly supports Twitter List URLs only</strong> (e.g. <code>https://x.com/i/lists/2103557569319219223</code>).
+                            </div>
+                          </div>
 
-                    <!-- Target Chips & Count Control -->
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                      <div style="font-size:11px; font-weight:700; color:var(--text-secondary); text-transform:uppercase;">
-                        TARGET ACCOUNTS (${(l.targets || []).length}):
-                      </div>
-                      <div style="display:flex; gap:6px;">
-                        <button onclick="trimListTargetsPrompt('${k}')" class="btn btn-secondary btn-sm" style="font-size:10.5px; padding:2px 7px;">✂️ Set ID Count</button>
-                        <button onclick="clearAllTargetsFromList('${k}')" class="btn btn-secondary btn-sm" style="font-size:10.5px; padding:2px 7px; color:var(--status-error);">Clear</button>
-                      </div>
-                    </div>
-                    <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; max-height:150px; overflow-y:auto; padding:4px 0;">
-                      ${(l.targets && l.targets.length > 0) ? (l.targets || []).map((t, idx) => `
-                        <span style="display:inline-flex; align-items:center; gap:5px; background:var(--bg-canvas); border:1px solid var(--border-subtle); padding:4px 9px; border-radius:99px; font-size:12px; font-weight:600;">
-                          ${t}
-                          <button onclick="removeTargetFromList('${k}', ${idx})" style="background:none; border:none; color:var(--status-error); cursor:pointer; font-size:12px; font-weight:bold; padding:0 2px;">×</button>
-                        </span>
-                      `).join('') : '<div style="font-size:11.5px; color:var(--text-secondary); font-style:italic;">No target accounts yet. Add handles below or import from Sheet.</div>'}
-                    </div>
-                  </div>
+                          <!-- Notice: Usernames/CSV not supported for this agent -->
+                          <div style="background:rgba(239, 68, 68, 0.06); border:1px solid rgba(239, 68, 68, 0.25); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:6px; font-size:11px; line-height:1.4;">
+                            <div style="font-weight:700; color:#EF4444; margin-bottom:2px;">🚫 CSV & Usernames Not Supported</div>
+                            <div style="color:var(--text-secondary);">${l.category} runs strictly on live Twitter List URLs. Admin cannot assign usernames or CSV lists to this agent.</div>
+                          </div>
+                        `;
+                      } else {
+                        // Increase Sorsa Score (Handles / CSV only)
+                        return `
+                          <!-- Notice: Twitter List URLs not supported for Sorsa Score -->
+                          <div style="background:rgba(239, 68, 68, 0.06); border:1px solid rgba(239, 68, 68, 0.25); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:12px; font-size:11px; line-height:1.4;">
+                            <div style="font-weight:700; color:#EF4444; margin-bottom:2px;">🚫 Twitter List URLs Not Supported</div>
+                            <div style="color:var(--text-secondary);">Increase Sorsa Score strictly uses target handles / CSV lists. Admin cannot assign Twitter List URLs to this agent.</div>
+                          </div>
 
-                  <!-- Quick Add & Bulk Import Form -->
-                  <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:12px; margin-top:10px;">
-                    <label class="form-label" style="font-size:11px; margin-bottom:4px;">+ Add Target Handles (e.g. @elonmusk or bulk paste)</label>
-                    <div style="display:flex; gap:8px;">
-                      <input type="text" id="input-${k}" class="form-input" placeholder="@handle or paste multiple comma separated" style="font-size:12px; padding:6px 10px;">
-                      <button class="btn btn-primary btn-sm" onclick="addTargetToList('${k}')">Add</button>
-                    </div>
+                          <!-- Target Chips & Count Control -->
+                          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <div style="font-size:11px; font-weight:700; color:var(--text-secondary); text-transform:uppercase;">
+                              TARGET ACCOUNTS (${(l.targets || []).length}):
+                            </div>
+                            <div style="display:flex; gap:6px;">
+                              <button onclick="trimListTargetsPrompt('${k}')" class="btn btn-secondary btn-sm" style="font-size:10.5px; padding:2px 7px;">✂️ Set ID Count</button>
+                              <button onclick="clearAllTargetsFromList('${k}')" class="btn btn-secondary btn-sm" style="font-size:10.5px; padding:2px 7px; color:var(--status-error);">Clear</button>
+                            </div>
+                          </div>
+                          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; max-height:150px; overflow-y:auto; padding:4px 0;">
+                            ${(l.targets && l.targets.length > 0) ? (l.targets || []).map((t, idx) => `
+                              <span style="display:inline-flex; align-items:center; gap:5px; background:var(--bg-canvas); border:1px solid var(--border-subtle); padding:4px 9px; border-radius:99px; font-size:12px; font-weight:600;">
+                                ${t}
+                                <button onclick="removeTargetFromList('${k}', ${idx})" style="background:none; border:none; color:var(--status-error); cursor:pointer; font-size:12px; font-weight:bold; padding:0 2px;">×</button>
+                              </span>
+                            `).join('') : '<div style="font-size:11.5px; color:var(--text-secondary); font-style:italic;">No target accounts yet. Add handles below or import from Sheet.</div>'}
+                          </div>
+
+                          <!-- Quick Add & Bulk Import Form -->
+                          <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:12px; margin-top:10px;">
+                            <label class="form-label" style="font-size:11px; margin-bottom:4px;">+ Add Target Handles (e.g. @elonmusk or bulk paste)</label>
+                            <div style="display:flex; gap:8px;">
+                              <input type="text" id="input-${k}" class="form-input" placeholder="@handle or paste multiple comma separated" style="font-size:12px; padding:6px 10px;">
+                              <button class="btn btn-primary btn-sm" onclick="addTargetToList('${k}')">Add</button>
+                            </div>
+                          </div>
+                        `;
+                      }
+                    })()}
                   </div>
                 </div>
               `;
@@ -5682,16 +5704,25 @@ function removeTargetFromList(listKey, index) {
 }
 
 function promptAddNewCustomList() {
-  const name = prompt('Enter List Name (e.g., "Solana Ecosystem Alpha Builders"):');
+  const name = prompt('Enter List Name (e.g., "Web3 Founders Alpha"):');
   if (!name || !name.trim()) return;
-  const cat = prompt('Enter Category:\n1 = Audience Builder\n2 = Increase Sorsa Score\n3 = Followers Increase', '1');
+  const cat = prompt('Enter Agent Category:\n1 = Audience Builder (Twitter List URL only)\n2 = Increase Sorsa Score (Usernames / CSV only)\n3 = Followers Increase (Twitter List URL only)', '1');
   let category = 'Audience Builder';
-  if (cat === '2') category = 'Increase Sorsa Score';
-  else if (cat === '3') category = 'Followers Increase';
-  
-  const listUrl = prompt('Enter Twitter/X List URL (optional, leave blank to use target handles):', '') || '';
-  const newKey = 'custom_' + Date.now();
+  let listUrl = '';
+  let targets = [];
 
+  if (cat === '2') {
+    category = 'Increase Sorsa Score';
+    listUrl = '';
+  } else {
+    if (cat === '3') category = 'Followers Increase';
+    else category = 'Audience Builder';
+    const enteredUrl = prompt(`Enter Twitter/X List URL for ${category} (e.g. https://x.com/i/lists/2103557569319219223):`, 'https://x.com/i/lists/2103557569319219223');
+    listUrl = (enteredUrl || 'https://x.com/i/lists/2103557569319219223').trim();
+    targets = [];
+  }
+
+  const newKey = 'custom_' + Date.now();
   if (!AtomXState.curatedLists) AtomXState.curatedLists = {};
   AtomXState.curatedLists[newKey] = {
     id: newKey,
@@ -5699,13 +5730,13 @@ function promptAddNewCustomList() {
     category: category,
     status: 'published',
     accessTier: 'free',
-    description: `Curated target list for ${category}.`,
-    listUrl: listUrl.trim(),
-    targets: []
+    description: `Curated list for ${category}.`,
+    listUrl: listUrl,
+    targets: targets
   };
 
   renderAdminCuratedLists(document.getElementById('mainContentArea'));
-  showToast(`✓ Created new list: ${name.trim()}`);
+  showToast(`✓ Created new list for ${category}`);
 }
 
 async function saveCuratedListsToServer() {
@@ -5749,6 +5780,24 @@ async function saveCuratedListsToServer() {
     }
   });
 
+  // Strict validation of agent rules before sending
+  for (const k of Object.keys(AtomXState.curatedLists)) {
+    const item = AtomXState.curatedLists[k];
+    if (!item) continue;
+    const cat = item.category || 'Audience Builder';
+    if (cat === 'Audience Builder' || cat === 'Followers Increase') {
+      item.targets = []; // Strictly no username targets for Audience Builder or Followers Increase
+      const trimmedUrl = (item.listUrl || '').trim();
+      const isValidList = trimmedUrl.includes('x.com/i/lists/') || trimmedUrl.includes('twitter.com/i/lists/') || /^\d{10,25}$/.test(trimmedUrl);
+      if (!isValidList) {
+        alert(`⚠️ Cannot Save: "${item.name}" is assigned to ${cat}.\n\nThis agent ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223). CSV and username handles are not allowed.\n\nPlease enter a valid Twitter List URL.`);
+        return false;
+      }
+    } else if (cat === 'Increase Sorsa Score') {
+      item.listUrl = ''; // Strictly no Twitter List URLs for Increase Sorsa Score
+    }
+  }
+
   try {
     const res = await fetch(`${API_BASE}/api/admin/curated-lists`, {
       method: 'POST',
@@ -5785,7 +5834,17 @@ async function saveCuratedListsToServer() {
 function updateListCategory(listKey, newCategory) {
   if (AtomXState.curatedLists[listKey]) {
     AtomXState.curatedLists[listKey].category = newCategory;
-    showToast(`✓ Updated ${AtomXState.curatedLists[listKey].name} agent to: ${newCategory}`);
+    if (newCategory === 'Audience Builder' || newCategory === 'Followers Increase') {
+      AtomXState.curatedLists[listKey].targets = [];
+      if (!AtomXState.curatedLists[listKey].listUrl || !AtomXState.curatedLists[listKey].listUrl.includes('x.com/i/lists/')) {
+        AtomXState.curatedLists[listKey].listUrl = 'https://x.com/i/lists/2103557569319219223';
+      }
+      showToast(`✓ Set to ${newCategory}: Live Twitter List URL only (CSV/usernames disabled)`);
+    } else if (newCategory === 'Increase Sorsa Score') {
+      AtomXState.curatedLists[listKey].listUrl = '';
+      showToast(`✓ Set to Sorsa Score: Usernames & CSV only (Twitter List URLs disabled)`);
+    }
+    renderAdminCuratedLists(document.getElementById('mainContentArea'));
   }
 }
 
@@ -5917,7 +5976,7 @@ function openImportGoogleSheetModal() {
 
           <div id="destExistingListWrap" style="display:none;">
             <select id="importExistingListSelect" class="form-input" style="font-size:12px; padding:6px 10px; width:100%;">
-              ${listKeys.map(k => `<option value="${k}">${currentLists[k].name} (${(currentLists[k].targets || []).length} current targets)</option>`).join('')}
+              ${listKeys.filter(k => (currentLists[k].category || '') === 'Increase Sorsa Score').map(k => `<option value="${k}">${currentLists[k].name} (${(currentLists[k].targets || []).length} current targets)</option>`).join('')}
             </select>
             <div style="display:flex; gap:12px; margin-top:6px; font-size:11.5px;">
               <label style="cursor:pointer;"><input type="radio" name="existingAction" value="replace" checked> Replace existing targets</label>
@@ -5952,11 +6011,12 @@ function openImportGoogleSheetModal() {
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:12px;">
           <div>
             <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">3. Target Agent:</label>
-            <select id="importTargetAgentSelect" class="form-input" style="font-size:11.5px; padding:6px 8px; width:100%;">
-              <option value="Audience Builder">Audience Builder</option>
+            <select id="importTargetAgentSelect" class="form-input" style="font-size:11.5px; padding:6px 8px; width:100%;" disabled>
               <option value="Increase Sorsa Score" selected>Increase Sorsa Score</option>
-              <option value="Followers Increase">Followers Growth</option>
             </select>
+            <div style="font-size:9.5px; color:var(--text-secondary); margin-top:2px;">
+              Audience & Followers only support Twitter List URLs.
+            </div>
           </div>
           <div>
             <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">4. Access Plan:</label>

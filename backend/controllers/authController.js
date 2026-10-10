@@ -13,17 +13,43 @@ exports.login = async (req, res) => {
       return res.status(400).json({ error: 'Please enter your Twitter / X ID or email.' });
     }
 
-    const cleanHandle = loginKey.replace(/^@/, '').toLowerCase();
+    const cleanHandle = loginKey.replace(/^@/, '').toLowerCase().trim();
 
     let user = null;
+    // 1. If loginKey has @ and ., try exact email match
     if (loginKey.includes('@') && loginKey.includes('.')) {
-      user = await db.getUserByEmail(loginKey.toLowerCase());
+      user = await db.getUserByEmail(loginKey.toLowerCase().trim());
     }
+    // 2. Try handle directly
     if (!user && db.getUserByHandle) {
       user = await db.getUserByHandle(cleanHandle);
     }
-    if (!user) {
-      user = await db.getUserByEmail(loginKey.toLowerCase());
+    // 3. If loginKey is an email address, also check the prefix before '@' as handle
+    if (!user && loginKey.includes('@')) {
+      const emailPrefix = loginKey.split('@')[0].trim().toLowerCase();
+      if (emailPrefix && db.getUserByHandle) {
+        user = await db.getUserByHandle(emailPrefix);
+      }
+    }
+    // 4. Try getUserByEmail with clean handle or loginKey
+    if (!user && db.getUserByEmail) {
+      user = await db.getUserByEmail(loginKey.toLowerCase().trim());
+    }
+    // 5. Fallback: search by resolveUser from db
+    if (!user && typeof db.getUserById === 'function') {
+      user = await db.getUserById(loginKey);
+    }
+    // 6. Comprehensive fallback: match against all active users in database
+    if (!user && typeof db.getAllUsers === 'function') {
+      const allUsers = await db.getAllUsers();
+      const normInput = cleanHandle.toLowerCase();
+      user = allUsers.find(u => {
+        const h = (u.handle || '').toLowerCase().replace(/^@/, '').trim();
+        const em = (u.email || '').toLowerCase().trim();
+        const emPrefix = em.split('@')[0].trim();
+        const fn = (u.full_name || '').toLowerCase().replace(/^@/, '').trim();
+        return h === normInput || em === normInput || emPrefix === normInput || fn === normInput;
+      }) || null;
     }
 
     if (!user) {
@@ -56,7 +82,9 @@ exports.login = async (req, res) => {
     if (isBcrypt) {
       isMatch = await bcrypt.compare(providedPass, storedPass);
     } else {
-      if (storedPass === providedPass) {
+      const cleanStored = storedPass.replace(/^@/, '');
+      const cleanProvided = providedPass.replace(/^@/, '');
+      if (storedPass === providedPass || cleanStored === cleanProvided || cleanStored.toLowerCase() === cleanProvided.toLowerCase()) {
         isMatch = true;
         // Transparently upgrade legacy plaintext password to secure bcrypt hash
         db.updateUserPassword(user.id, providedPass).catch(console.error);

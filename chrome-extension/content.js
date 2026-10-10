@@ -107,9 +107,20 @@ function extractTweetData(article) {
 
 let isWorkflowAborted = false;
 
-// Human-like typing delay simulator
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+// Human-like typing delay simulator with instant pause & abort support
+async function sleep(ms) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (isWorkflowAborted) break;
+    // If paused via HUD or extension, freeze here until resumed
+    while (isHudWorkflowPaused && !isWorkflowAborted) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    const remaining = Math.min(100, ms - (Date.now() - start));
+    if (remaining > 0) {
+      await new Promise(resolve => setTimeout(resolve, remaining));
+    }
+  }
 }
 
 /**
@@ -575,6 +586,71 @@ async function simulateHumanSubmitClick(btn) {
 }
 
 /**
+ * 100% reliable Repost Click with green glow & modal confirmation.
+ */
+async function simulateHumanRepostClick(targetArticle) {
+  if (!targetArticle) return false;
+  if (targetArticle.querySelector('button[data-testid="unretweet"], div[data-testid="unretweet"]')) {
+    return true; // Already reposted
+  }
+
+  const rtBtn = targetArticle.querySelector('button[data-testid="retweet"], div[data-testid="retweet"]') ||
+                Array.from(targetArticle.querySelectorAll('button, div[role="button"]')).find(b => {
+                  const label = (b.getAttribute('aria-label') || '').toLowerCase();
+                  return label.includes('repost') || label.includes('retweet');
+                });
+  if (!rtBtn) return false;
+
+  try {
+    gentleScrollIntoView(rtBtn);
+    rtBtn.style.transition = 'transform 0.2s ease, filter 0.2s ease';
+    rtBtn.style.transform = 'scale(1.2)';
+    rtBtn.style.filter = 'drop-shadow(0 0 10px rgba(16, 185, 129, 0.85))';
+
+    rtBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    rtBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    rtBtn.click();
+    rtBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+    rtBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+
+    await sleep(400);
+    rtBtn.style.transform = 'scale(1)';
+    rtBtn.style.filter = 'none';
+
+    const confirmBtn = await waitForElement('div[data-testid="retweetConfirm"], button[data-testid="retweetConfirm"], [data-testid="retweetConfirm"]', 2500) ||
+                       Array.from(document.querySelectorAll('div[role="menuitem"], button[role="menuitem"], div[data-testid="Dropdown"] span')).find(el => {
+                         const txt = (el.innerText || '').trim();
+                         return txt === 'Repost' || txt === 'Retweet';
+                       });
+
+    if (confirmBtn) {
+      confirmBtn.click();
+      await sleep(500);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    rtBtn.click();
+    return true;
+  }
+}
+
+/**
+ * Natural human-like smooth scrolling with micro-steps allowing Twitter React virtual DOM to hydrate.
+ */
+async function smoothScrollAndHydrate(totalDelta = 650, pauseAfter = 900) {
+  const steps = 4;
+  const stepDelta = Math.round(totalDelta / steps);
+  for (let s = 0; s < steps; s++) {
+    if (isWorkflowAborted) break;
+    const randomized = stepDelta + Math.floor(Math.random() * 40 - 20);
+    window.scrollBy({ top: randomized, behavior: 'smooth' });
+    await sleep(120 + Math.floor(Math.random() * 80));
+  }
+  await sleep(pauseAfter);
+}
+
+/**
  * Human-like letter-by-letter typing with intentional typos & backspace corrections.
  * Fully compatible with modern X (Twitter) DraftJS & Lexical rich-text editors.
  */
@@ -951,49 +1027,49 @@ function ensureFloatingHud() {
     position: fixed;
     bottom: 24px;
     right: 24px;
-    width: 320px;
+    width: 330px;
     background: rgba(15, 23, 42, 0.95);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(59, 130, 246, 0.3);
+    border: 1px solid rgba(59, 130, 246, 0.35);
     border-radius: 14px;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color: #F8FAFC;
     z-index: 2147483647;
-    padding: 14px;
+    padding: 13px;
     box-sizing: border-box;
     transition: transform 0.2s ease, opacity 0.2s ease;
     user-select: none;
   `;
 
   hud.innerHTML = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span id="hud-badge" style="background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px;">RUNNING</span>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px;">
+      <div style="display: flex; align-items: center; gap: 7px;">
+        <span id="hud-badge" style="background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px;">RUNNING</span>
         <strong id="hud-title" style="font-size: 13px; font-weight: 700; color: #FFFFFF;">AtomX Agent</strong>
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
-        <span id="hud-indicator" style="font-size: 11px; font-weight: 600; color: #60A5FA;">Active</span>
+        <span id="hud-indicator" style="font-size: 11px; font-weight: 700; color: #60A5FA;">Active</span>
         <button id="hud-minimize-btn" title="Minimize / Expand" style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); color: #CBD5E1; font-size: 14px; font-weight: 700; border-radius: 6px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">−</button>
         <button id="hud-close-btn" title="Close & Hide HUD (✕)" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #FCA5A5; font-size: 13px; font-weight: 800; border-radius: 6px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; line-height: 1;">✕</button>
       </div>
     </div>
 
     <!-- 3 Metric Cards Grid -->
-    <div id="hud-body" style="display: flex; flex-direction: column; gap: 10px;">
+    <div id="hud-body" style="display: flex; flex-direction: column; gap: 8px;">
       <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
         <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 6px 4px; text-align: center;">
-          <div style="font-size: 9.5px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">DONE</div>
-          <div id="hud-done-count" style="font-size: 17px; font-weight: 800; color: #10B981; margin-top: 2px;">0</div>
+          <div style="font-size: 9px; color: #94A3B8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">DONE</div>
+          <div id="hud-done-count" style="font-size: 17px; font-weight: 800; color: #10B981; margin-top: 1px;">0</div>
         </div>
         <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 6px 4px; text-align: center;">
-          <div style="font-size: 9.5px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">COLLECTED</div>
-          <div id="hud-col-count" style="font-size: 17px; font-weight: 800; color: #60A5FA; margin-top: 2px;">0</div>
+          <div style="font-size: 9px; color: #94A3B8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">COLLECTED</div>
+          <div id="hud-col-count" style="font-size: 17px; font-weight: 800; color: #60A5FA; margin-top: 1px;">0</div>
         </div>
         <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 8px; padding: 6px 4px; text-align: center;">
-          <div style="font-size: 9.5px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">SKIPPED</div>
-          <div id="hud-skip-count" style="font-size: 17px; font-weight: 800; color: #F59E0B; margin-top: 2px;">0</div>
+          <div style="font-size: 9px; color: #94A3B8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">SKIPPED</div>
+          <div id="hud-skip-count" style="font-size: 17px; font-weight: 800; color: #F59E0B; margin-top: 1px;">0</div>
         </div>
       </div>
 
@@ -1003,15 +1079,23 @@ function ensureFloatingHud() {
       </div>
 
       <!-- Live Status Text -->
-      <div id="hud-status-text" style="font-size: 11.5px; color: #CBD5E1; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      <div id="hud-status-text" style="font-size: 11px; color: #CBD5E1; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
         Initializing agent automation...
       </div>
 
-      <!-- Countdown text (shown during pacing delays) -->
-      <div id="hud-countdown-text" style="font-size: 11px; color: #10B981; font-weight: 700; font-family: monospace; display: none;"></div>
+      <!-- Next Action & Real-Time Countdown Row -->
+      <div id="hud-next-action-row" style="display: flex; justify-content: space-between; align-items: center; background: rgba(30, 41, 59, 0.65); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; padding: 5px 8px; font-size: 11px;">
+        <div style="display: flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
+          <span style="color: #94A3B8; font-size: 9.5px; font-weight: 700; text-transform: uppercase;">NEXT:</span>
+          <span id="hud-next-action-text" style="color: #60A5FA; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Preparing next target...</span>
+        </div>
+        <div id="hud-timer-badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #10B981; font-weight: 800; font-family: monospace; font-size: 11px; padding: 2px 6px; border-radius: 4px; white-space: nowrap; margin-left: 6px;">
+          ⚡ Active
+        </div>
+      </div>
 
       <!-- Action Controls: Pause/Resume, Skip, Stop -->
-      <div style="display: flex; gap: 6px; margin-top: 4px;">
+      <div style="display: flex; gap: 6px; margin-top: 2px;">
         <button id="hud-pause-btn" style="flex: 1; padding: 7px 0; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 8px; color: #FBBF24; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Pause or Resume current workflow">
           ⏸️ Pause
         </button>
@@ -1021,12 +1105,16 @@ function ensureFloatingHud() {
         <button id="hud-stop-btn" style="flex: 1; padding: 7px 0; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 8px; color: #F87171; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Completely abort and stop workflow">
           ⏹️ Stop
         </button>
+        <button id="hud-dismiss-btn" style="flex: 1; padding: 7px 0; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 8px; color: #CBD5E1; font-size: 11px; font-weight: 700; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 4px;" title="Dismiss HUD">
+          Dismiss
+        </button>
       </div>
     </div>
   `;
 
-  // Pause / Resume listener
-  hud.querySelector('#hud-pause-btn')?.addEventListener('click', () => {
+  // Pause / Resume listener — Instant response
+  hud.querySelector('#hud-pause-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     isHudWorkflowPaused = !isHudWorkflowPaused;
     const pauseBtn = hud.querySelector('#hud-pause-btn');
     if (pauseBtn) {
@@ -1039,37 +1127,55 @@ function ensureFloatingHud() {
     if (badge) {
       badge.textContent = isHudWorkflowPaused ? 'PAUSED' : 'RUNNING';
       badge.style.color = isHudWorkflowPaused ? '#FBBF24' : '#10B981';
+      badge.style.background = isHudWorkflowPaused ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.15)';
+      badge.style.borderColor = isHudWorkflowPaused ? 'rgba(245, 158, 11, 0.5)' : 'rgba(16, 185, 129, 0.4)';
+    }
+    const timerBadge = hud.querySelector('#hud-timer-badge');
+    if (timerBadge) {
+      timerBadge.textContent = isHudWorkflowPaused ? '⏸️ Paused' : '⚡ Active';
     }
     chrome.storage.local.set({ atomx_workflow_paused: isHudWorkflowPaused }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: isHudWorkflowPaused }).catch(() => null);
   });
 
-  // Skip current item listener
-  hud.querySelector('#hud-skip-action-btn')?.addEventListener('click', () => {
+  // Skip current item listener — Instant response
+  hud.querySelector('#hud-skip-action-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
     const statusEl = hud.querySelector('#hud-status-text');
     if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
+    const timerBadge = hud.querySelector('#hud-timer-badge');
+    if (timerBadge) timerBadge.textContent = '⏭️ Skip';
   });
 
-  // Attach stop listener
-  hud.querySelector('#hud-stop-btn')?.addEventListener('click', () => {
+  // Stop workflow listener — Instant response
+  hud.querySelector('#hud-stop-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     isWorkflowAborted = true;
     updateFloatingHud({
       stateBadge: 'STOPPED',
       statusText: 'Workflow stopped by user.',
-      isStopped: true
+      timerBadge: '🛑 Stopped',
+      countdownText: '',
+      isStopped: true,
+      active: false
     });
     chrome.storage.local.set({
       atomx_active_hud: {
         stateBadge: 'STOPPED',
         statusText: 'Workflow stopped by user.',
+        timerBadge: '🛑 Stopped',
+        countdownText: '',
         isStopped: true,
         active: false
       },
-      atomx_workflow_paused: false
+      atomx_workflow_paused: false,
+      atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true },
+      atomx_agent_workflow: { active: false, stateBadge: 'STOPPED', isStopped: true }
     }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
+    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
   });
 
   // Minimize / Expand toggle
@@ -1132,6 +1238,10 @@ function ensureFloatingHud() {
 }
 
 function updateFloatingHud(data = {}) {
+  if (data.isStopped || data.stateBadge === 'STOPPED') {
+    isWorkflowAborted = true;
+  }
+
   // If explicitly requested a new workflow, clear dismiss flag
   if (data.isNewWorkflow) {
     isHudDismissedLocally = false;
@@ -1211,18 +1321,52 @@ function updateFloatingHud(data = {}) {
       el.title = data.statusText;
     }
   }
-  // Countdown text (pacing delay)
-  if (data.countdownText !== undefined) {
-    const cd = hud.querySelector('#hud-countdown-text');
-    if (cd) {
-      if (data.countdownText) {
-        cd.style.display = 'block';
-        cd.textContent = data.countdownText;
-      } else {
-        cd.style.display = 'none';
-      }
+
+  // Next action display
+  const nextActionEl = hud.querySelector('#hud-next-action-text');
+  if (nextActionEl) {
+    if (data.nextAction) {
+      nextActionEl.textContent = data.nextAction;
+    } else if (data.countdownText) {
+      nextActionEl.textContent = data.countdownText;
+    } else if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
+      nextActionEl.textContent = 'Workflow Paused';
+    } else if (data.isStopped || data.stateBadge === 'STOPPED') {
+      nextActionEl.textContent = 'Stopped by user';
+    } else if (data.stateBadge === 'DONE') {
+      nextActionEl.textContent = 'Workflow Completed';
     }
   }
+
+  // Timer badge display
+  const timerBadgeEl = hud.querySelector('#hud-timer-badge');
+  if (timerBadgeEl) {
+    if (data.timerBadge) {
+      timerBadgeEl.textContent = data.timerBadge;
+    } else if (data.countdownText) {
+      const match = data.countdownText.match(/(\d+:\d+|\d+s)/);
+      timerBadgeEl.textContent = match ? `⏱️ ${match[1]}` : '⏱️ 0:00';
+    } else if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
+      timerBadgeEl.textContent = '⏸️ Paused';
+    } else if (data.isStopped || data.stateBadge === 'STOPPED') {
+      timerBadgeEl.textContent = '⏹️ Stopped';
+    } else if (data.stateBadge === 'DONE') {
+      timerBadgeEl.textContent = '✓ Done';
+    } else {
+      timerBadgeEl.textContent = '⚡ Active';
+    }
+  }
+
+  // Sync Pause Button appearance
+  const pauseBtn = hud.querySelector('#hud-pause-btn');
+  if (pauseBtn) {
+    const isPaused = data.stateBadge === 'PAUSED' || isHudWorkflowPaused;
+    pauseBtn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
+    pauseBtn.style.color = isPaused ? '#34D399' : '#FBBF24';
+    pauseBtn.style.background = isPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
+    pauseBtn.style.borderColor = isPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
+  }
+
   const stopBtn = hud.querySelector('#hud-stop-btn');
   const dismissBtn = hud.querySelector('#hud-dismiss-btn');
   if (data.isStopped || data.stateBadge === 'DONE' || data.stateBadge === 'STOPPED') {
@@ -1298,11 +1442,22 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       }
     }
 
+    if (changes.atomx_agent_workflow) {
+      const wf = changes.atomx_agent_workflow.newValue;
+      if (wf && (wf.active === false || wf.isStopped || wf.stateBadge === 'STOPPED')) {
+        isWorkflowAborted = true;
+      }
+    }
+
     if (changes.atomx_active_hud) {
       const val = changes.atomx_active_hud.newValue;
 
       if (val && val.isNewWorkflow) {
         isHudDismissedLocally = false;
+      }
+
+      if (val && (val.isStopped || val.stateBadge === 'STOPPED')) {
+        isWorkflowAborted = true;
       }
 
       if (isPopupOpenLocally || isHudDismissedLocally) {
@@ -1350,13 +1505,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ABORT_WORKFLOW') {
     isWorkflowAborted = true;
     console.log('[ATOMX] Abort signal received. Stopping all automation.');
-    hideFloatingHud();
+    updateFloatingHud({
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      countdownText: '',
+      isStopped: true,
+      active: false
+    });
     sendResponse({ success: true, aborted: true });
     return true;
   }
 
+  if (message.type === 'TOGGLE_WORKFLOW_PAUSE') {
+    isHudWorkflowPaused = Boolean(message.isPaused);
+    const pauseBtn = floatingHudEl?.querySelector('#hud-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.textContent = isHudWorkflowPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.style.color = isHudWorkflowPaused ? '#34D399' : '#FBBF24';
+      pauseBtn.style.background = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
+      pauseBtn.style.borderColor = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
+    }
+    const badge = floatingHudEl?.querySelector('#hud-badge');
+    if (badge && !isWorkflowAborted) {
+      badge.textContent = isHudWorkflowPaused ? 'PAUSED' : 'RUNNING';
+      badge.style.color = isHudWorkflowPaused ? '#FBBF24' : '#10B981';
+    }
+    const timerBadge = floatingHudEl?.querySelector('#hud-timer-badge');
+    if (timerBadge) {
+      timerBadge.textContent = isHudWorkflowPaused ? '⏸️ Paused' : '⚡ Active';
+    }
+    sendResponse({ success: true, isPaused: isHudWorkflowPaused });
+    return true;
+  }
+
+  if (message.type === 'SKIP_WORKFLOW_ITEM') {
+    isWorkflowAborted = true; // abort active sleep / action in this page
+    setTimeout(() => { isWorkflowAborted = false; }, 800);
+    const statusEl = floatingHudEl?.querySelector('#hud-status-text');
+    if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.type === 'UPDATE_FLOATING_HUD') {
-    updateFloatingHud(message.data);
+    const payload = message.data || message.hud || message.payload || message;
+    updateFloatingHud(payload);
     sendResponse({ success: true });
     return true;
   }
@@ -1368,11 +1561,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'POPUP_OPENED') {
+    isPopupOpenLocally = true;
+    hideFloatingHud();
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.type === 'POPUP_CLOSED') {
     isPopupOpenLocally = false;
-    chrome.storage.local.get(['atomx_active_hud', 'atomx_hud_dismissed']).then(s => {
-      if (s?.atomx_active_hud && !s?.atomx_hud_dismissed) {
-        updateFloatingHud(s.atomx_active_hud);
+    chrome.storage.local.get(['atomx_active_hud', 'atomx_hud_dismissed', 'atomx_tg_raid', 'atomx_agent_workflow']).then(s => {
+      const activeHud = s?.atomx_active_hud;
+      const isRunning = Boolean(s?.atomx_tg_raid?.active || s?.atomx_agent_workflow?.active || activeHud?.active);
+      if (isRunning && !s?.atomx_hud_dismissed && activeHud) {
+        updateFloatingHud(activeHud);
       }
     }).catch(() => null);
     sendResponse({ success: true });
@@ -1414,6 +1616,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     huntAudienceUsers(message)
       .then(res => sendResponse(res))
       .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // Agent 1: Audience Builder — Scrape commenters from most engaged recent tweets in Twitter List
+  if (message.type === 'COLLECT_AUDIENCE_FROM_LIST') {
+    collectAudienceFromListTimeline(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, profiles: [] }));
     return true;
   }
 
@@ -1465,9 +1675,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Agent 13: Commenter Reciprocator — Scan post comments, like unliked comments & collect profiles
+  if (message.type === 'COLLECT_RECIPROCATOR_COMMENTERS') {
+    collectReciprocatorCommenters(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, commenters: [] }));
+    return true;
+  }
+
   // Agent 13: Commenter Reciprocator — Engage on commenter profile
   if (message.type === 'RECIPROCAL_PROFILE_ENGAGEMENT') {
-    executeReciprocalProfileEngagement(message)
+    engageAndFollowProfile(message)
       .then(res => sendResponse(res))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
@@ -1478,6 +1696,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     collectEngagingNicheProfiles(message)
       .then(res => sendResponse(res))
       .catch(err => sendResponse({ success: false, error: err.message, profiles: [] }));
+    return true;
+  }
+
+  // Agent 4: Followers Increase — Autonomous direct timeline engagement on List's recent posts
+  if (message.type === 'EXECUTE_FOLLOWERS_LIST_CYCLE') {
+    executeFollowersListCycle(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, engagedCount: 0 }));
+    return true;
+  }
+
+  // Agent 1: Audience Builder — Discover most engaged recent tweets from list query
+  if (message.type === 'DISCOVER_TOP_ENGAGED_LIST_TWEETS') {
+    discoverTopEngagedListTweets(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, topTweets: [] }));
     return true;
   }
 });
@@ -2038,6 +2272,14 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
   const seenHandles = new Set();
   const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
 
+  const storedAudience = await new Promise(r => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get(['atomx_audience_engaged_history'], r);
+    } else r({});
+  });
+  const engagedHistory = (storedAudience?.atomx_audience_engaged_history && typeof storedAudience.atomx_audience_engaged_history === 'object')
+    ? storedAudience.atomx_audience_engaged_history : {};
+
   // DYNAMIC SCROLL: Keep scrolling until targetCount repliers are met
   const maxThreadScrolls = Math.max(80, numTarget * 4);
   let consecutiveNoNew = 0;
@@ -2055,7 +2297,7 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
 
       const data = extractTweetData(art);
       const cleanHandle = (data.authorHandle || '').replace('@', '').toLowerCase();
-      if (!cleanHandle || cleanHandle === loggedInHandle || seenHandles.has(cleanHandle)) {
+      if (!cleanHandle || cleanHandle === loggedInHandle || seenHandles.has(cleanHandle) || engagedHistory[cleanHandle]) {
         continue;
       }
 
@@ -2125,12 +2367,19 @@ async function engageAndFollowProfile(options = {}) {
   const targetHandle = typeof options === 'string' ? options : (options.handle || '');
   const likePosts = options.likePosts !== false;
   const replyPosts = !!options.replyPosts;
+  const repostPosts = !!options.repostPosts;
+  const followPosts = options.followPosts !== false;
+  const autoUnfollow = !!options.autoUnfollow;
+  const postsCountSetting = options.postsCount || options.postsPerProfile || 'random';
   const style = options.style || 'Bullish (5-10 words)';
   const stylePrompt = options.stylePrompt || null;
   const backendUrl = (options.backendUrl || 'https://agenticx-two.vercel.app').replace(/\/+$/, '');
 
   let likesDone = 0;
   let replyDone = 0;
+  let repostDone = 0;
+  let followed = false;
+  let unfollowedFirst = false;
 
   if (checkTwitterRateLimit()) {
     triggerRateLimitAbort();
@@ -2138,7 +2387,7 @@ async function engageAndFollowProfile(options = {}) {
   }
 
   try {
-    // Step 1: Follow Check & Action right at the top of the profile where avatar and Follow button are visible
+    // Step 1: Follow & Smart Unfollow Status Check
     const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
     const alreadyBtn = buttons.find(b => {
       const txt = (b.innerText || '').trim();
@@ -2146,8 +2395,24 @@ async function engageAndFollowProfile(options = {}) {
       return txt === 'Following' || testId.includes('unfollow') || txt.includes('Following');
     });
 
-    let followed = false;
-    if (!alreadyBtn) {
+    const pageText = (document.body ? document.body.innerText : '') || '';
+    const hasFollowsYouBadge = pageText.includes('Follows you');
+
+    // Smart Unfollow Strategy for Sorsa Booster:
+    // If target does not follow back and we already follow them -> unfollow first, engage on posts, then re-follow!
+    if (autoUnfollow && alreadyBtn && !hasFollowsYouBadge) {
+      console.log(`[ATOMX] @${targetHandle} does not follow back. Executing Unfollow First strategy...`);
+      alreadyBtn.click();
+      await sleep(500);
+      const confirmUnfollowBtn = await waitForElement('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"]', 2000) ||
+                                 Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => (b.innerText || '').trim() === 'Unfollow');
+      if (confirmUnfollowBtn) {
+        confirmUnfollowBtn.click();
+        unfollowedFirst = true;
+        await sleep(900);
+      }
+    } else if (!alreadyBtn && followPosts) {
+      // Standard Follow action if requested and not yet following
       const followBtn = buttons.find(b => {
         const txt = (b.innerText || '').trim();
         const testId = b.getAttribute('data-testid') || '';
@@ -2156,25 +2421,18 @@ async function engageAndFollowProfile(options = {}) {
       if (followBtn) {
         await simulateHumanFollowClick(followBtn);
         followed = true;
-        await sleep(400);
+        await sleep(500);
       }
     }
 
-    // If already followed (or just followed) and neither like nor reply is requested, exit early
-    if ((alreadyBtn || followed) && !likePosts && !replyPosts) {
-      return { success: true, alreadyFollowing: !!alreadyBtn, followed, handle: targetHandle, message: alreadyBtn ? 'Already Following' : 'Followed' };
-    }
-
-    // Step 2: Smooth scroll down past profile header/bio to reveal recent posts
-    window.scrollBy({ top: 550, behavior: 'smooth' });
-    await sleep(900);
+    // Step 2: Smooth scroll down past profile header/bio with human hydration
+    await smoothScrollAndHydrate(550, 900);
 
     // Step 3: Wait for timeline posts to hydrate with retry scrolling
     let allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     if (allArticles.length === 0) {
       for (let retries = 0; retries < 4 && allArticles.length === 0; retries++) {
-        window.scrollBy({ top: 400, behavior: 'smooth' });
-        await sleep(1000);
+        await smoothScrollAndHydrate(400, 1000);
         allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
       }
     }
@@ -2184,31 +2442,43 @@ async function engageAndFollowProfile(options = {}) {
       return !socialCtx.includes('pinned') && !socialCtx.includes('pin');
     });
 
-    // The topmost non-pinned post is the creator's recent post
-    const targetRecentPost = validRecentArticles[0] || allArticles[0];
+    const candidatePosts = validRecentArticles.length > 0 ? validRecentArticles : allArticles;
+    const targetRecentPost = candidatePosts[0];
 
-    // Gently scroll that target post into view
-    if (targetRecentPost) {
-      gentleScrollIntoView(targetRecentPost);
-      await sleep(600);
+    // Determine how many posts to engage
+    let numPostsToEngage = 1;
+    if (postsCountSetting === 'random') {
+      numPostsToEngage = Math.floor(Math.random() * 2) + 1; // 1 or 2 posts
+    } else {
+      numPostsToEngage = Math.max(1, Number(postsCountSetting) || 1);
     }
+    const postsSlice = candidatePosts.slice(0, numPostsToEngage);
 
-    // Step 4: Like recent posts on user's profile timeline (randomly 1 or 2 posts)
+    // Step 4: Like selected posts
     if (likePosts) {
-      const randomLikesCount = Math.floor(Math.random() * 2) + 1; // randomly 1 or 2 likes
-      const candidatePosts = validRecentArticles.length > 0 ? validRecentArticles : allArticles;
-      const postsToLike = candidatePosts.slice(0, randomLikesCount);
-      for (const art of postsToLike) {
+      for (const art of postsSlice) {
         if (isWorkflowAborted) break;
         const ok = await simulateHumanLikeClick(art);
         if (ok) {
           likesDone++;
-          await sleep(500);
+          await sleep(600);
         }
       }
     }
 
-    // Step 5: Generate AI Reply and comment on centered recent post
+    // Step 5: Repost selected posts
+    if (repostPosts) {
+      for (const art of postsSlice) {
+        if (isWorkflowAborted) break;
+        const ok = await simulateHumanRepostClick(art);
+        if (ok) {
+          repostDone++;
+          await sleep(600);
+        }
+      }
+    }
+
+    // Step 6: Generate AI Reply and comment on the primary recent post
     if (replyPosts && targetRecentPost && !isWorkflowAborted) {
       try {
         const tweetData = extractTweetData(targetRecentPost);
@@ -2216,11 +2486,7 @@ async function engageAndFollowProfile(options = {}) {
         const authorName = tweetData.authorName || targetHandle;
         const authorHandle = tweetData.authorHandle || `@${targetHandle}`;
 
-        console.log(`[ATOMX AUDIENCE] Generating contextual AI reply for @${targetHandle}'s recent post: "${tweetText.slice(0, 60)}..." Style: ${style}`);
-
         let commentToPost = '';
-
-        // Call background worker with active tone and prompt
         try {
           const aiRes = await chrome.runtime.sendMessage({
             type: 'GENERATE_INLINE_REPLY',
@@ -2278,21 +2544,34 @@ async function engageAndFollowProfile(options = {}) {
           commentToPost = 'Spot on insight. Keep building!';
         }
 
-        // Enforce strict client-side sanitization
         commentToPost = sanitizeClientComment(commentToPost, 10);
-
         if (commentToPost) {
           const commentRes = await postCommentOnTargetArticle(targetRecentPost, commentToPost);
           if (commentRes && commentRes.success) {
             replyDone++;
-            console.log(`[ATOMX] Successfully posted AI Reply on @${targetHandle}: "${commentToPost}"`);
             await sleep(1000);
-          } else {
-            console.warn('[ATOMX] postCommentOnTargetArticle returned error:', commentRes?.error);
           }
         }
       } catch (rErr) {
         console.warn('Could not post profile reply:', rErr);
+      }
+    }
+
+    // Step 7: If unfollowed first, RE-FOLLOW now to maximize follow-back!
+    if (unfollowedFirst && followPosts && !isWorkflowAborted) {
+      console.log(`[ATOMX] Re-following @${targetHandle} after engagement...`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      await sleep(800);
+      const reButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+      const reFollowBtn = reButtons.find(b => {
+        const txt = (b.innerText || '').trim();
+        const testId = b.getAttribute('data-testid') || '';
+        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
+      });
+      if (reFollowBtn) {
+        await simulateHumanFollowClick(reFollowBtn);
+        followed = true;
+        await sleep(500);
       }
     }
 
@@ -2302,14 +2581,16 @@ async function engageAndFollowProfile(options = {}) {
 
     return {
       success: true,
-      alreadyFollowing: !!alreadyBtn,
+      alreadyFollowing: !!alreadyBtn && !unfollowedFirst,
       followed,
+      unfollowedFirst,
       handle: targetHandle,
       likesDone,
-      replyDone
+      replyDone,
+      repostDone
     };
   } catch (err) {
-    return { success: false, error: err.message, likesDone, replyDone };
+    return { success: false, error: err.message, likesDone, replyDone, repostDone };
   }
 }
 
@@ -2605,14 +2886,16 @@ async function executeAutoUnfollowStep(params = {}) {
 // =========================================================================
 async function auditPostCommenters(params = {}) {
   isWorkflowAborted = false;
-  const targetCount = Number(params.targetCount || params.maxCount || 100);
-  const maxScrolls = Math.max(params.maxScrolls || 40, targetCount * 3);
+  const maxScrolls = Math.max(Number(params.maxScrolls) || 100, 80);
   const commenters = new Set();
   const mainArticle = getMainPostArticle();
   const mainHandle = mainArticle ? (extractTweetData(mainArticle).authorHandle || '').toLowerCase().replace(/^@/, '').trim() : '';
 
   let consecutiveNoNew = 0;
   let prevSize = 0;
+  let clickedSpamOrHidden = false;
+
+  console.log('[ATOMX DEFAULTERS] Starting deep comment audit on post. Will scroll till end and expand probable spam/hidden replies.');
 
   for (let i = 0; i < maxScrolls; i++) {
     if (isWorkflowAborted) break;
@@ -2636,11 +2919,154 @@ async function auditPostCommenters(params = {}) {
       }
     });
 
-    if (commenters.size >= targetCount) {
+    // Detect and Auto-Click "Probable Spam" or hidden / additional replies
+    const actionButtons = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"]'));
+    let buttonClicked = false;
+    for (const btn of actionButtons) {
+      const txt = (btn.innerText || btn.textContent || '').toLowerCase().trim();
+      if (
+        txt.includes('probable spam') ||
+        txt.includes('offensive content') ||
+        txt.includes('show additional replies') ||
+        txt.includes('show more replies') ||
+        txt.includes('show replies') ||
+        txt.includes('show probability')
+      ) {
+        try {
+          gentleScrollIntoView(btn);
+          btn.click();
+          buttonClicked = true;
+          clickedSpamOrHidden = true;
+          console.log(`[ATOMX DEFAULTERS] Clicked expand button: "${txt.slice(0, 40)}"`);
+          await sleep(1400);
+          break;
+        } catch (e) {}
+      }
+    }
+
+    if (commenters.size === prevSize && !buttonClicked) {
+      consecutiveNoNew++;
+      // Check if user has scrolled past bottom
+      if (consecutiveNoNew >= 8) {
+        console.log(`[ATOMX DEFAULTERS] No new comments for 8 consecutive cycles. Scan complete.`);
+        break;
+      }
+    } else {
+      consecutiveNoNew = 0;
+      prevSize = commenters.size;
+    }
+
+    await smoothScrollAndHydrate(850, 800);
+  }
+
+  console.log(`[ATOMX DEFAULTERS] Finished audit. Total unique commenters found: ${commenters.size} (expanded spam: ${clickedSpamOrHidden})`);
+
+  return {
+    success: true,
+    mainAuthor: mainHandle,
+    commenters: Array.from(commenters)
+  };
+}
+
+// =========================================================================
+// AGENT 13: COMMENTER RECIPROCATOR — PRE-COLLECTION LIKING & SMART DEDUPLICATION
+// =========================================================================
+async function collectReciprocatorCommenters(params = {}) {
+  isWorkflowAborted = false;
+  const targetCount = Number(params.targetCount || params.maxCount || 10);
+  const maxScrolls = Math.max(params.maxScrolls || 40, targetCount * 4);
+  const likeDelayMs = Number(params.commentLikeDelayMs || params.likeDelay || 4000);
+  const collectedProfiles = [];
+  const collectedHandles = new Set();
+  const mainArticle = getMainPostArticle();
+  const mainHandle = mainArticle ? (extractTweetData(mainArticle).authorHandle || '').toLowerCase().replace(/^@/, '').trim() : '';
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
+
+  let likesGiven = 0;
+  let skippedAlreadyLiked = 0;
+  let consecutiveNoNew = 0;
+  let prevSize = 0;
+
+  console.log(`[ATOMX RECIPROCATOR] Scanning comments for post (target: ${targetCount}, special like delay: ${likeDelayMs}ms). Will auto-like unliked comments and skip already-liked comments.`);
+
+  for (let i = 0; i < maxScrolls; i++) {
+    if (isWorkflowAborted) break;
+
+    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    for (const art of articles) {
+      if (isWorkflowAborted) break;
+      if (mainArticle && art === mainArticle) continue;
+
+      // Extract author handle
+      let commentAuthor = '';
+      const userEl = art.querySelector('div[data-testid="User-Name"]');
+      if (userEl) {
+        const links = userEl.querySelectorAll('a[href^="/"]');
+        for (const link of links) {
+          const href = (link.getAttribute('href') || '').replace(/^\//, '').split('?')[0].split('/')[0].toLowerCase().trim();
+          if (href && !['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(href)) {
+            commentAuthor = href;
+            break;
+          }
+        }
+      }
+
+      if (!commentAuthor) {
+        const d = extractTweetData(art);
+        commentAuthor = (d.authorHandle || '').toLowerCase().replace(/^@/, '').trim();
+      }
+
+      // Skip self comments and main post author
+      if (!commentAuthor || commentAuthor === mainHandle || (loggedInHandle && commentAuthor === loggedInHandle)) {
+        continue;
+      }
+
+      // If author already collected in this run, skip
+      if (collectedHandles.has(commentAuthor)) {
+        continue;
+      }
+
+      // ── CRITICAL FEATURE ──
+      // Check if this comment is ALREADY LIKED
+      const isAlreadyLiked = !!art.querySelector('button[data-testid="unlike"], div[data-testid="unlike"], [data-testid="unlike"]') ||
+                             Array.from(art.querySelectorAll('button, div[role="button"]')).some(b => {
+                               const l = (b.getAttribute('aria-label') || '').toLowerCase();
+                               return l.includes('unlike') || l.includes('liked');
+                             });
+
+      if (isAlreadyLiked) {
+        // ALREADY LIKED: Skip collecting this profile (native deduplication)
+        skippedAlreadyLiked++;
+        continue;
+      }
+
+      // NOT YET LIKED: Like the comment on the spot before collecting profile!
+      gentleScrollIntoView(art);
+      await sleep(200);
+      const likedOk = await simulateHumanLikeClick(art);
+      if (likedOk) {
+        likesGiven++;
+      }
+
+      // Special Delay Between Comment Likes (Commenter Reciprocator Exclusive)
+      const specialPacing = Math.max(1500, likeDelayMs + Math.floor(Math.random() * 1000 - 500));
+      console.log(`[ATOMX RECIPROCATOR] Comment liked. Special like delay pause: ${(specialPacing / 1000).toFixed(1)}s`);
+      await sleep(specialPacing);
+
+      // Collect this commenter's profile for reciprocal engagement
+      collectedHandles.add(commentAuthor);
+      collectedProfiles.push(commentAuthor);
+
+      if (collectedProfiles.length >= targetCount) {
+        break;
+      }
+    }
+
+    if (collectedProfiles.length >= targetCount) {
       break;
     }
 
-    // Auto-click show more replies
+    // Auto-click "Show more replies" if visible
     const showBtns = Array.from(document.querySelectorAll('button[role="button"], div[role="button"]')).filter(b => {
       const txt = (b.innerText || '').toLowerCase();
       return txt.includes('show replies') || txt.includes('show more replies') || txt.includes('show probability');
@@ -2650,22 +3076,25 @@ async function auditPostCommenters(params = {}) {
       await sleep(1000);
     }
 
-    if (commenters.size === prevSize) {
+    if (collectedProfiles.length === prevSize) {
       consecutiveNoNew++;
       if (consecutiveNoNew >= 8) break;
     } else {
       consecutiveNoNew = 0;
-      prevSize = commenters.size;
+      prevSize = collectedProfiles.length;
     }
 
-    window.scrollBy({ top: 950, behavior: 'smooth' });
-    await sleep(900);
+    await smoothScrollAndHydrate(650, 750);
   }
+
+  console.log(`[ATOMX RECIPROCATOR] Scan finished. Collected ${collectedProfiles.length} profiles, liked ${likesGiven} comments, skipped ${skippedAlreadyLiked} already-liked.`);
 
   return {
     success: true,
     mainAuthor: mainHandle,
-    commenters: Array.from(commenters)
+    commenters: collectedProfiles,
+    likesGiven,
+    skippedAlreadyLiked
   };
 }
 
@@ -2787,59 +3216,611 @@ async function executeLiveRaidEngagement(params = {}) {
 }
 
 // =========================================================================
-// AGENT 4: COLLECT ENGAGING NICHE PROFILES (DYNAMIC DISCOVERY)
+// AGENT 1: AUDIENCE BUILDER — COLLECT ENGAGED COMMENTERS FROM LIST TIMELINE
+// =========================================================================
+async function collectAudienceFromListTimeline(params = {}) {
+  isWorkflowAborted = false;
+  const targetCount = Number(params.targetCount || 10);
+  const freshness = params.freshness || '1h';
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
+
+  let freshnessMs = 60 * 60 * 1000;
+  if (freshness === '15m') freshnessMs = 15 * 60 * 1000;
+  else if (freshness === '30m') freshnessMs = 30 * 60 * 1000;
+  else if (freshness === '1h') freshnessMs = 60 * 60 * 1000;
+  else if (freshness === '2h') freshnessMs = 2 * 3600 * 1000;
+  else if (freshness === '6h') freshnessMs = 6 * 3600 * 1000;
+  else if (freshness === '12h') freshnessMs = 12 * 3600 * 1000;
+  else if (freshness === '24h') freshnessMs = 24 * 3600 * 1000;
+  else if (freshness === '3d') freshnessMs = 3 * 24 * 3600 * 1000;
+  else if (freshness === '7d') freshnessMs = 7 * 24 * 3600 * 1000;
+
+  const storedAudience = await new Promise(r => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get(['atomx_audience_engaged_history'], r);
+    } else r({});
+  });
+  const engagedHistory = (storedAudience?.atomx_audience_engaged_history && typeof storedAudience.atomx_audience_engaged_history === 'object')
+    ? storedAudience.atomx_audience_engaged_history : {};
+
+  const collectedProfiles = new Map();
+  const startTime = Date.now();
+  let consecutiveEmptyScrolls = 0;
+  const maxScanDurationMs = 120000; // 2 minutes warning threshold
+
+  for (let s = 0; s < 25; s++) {
+    if (isWorkflowAborted) break;
+    if (Date.now() - startTime > maxScanDurationMs) {
+      console.warn('[ATOMX AUDIENCE] Scraper reached 2-minute safety threshold.');
+      break;
+    }
+
+    const initialCount = collectedProfiles.size;
+    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+
+    for (const art of articles) {
+      if (collectedProfiles.size >= targetCount) break;
+
+      const timeEl = art.querySelector('time');
+      const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+      const tweetTime = timeStr ? new Date(timeStr).getTime() : Date.now();
+      const ageMs = Date.now() - tweetTime;
+      if (ageMs > freshnessMs) continue; // Skip tweets older than freshness window
+
+      const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+      const repliesCount = extractTwitterMetric(replyBtn);
+
+      const tweetData = extractTweetData(art);
+      const authorHandle = (tweetData.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+
+      // Collect commenters / repliers in thread
+      const userLinks = Array.from(art.querySelectorAll('a[role="link"][href^="/"], div[data-testid="User-Name"] a[href^="/"]'));
+      for (const link of userLinks) {
+        const href = (link.getAttribute('href') || '').replace(/^\//, '').split('?')[0].split('/')[0].toLowerCase().trim();
+        if (!href || ['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(href) || href === loggedInHandle) continue;
+
+        if (engagedHistory[href]) continue; // Skip if already engaged
+
+        if (!collectedProfiles.has(href)) {
+          collectedProfiles.set(href, {
+            cleanHandle: href,
+            handle: `@${href}`,
+            name: href,
+            repliesCount: repliesCount || 1
+          });
+        }
+      }
+
+      if (authorHandle && authorHandle !== loggedInHandle && !engagedHistory[authorHandle] && !collectedProfiles.has(authorHandle)) {
+        collectedProfiles.set(authorHandle, {
+          cleanHandle: authorHandle,
+          handle: `@${authorHandle}`,
+          name: authorHandle,
+          repliesCount: repliesCount || 1
+        });
+      }
+    }
+
+    if (collectedProfiles.size >= targetCount) break;
+
+    if (collectedProfiles.size === initialCount) {
+      consecutiveEmptyScrolls++;
+    } else {
+      consecutiveEmptyScrolls = 0;
+    }
+
+    // Dynamic refresh: if 5-6 scrolls find no fresh tweets, reload list page to fetch fresh tweets
+    if (consecutiveEmptyScrolls >= 5) {
+      console.log('[ATOMX AUDIENCE] 5 scrolls found no fresh tweets. Re-hydrating list page...');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      await sleep(1000);
+      window.location.reload();
+      await sleep(4500);
+      consecutiveEmptyScrolls = 0;
+      continue;
+    }
+
+    await smoothScrollAndHydrate(650, 900);
+  }
+
+  const profilesArray = Array.from(collectedProfiles.values()).slice(0, targetCount);
+  const warned = (Date.now() - startTime > maxScanDurationMs) && profilesArray.length < targetCount;
+
+  return {
+    success: true,
+    profiles: profilesArray,
+    totalFound: profilesArray.length,
+    warned: warned ? 'Warning: List had few fresh tweets in chosen timeframe after 2 minutes of scanning.' : null
+  };
+}
+
+// =========================================================================
+// AGENT 4: COLLECT ENGAGING NICHE PROFILES (FOLLOWERS INCREASE DISCOVERY)
 // =========================================================================
 async function collectEngagingNicheProfiles(params = {}) {
   isWorkflowAborted = false;
   const targetCount = Number(params.targetCount || 8);
-  const maxScrolls = Number(params.maxScrolls || 6);
+  const maxScrolls = Number(params.maxScrolls || 16);
+  const freshness = params.freshness || '1h';
+  const sortBy = params.sortBy || 'active'; // 'active' (highest replies) vs 'recent'
   const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
+
+  let freshnessMs = 60 * 60 * 1000;
+  if (freshness === '15m') freshnessMs = 15 * 60 * 1000;
+  else if (freshness === '30m') freshnessMs = 30 * 60 * 1000;
+  else if (freshness === '1h') freshnessMs = 60 * 60 * 1000;
+  else if (freshness === '2h') freshnessMs = 2 * 3600 * 1000;
+  else if (freshness === '6h') freshnessMs = 6 * 3600 * 1000;
+  else if (freshness === '12h') freshnessMs = 12 * 3600 * 1000;
+  else if (freshness === '24h') freshnessMs = 24 * 3600 * 1000;
+  else if (freshness === '3d') freshnessMs = 3 * 24 * 3600 * 1000;
+  else if (freshness === '7d') freshnessMs = 7 * 24 * 3600 * 1000;
+
   const foundMap = new Map();
+  let consecutiveEmptyScrolls = 0;
+
+  for (let s = 0; s < maxScrolls; s++) {
+    if (isWorkflowAborted) break;
+    const initialSize = foundMap.size;
+
+    // Scrape tweet articles from list timeline
+    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    for (const art of articles) {
+      // Filter out spam / giveaway / weak junk posts
+      const text = (art.innerText || '').toLowerCase();
+      if (text.includes('airdrop bot') || text.includes('send 0.1 eth') || text.includes('giveaway bot') || text.includes('dm to claim')) {
+        continue;
+      }
+
+      // Filter out comments / replies strictly
+      const artText = (art.innerText || '');
+      const hasReplyingText = /replying to/i.test(artText);
+      const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
+      const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
+      if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
+
+      const timeEl = art.querySelector('time');
+      const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+      const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
+      const ageMs = Date.now() - timestamp;
+      if (ageMs > freshnessMs) continue;
+
+      let handle = '';
+      const userEl = art.querySelector('div[data-testid="User-Name"]');
+      if (userEl) {
+        const textMatch = (userEl.innerText || '').match(/@([a-zA-Z0-9_]{1,25})/);
+        if (textMatch && textMatch[1]) {
+          handle = textMatch[1].toLowerCase().trim();
+        }
+      }
+
+      if (!handle || ['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(handle) || handle === loggedInHandle) {
+        continue;
+      }
+
+      const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+      const likeBtn = art.querySelector('button[data-testid="like"], div[data-testid="like"]');
+      const repliesCount = extractTwitterMetric(replyBtn);
+      const likesCount = extractTwitterMetric(likeBtn);
+      const score = (repliesCount * 5) + likesCount + (sortBy === 'recent' ? Math.round(timestamp / 100000000) : 0);
+
+      const existing = foundMap.get(handle);
+      if (!existing || score > existing.score) {
+        foundMap.set(handle, {
+          cleanHandle: handle,
+          handle: `@${handle}`,
+          name: handle,
+          score,
+          timestamp,
+          repliesCount
+        });
+      }
+    }
+
+    if (foundMap.size >= targetCount * 2) break;
+
+    if (foundMap.size === initialSize) {
+      consecutiveEmptyScrolls++;
+    } else {
+      consecutiveEmptyScrolls = 0;
+    }
+
+    // 5-6 scroll refresh if no new tweets found
+    if (consecutiveEmptyScrolls >= 5) {
+      console.log('[ATOMX FOLLOWERS] 5-6 scrolls found no new tweets. Refreshing list page...');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      await sleep(1000);
+      window.location.reload();
+      await sleep(4000);
+      consecutiveEmptyScrolls = 0;
+      continue;
+    }
+
+    await smoothScrollAndHydrate(700, 900);
+  }
+
+  const sorted = Array.from(foundMap.values())
+    .sort((a, b) => sortBy === 'recent' ? b.timestamp - a.timestamp : b.score - a.score)
+    .slice(0, targetCount);
+
+  return { success: true, profiles: sorted, totalFound: sorted.length };
+}
+
+// =========================================================================
+// AGENT 1: AUDIENCE BUILDER — DISCOVER TOP ENGAGED TWEETS FROM LIST TIMELINE
+// Finds highest reply count tweets within timeframe, refreshing after 5-6 scrolls
+// =========================================================================
+async function discoverTopEngagedListTweets(params = {}) {
+  isWorkflowAborted = false;
+  const targetCount = Number(params.targetCount || 10);
+  const freshness = params.freshness || '2h';
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
+
+  let freshnessMs = 2 * 3600 * 1000;
+  if (freshness === '15m') freshnessMs = 15 * 60 * 1000;
+  else if (freshness === '30m') freshnessMs = 30 * 60 * 1000;
+  else if (freshness === '1h') freshnessMs = 60 * 60 * 1000;
+  else if (freshness === '2h') freshnessMs = 2 * 3600 * 1000;
+  else if (freshness === '6h') freshnessMs = 6 * 3600 * 1000;
+  else if (freshness === '12h') freshnessMs = 12 * 3600 * 1000;
+  else if (freshness === '24h') freshnessMs = 24 * 3600 * 1000;
+  else if (freshness === '3d') freshnessMs = 3 * 24 * 3600 * 1000;
+  else if (freshness === '7d') freshnessMs = 7 * 24 * 3600 * 1000;
+
+  const topTweetsMap = new Map();
+  let consecutiveEmptyScrolls = 0;
+  const maxScrolls = 20;
 
   for (let s = 0; s < maxScrolls; s++) {
     if (isWorkflowAborted) break;
 
+    const initialCount = topTweetsMap.size;
     const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+
     for (const art of articles) {
-      const userEl = art.querySelector('div[data-testid="User-Name"]');
-      if (!userEl) continue;
-      const link = userEl.querySelector('a[href^="/"]');
-      if (!link) continue;
-      const handle = (link.getAttribute('href') || '').replace(/^\//, '').split('?')[0].split('/')[0].toLowerCase().trim();
-      if (!handle || ['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(handle)) continue;
-      if (handle === loggedInHandle) continue;
+      const timeEl = art.querySelector('time');
+      const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+      const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
+      const ageMs = Date.now() - timestamp;
+      if (ageMs > freshnessMs) continue;
 
-      let score = 1;
-      const likeBtn = art.querySelector('button[data-testid="like"], div[data-testid="like"]');
+      // Filter out comments / replies strictly
+      const artText = (art.innerText || '');
+      const hasReplyingText = /replying to/i.test(artText);
+      const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
+      const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
+      if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
+
       const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
-      if (likeBtn) {
-        const txt = (likeBtn.innerText || '').replace(/[^0-9]/g, '');
-        if (txt) score += parseInt(txt, 10);
-      }
-      if (replyBtn) {
-        const txt = (replyBtn.innerText || '').replace(/[^0-9]/g, '');
-        if (txt) score += (parseInt(txt, 10) * 2);
-      }
+      const repliesCount = extractTwitterMetric(replyBtn);
 
-      const existing = foundMap.get(handle) || 0;
-      foundMap.set(handle, Math.max(existing, score));
+      const statusLink = art.querySelector('a[href*="/status/"]');
+      if (!statusLink) continue;
+      const href = statusLink.getAttribute('href') || '';
+      const fullUrl = href.startsWith('http') ? href : `https://x.com${href}`;
+
+      const tweetData = extractTweetData(art);
+      const author = (tweetData.authorHandle || '').replace(/^@/, '').trim();
+
+      if (!topTweetsMap.has(fullUrl)) {
+        topTweetsMap.set(fullUrl, {
+          url: fullUrl,
+          repliesCount: repliesCount || 0,
+          author,
+          timestamp
+        });
+      }
     }
 
-    if (foundMap.size >= targetCount * 2) break;
-    window.scrollBy({ top: 850, behavior: 'smooth' });
-    await sleep(1000);
+    if (topTweetsMap.size === initialCount) {
+      consecutiveEmptyScrolls++;
+      if (consecutiveEmptyScrolls >= 5) {
+        console.log('[ATOMX AUDIENCE] 5 scrolls found no fresh tweets. Refreshing list timeline...');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        await sleep(1000);
+        window.location.reload();
+        await sleep(4500);
+        consecutiveEmptyScrolls = 0;
+        continue;
+      }
+    } else {
+      consecutiveEmptyScrolls = 0;
+    }
+
+    if (topTweetsMap.size >= 12) break;
+    await smoothScrollAndHydrate(650, 900);
   }
 
-  const sorted = Array.from(foundMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, targetCount)
-    .map(([handle]) => ({
-      cleanHandle: handle,
-      handle: `@${handle}`,
-      name: handle
-    }));
+  // Sort descending by highest replies count ("most engaged (sobche beshi reply) ar recent tweet")
+  const sorted = Array.from(topTweetsMap.values())
+    .sort((a, b) => b.repliesCount - a.repliesCount);
 
-  return { success: true, profiles: sorted, totalFound: sorted.length };
+  return {
+    success: true,
+    topTweets: sorted
+  };
+}
+
+// =========================================================================
+// AGENT 4: FOLLOWERS INCREASE — DIRECT TIMELINE ENGAGEMENT ENGINE
+// Engages directly on the List's recent posts (not comments) within timeframe.
+// Skips weak tweets (< 15 chars, < 4 words, spam keywords).
+// Auto-refreshes list if 5-6 scrolls yield no new tweets.
+// =========================================================================
+async function executeFollowersListCycle(params = {}) {
+  isWorkflowAborted = false;
+  const targetCount = Number(params.targetCount || 8);
+  const freshness = params.freshness || '1h';
+  const likePosts = params.likePosts !== false;
+  const replyPosts = params.replyPosts !== false;
+  const repostPosts = params.repostPosts === true;
+  const autoFollow = params.autoFollow !== false;
+  const style = params.style || 'Natural & Concise';
+  const stylePrompt = params.stylePrompt || null;
+  const backendUrl = (params.backendUrl || 'https://agenticx-two.vercel.app').replace(/\/+$/, '');
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
+
+  let freshnessMs = 60 * 60 * 1000;
+  if (freshness === '15m') freshnessMs = 15 * 60 * 1000;
+  else if (freshness === '30m') freshnessMs = 30 * 60 * 1000;
+  else if (freshness === '1h') freshnessMs = 60 * 60 * 1000;
+  else if (freshness === '2h') freshnessMs = 2 * 3600 * 1000;
+  else if (freshness === '6h') freshnessMs = 6 * 3600 * 1000;
+  else if (freshness === '12h') freshnessMs = 12 * 3600 * 1000;
+  else if (freshness === '24h') freshnessMs = 24 * 3600 * 1000;
+  else if (freshness === '3d') freshnessMs = 3 * 24 * 3600 * 1000;
+  else if (freshness === '7d') freshnessMs = 7 * 24 * 3600 * 1000;
+
+  const stored = await new Promise(r => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get(['atomx_follower_engaged_tweets', 'atomx_follower_engaged_history', 'atomx_safety_settings'], r);
+    } else r({});
+  });
+  const engagedTweets = (stored?.atomx_follower_engaged_tweets && typeof stored.atomx_follower_engaged_tweets === 'object')
+    ? stored.atomx_follower_engaged_tweets : {};
+  const engagedAuthors = (stored?.atomx_follower_engaged_history && typeof stored.atomx_follower_engaged_history === 'object')
+    ? stored.atomx_follower_engaged_history : {};
+  const safety = stored?.atomx_safety_settings || {};
+  const postWaitSec = Number(safety.postWait) || 20;
+
+  let engagedCount = 0;
+  let consecutiveEmptyScrolls = 0;
+  const processedTweetIds = new Set();
+  const maxScrolls = 80;
+
+  console.log(`[ATOMX FOLLOWERS] Starting Followers Increase timeline engine. Target: ${targetCount} posts, Freshness: ${freshness}`);
+
+  for (let s = 0; s < maxScrolls; s++) {
+    if (isWorkflowAborted || engagedCount >= targetCount) break;
+
+    // Respect HUD Pause
+    while (isHudWorkflowPaused && !isWorkflowAborted) {
+      await sleep(1000);
+    }
+
+    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    let foundNewInPass = false;
+
+    for (const art of articles) {
+      if (isWorkflowAborted || engagedCount >= targetCount) break;
+
+      while (isHudWorkflowPaused && !isWorkflowAborted) {
+        await sleep(1000);
+      }
+
+      const tweetData = extractTweetData(art);
+      const tweetId = tweetData.id || tweetData.tweetUrl;
+      const authorHandle = (tweetData.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+
+      if (!tweetId || processedTweetIds.has(tweetId)) continue;
+      processedTweetIds.add(tweetId);
+
+      // Skip own tweets
+      if (authorHandle && authorHandle === loggedInHandle) continue;
+
+      // Skip if already engaged on this tweet
+      if (engagedTweets[tweetId]) continue;
+      const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
+      if (alreadyLiked) {
+        engagedTweets[tweetId] = Date.now();
+        continue;
+      }
+
+      // Check timeframe freshness
+      const timeEl = art.querySelector('time');
+      const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+      const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
+      const ageMs = Date.now() - timestamp;
+      if (ageMs > freshnessMs) {
+        continue; // Older than timeframe
+      }
+
+      // STRICT CHECK: Only recent posts, NEVER comments / replies
+      // "sudu matro recent post a. recent comment gulai na"
+      const artText = (art.innerText || '');
+      const hasReplyingText = /replying to/i.test(artText);
+      const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
+      const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
+      const isReplying = hasReplyingText || hasThreadConnector || hasReplyLink;
+      if (isReplying) {
+        console.log(`[ATOMX FOLLOWERS] Skipping comment/reply tweet by @${authorHandle}`);
+        continue; // STRICT: Skip comments/replies!
+      }
+
+      // WEAK TWEET FILTER (short, spam): skip
+      // "week tweet(short, spam): skip"
+      const tweetText = (tweetData.text || '').trim();
+      const words = tweetText.split(/\s+/).filter(Boolean);
+      if (tweetText.length < 15 || words.length < 4) {
+        console.log(`[ATOMX FOLLOWERS] Skipping weak short post (${tweetText.length} chars, ${words.length} words): "${tweetText}"`);
+        continue;
+      }
+
+      const lowerText = tweetText.toLowerCase();
+      const spamKeywords = [
+        'airdrop', 'send 0.1 eth', 'send eth', 'giveaway bot', 'dm to claim',
+        'presale', 'free mint', 'claim your free', 'airdrop bot', 'pump',
+        'drop wallet', 'drop address', 'whitelist slot'
+      ];
+      if (spamKeywords.some(kw => lowerText.includes(kw))) {
+        console.log(`[ATOMX FOLLOWERS] Skipping spam post: "${tweetText.slice(0, 50)}"`);
+        continue;
+      }
+
+      // QUALIFYING RECENT POST FOUND!
+      foundNewInPass = true;
+      consecutiveEmptyScrolls = 0;
+
+      art.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(700);
+
+      const statusMsg = `Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}...`;
+      updateFloatingHud({
+        title: 'Followers Increase',
+        stateBadge: 'ENGAGING',
+        indicator: `${engagedCount}/${targetCount}`,
+        done: engagedCount,
+        collected: targetCount,
+        skipped: 0,
+        progressPercent: Math.round((engagedCount / targetCount) * 100),
+        statusText: statusMsg
+      });
+
+      // Execute checked actions:
+      // 1. ❤️ Like
+      if (likePosts && !isWorkflowAborted) {
+        await simulateHumanLikeClick(art);
+        await sleep(500);
+      }
+
+      // 2. 🔁 Repost
+      if (repostPosts && !isWorkflowAborted) {
+        await simulateHumanRepostClick(art);
+        await sleep(500);
+      }
+
+      // 3. 💬 Comment
+      if (replyPosts && !isWorkflowAborted) {
+        let replyContent = '';
+        try {
+          const aiRes = await chrome.runtime.sendMessage({
+            type: 'GENERATE_INLINE_REPLY',
+            tweetText,
+            tweetAuthor: `@${authorHandle}`,
+            tweetAuthorName: tweetData.authorName || authorHandle,
+            style,
+            stylePrompt
+          });
+          if (aiRes?.reply) replyContent = aiRes.reply.trim();
+        } catch (e) {
+          console.warn('[ATOMX FOLLOWERS] AI reply error:', e);
+        }
+
+        if (!replyContent) {
+          replyContent = 'Solid point. Appreciate the clear insight here.';
+        }
+
+        replyContent = sanitizeClientComment(replyContent, 10);
+        if (replyContent && !isWorkflowAborted) {
+          await postCommentOnTargetArticle(art, replyContent);
+          await sleep(900);
+        }
+      }
+
+      // 4. ➕ Follow author
+      if (autoFollow && authorHandle && !isWorkflowAborted) {
+        const followBtn = art.querySelector('button[data-testid*="-follow"], div[data-testid*="-follow"]') ||
+          Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => (b.innerText || '').trim() === 'Follow');
+        if (followBtn) {
+          await simulateHumanFollowClick(followBtn);
+          await sleep(500);
+        }
+      }
+
+      engagedCount++;
+      engagedTweets[tweetId] = Date.now();
+      if (authorHandle) engagedAuthors[authorHandle] = Date.now();
+
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({
+          atomx_follower_engaged_tweets: engagedTweets,
+          atomx_follower_engaged_history: engagedAuthors
+        }).catch(() => null);
+      }
+
+      updateFloatingHud({
+        title: 'Followers Increase',
+        stateBadge: engagedCount >= targetCount ? 'DONE' : 'ENGAGING',
+        indicator: `${engagedCount}/${targetCount}`,
+        done: engagedCount,
+        collected: targetCount,
+        skipped: 0,
+        progressPercent: Math.round((engagedCount / targetCount) * 100),
+        statusText: `✓ Engaged [${engagedCount}/${targetCount}] on @${authorHandle || 'user'}'s post`
+      });
+
+      if (engagedCount >= targetCount || isWorkflowAborted) break;
+
+      // Pacing countdown between posts
+      const waitSec = Math.max(8, postWaitSec + Math.floor(Math.random() * 6 - 3));
+      for (let sec = waitSec; sec > 0 && !isWorkflowAborted; sec--) {
+        const check = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+        if (check?.atomx_agent_workflow?.active === false || check?.atomx_agent_workflow?.isStopped || check?.atomx_active_hud?.isStopped || check?.atomx_active_hud?.stateBadge === 'STOPPED') {
+          isWorkflowAborted = true;
+          break;
+        }
+        updateFloatingHud({
+          countdownText: `⏱️ Next post in ${sec}s...`,
+          timerBadge: `⏱️ ${sec}s`
+        });
+        await sleep(1000);
+        if (isWorkflowAborted) break;
+      }
+    }
+
+    if (engagedCount >= targetCount || isWorkflowAborted) break;
+
+    if (!foundNewInPass) {
+      consecutiveEmptyScrolls++;
+    } else {
+      consecutiveEmptyScrolls = 0;
+    }
+
+    // "No new tweet in 5to6 scroll: refresh the list"
+    if (consecutiveEmptyScrolls >= 5) {
+      console.log('[ATOMX FOLLOWERS] No new qualifying tweets in 5-6 scrolls. Refreshing list page...');
+      updateFloatingHud({
+        statusText: 'No new tweets in 5-6 scrolls. Refreshing list...',
+        stateBadge: 'REFRESHING'
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      await sleep(1000);
+      window.location.reload();
+      await sleep(5000);
+      consecutiveEmptyScrolls = 0;
+      continue;
+    }
+
+    await smoothScrollAndHydrate(700, 1000);
+  }
+
+  if (isWorkflowAborted) {
+    updateFloatingHud({
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      timerBadge: '🛑 Stopped',
+      countdownText: '',
+      isStopped: true,
+      active: false
+    });
+  }
+
+  return {
+    success: true,
+    engagedCount,
+    targetCount,
+    aborted: isWorkflowAborted
+  };
 }
 
 // =========================================================================

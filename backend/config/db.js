@@ -26,8 +26,8 @@ async function resolveUser(userIdOrId) {
   }
 
   // 3. If Twitter handle
-  const cleanHandle = val.replace(/^@/, '').toLowerCase();
-  const { data: handleUser } = await supabase.from('users').select('*').or(`handle.eq.@${cleanHandle},handle.eq.${cleanHandle}`).maybeSingle();
+  const cleanHandle = val.replace(/^@/, '').toLowerCase().trim();
+  const { data: handleUser } = await supabase.from('users').select('*').or(`handle.ilike.@${cleanHandle},handle.ilike.${cleanHandle}`).maybeSingle();
   if (handleUser) return handleUser;
 
   // 4. If numeric ID
@@ -55,16 +55,34 @@ module.exports = {
   },
 
   async getUserByEmail(email) {
-    if (!supabase) return null;
-    const { data } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+    if (!supabase || !email) return null;
+    const cleanEmail = email.toLowerCase().trim();
+    const { data } = await supabase.from('users').select('*').ilike('email', cleanEmail).maybeSingle();
     return data || null;
   },
 
   async getUserByHandle(handle) {
     if (!supabase || !handle) return null;
     const clean = handle.replace(/^@/, '').toLowerCase().trim();
-    const { data } = await supabase.from('users').select('*').or(`handle.eq.@${clean},handle.eq.${clean}`).maybeSingle();
-    return data || null;
+    try {
+      const { data } = await supabase.from('users').select('*').or(`handle.ilike.@${clean},handle.ilike.${clean}`).maybeSingle();
+      if (data) return data;
+    } catch (e) {}
+
+    // Fallback: exact match across all users to handle PostgreSQL ILIKE wildcard chars (like _)
+    try {
+      const { data: all } = await supabase.from('users').select('*');
+      if (all && all.length > 0) {
+        const found = all.find(u => {
+          const uH = (u.handle || '').toLowerCase().replace(/^@/, '').trim();
+          const uEm = (u.email || '').toLowerCase().trim();
+          const uFn = (u.full_name || '').toLowerCase().replace(/^@/, '').trim();
+          return uH === clean || uEm === clean || uFn === clean;
+        });
+        if (found) return found;
+      }
+    } catch (err) {}
+    return null;
   },
 
   async getAllUsers() {
@@ -275,13 +293,6 @@ module.exports = {
         user_handle: userHandle ? (userHandle.startsWith('@') ? userHandle : `@${userHandle}`) : null
       };
     });
-  },
-
-  async getUserByHandle(handle) {
-    if (!supabase) return null;
-    const clean = handle.replace(/^@/, '');
-    const { data } = await supabase.from('users').select('*').or(`handle.eq.@${clean},handle.eq.${clean}`).maybeSingle();
-    return data;
   },
 
   // Access Requests & Approval
