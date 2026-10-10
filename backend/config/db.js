@@ -115,6 +115,14 @@ module.exports = {
         .update({ action: 'Password Reset (Resolved)' })
         .eq('user_id', user.id)
         .eq('action', 'Forgot Password');
+
+      const userH = (user.handle || '').toLowerCase().replace(/^@/, '');
+      if (userH) {
+        await supabase.from('credits_ledger')
+          .update({ action: 'Password Reset (Resolved)' })
+          .ilike('reason', `%${userH}%`)
+          .eq('action', 'Forgot Password');
+      }
     } catch (ledgerErr) {
       console.warn('Could not update ledger reset status:', ledgerErr.message);
     }
@@ -124,13 +132,24 @@ module.exports = {
 
   async resolvePasswordReset(userIdOrHandle) {
     if (!supabase) return true;
-    const user = await resolveUser(userIdOrHandle);
-    if (!user) return true;
-    const { error } = await supabase.from('credits_ledger')
-      .update({ action: 'Password Reset (Resolved)' })
-      .eq('user_id', user.id)
-      .eq('action', 'Forgot Password');
-    if (error) console.warn('Could not mark password reset resolved:', error.message);
+    try {
+      const user = await resolveUser(userIdOrHandle);
+      if (user && user.id) {
+        await supabase.from('credits_ledger')
+          .update({ action: 'Password Reset (Resolved)' })
+          .eq('user_id', user.id)
+          .eq('action', 'Forgot Password');
+      }
+      const cleanH = String(userIdOrHandle || '').replace(/^@/, '').toLowerCase().trim();
+      if (cleanH) {
+        await supabase.from('credits_ledger')
+          .update({ action: 'Password Reset (Resolved)' })
+          .ilike('reason', `%${cleanH}%`)
+          .eq('action', 'Forgot Password');
+      }
+    } catch (e) {
+      console.warn('Could not mark password reset resolved:', e.message);
+    }
     return true;
   },
 
