@@ -37,6 +37,7 @@ chrome.runtime.onInstalled.addListener(() => {
     id: 'atomx-generate-reply',
     title: 'ATOMX: Generate AI Reply for selection',
     contexts: ['selection']
+  });
 });
 
 // ─────────────────────────────────────────────

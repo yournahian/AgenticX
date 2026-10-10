@@ -166,7 +166,34 @@ function getLoggedInUserHandle() {
         return clean;
       }
     }
+    // 4. Check profile links in primary navigation
+    const navProfileLink = document.querySelector('header a[href^="/"][aria-label*="Profile" i], nav a[href^="/"][aria-label*="Profile" i]');
+    if (navProfileLink) {
+      const href = navProfileLink.getAttribute('href') || '';
+      const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
+      if (clean && clean.length > 1) return clean;
+    }
   } catch (e) {}
+  return null;
+}
+
+function isDefinitelyLoggedOut() {
+  try {
+    return !!document.querySelector('a[data-testid="loginButton"], a[href*="/login"], a[data-testid="signupButton"], div[data-testid="BottomBar"] a[href*="/login"]');
+  } catch (e) {
+    return false;
+  }
+}
+
+async function waitForLoggedInUserHandle(timeoutMs = 2500) {
+  let h = getLoggedInUserHandle();
+  if (h) return h;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await sleep(250);
+    h = getLoggedInUserHandle();
+    if (h) return h;
+  }
   return null;
 }
 
@@ -215,6 +242,29 @@ function showAccountMismatchModal(expectedHandle, actualHandle) {
   document.body.appendChild(banner);
   document.getElementById('atomx-close-mismatch')?.addEventListener('click', () => banner.remove());
   setTimeout(() => banner.remove(), 12000);
+}
+
+async function verifyAccountLockOrAbort(expectedHandle) {
+  if (!expectedHandle) return { ok: true };
+  const expected = expectedHandle.replace(/^@/, '').toLowerCase().trim();
+  const current = ((await waitForLoggedInUserHandle(2500)) || '').toLowerCase().trim();
+  if (current && current !== expected) {
+    showAccountMismatchModal(expected, current);
+    return {
+      ok: false,
+      error: `Account Lock Mismatch: Active Twitter ID is @${current}, but extension is locked to @${expected}. Please log into @${expected}.`,
+      unauthorizedAccount: true
+    };
+  }
+  if (!current && isDefinitelyLoggedOut()) {
+    showAccountMismatchModal(expected, 'Not Logged In');
+    return {
+      ok: false,
+      error: `Please log into your verified Twitter account (@${expected}) on x.com.`,
+      unauthorizedAccount: true
+    };
+  }
+  return { ok: true, current: current || expected };
 }
 
 /**
@@ -1283,13 +1333,17 @@ async function insertIntoTwitterInput(text) {
 // Listen to commands from Extension Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' || message.type === 'GET_CURRENT_X_ACCOUNT') {
-    const handle = getLoggedInUserHandle();
-    sendResponse({
-      success: true,
-      handle: handle ? `@${handle}` : null,
-      rawHandle: handle || null,
-      isLoggedIn: Boolean(handle)
-    });
+    (async () => {
+      const handle = await waitForLoggedInUserHandle(1500);
+      const isLoggedOut = !handle && isDefinitelyLoggedOut();
+      sendResponse({
+        success: true,
+        handle: handle ? `@${handle}` : null,
+        rawHandle: handle || null,
+        isLoggedIn: Boolean(handle) || !isLoggedOut,
+        isDefinitelyLoggedOut: isLoggedOut
+      });
+    })();
     return true;
   }
 
@@ -1482,15 +1536,9 @@ async function executeAutonomousTweetWorkflow(params) {
 
   // 1-to-1 Verified Account Enforcement
   if (params.verifiedXHandle) {
-    const expected = params.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
-    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
-    if (!current || current !== expected) {
-      showAccountMismatchModal(expected, current || 'Not Logged In');
-      return {
-        success: false,
-        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
-        unauthorizedAccount: true
-      };
+    const lockCheck = await verifyAccountLockOrAbort(params.verifiedXHandle);
+    if (!lockCheck.ok) {
+      return { success: false, error: lockCheck.error, unauthorizedAccount: true };
     }
   }
 
@@ -1775,13 +1823,11 @@ async function huntAudienceUsers(options = {}) {
 
   // 1-to-1 Verified Account Enforcement
   if (options.verifiedXHandle) {
-    const expected = options.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
-    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
-    if (!current || current !== expected) {
-      showAccountMismatchModal(expected, current || 'Not Logged In');
+    const lockCheck = await verifyAccountLockOrAbort(options.verifiedXHandle);
+    if (!lockCheck.ok) {
       return {
         success: false,
-        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        error: lockCheck.error,
         unauthorizedAccount: true,
         profiles: [],
         busyTweets: []
@@ -2070,15 +2116,9 @@ async function engageAndFollowProfile(options = {}) {
 
   // 1-to-1 Verified Account Enforcement
   if (options.verifiedXHandle) {
-    const expected = options.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
-    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
-    if (!current || current !== expected) {
-      showAccountMismatchModal(expected, current || 'Not Logged In');
-      return {
-        success: false,
-        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
-        unauthorizedAccount: true
-      };
+    const lockCheck = await verifyAccountLockOrAbort(options.verifiedXHandle);
+    if (!lockCheck.ok) {
+      return { success: false, error: lockCheck.error, unauthorizedAccount: true };
     }
   }
 
@@ -2285,13 +2325,11 @@ async function executeReplyBackCycle(params = {}) {
 
   // 1-to-1 Verified Account Enforcement
   if (params.verifiedXHandle) {
-    const expected = params.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
-    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
-    if (!current || current !== expected) {
-      showAccountMismatchModal(expected, current || 'Not Logged In');
+    const lockCheck = await verifyAccountLockOrAbort(params.verifiedXHandle);
+    if (!lockCheck.ok) {
       return {
         success: false,
-        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        error: lockCheck.error,
         unauthorizedAccount: true
       };
     }
@@ -2812,13 +2850,11 @@ async function executeReciprocalProfileEngagement(params = {}) {
 
   // 1-to-1 Verified Account Enforcement
   if (params.verifiedXHandle) {
-    const expected = params.verifiedXHandle.replace(/^@/, '').toLowerCase().trim();
-    const current = (getLoggedInUserHandle() || '').toLowerCase().trim();
-    if (!current || current !== expected) {
-      showAccountMismatchModal(expected, current || 'Not Logged In');
+    const lockCheck = await verifyAccountLockOrAbort(params.verifiedXHandle);
+    if (!lockCheck.ok) {
       return {
         success: false,
-        error: `Account Lock Mismatch: Active Twitter ID is @${current || 'none'}, but extension is locked to @${expected}. Please log into @${expected}.`,
+        error: lockCheck.error,
         unauthorizedAccount: true
       };
     }
