@@ -2209,51 +2209,48 @@ function renderCreditsPlans(container) {
               <button class="btn btn-primary btn-block" style="background:linear-gradient(135deg, #FF6B00, #E60000); border:none; font-weight:700;" onclick="alert('Claiming Founding 100 Offer ($2 / 5,000 Credits)!'); AtomXState.currentUser.credits += 5000; renderCreditsPlans(document.getElementById('mainContentArea'));">Claim Offer ($2)</button>
             </div>
 
-            <!-- Free Plan -->
-            <div class="pricing-card">
-              <div style="font-size:13px; font-weight:700; color:var(--text-secondary);">FREE</div>
-              <div class="plan-price">$0 <span style="font-size:14px; color:var(--text-muted); font-weight:500;">/ mo</span></div>
-              <div style="font-size:14px; font-weight:600; color:var(--text-primary);">100 Credits</div>
-              <ul class="plan-feature-list">
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 100 AI replies</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Basic reply styles</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Reply queue</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Basic history</li>
-              </ul>
-              <button class="btn btn-secondary btn-block">Current Plan</button>
-            </div>
+            <!-- Dynamic Pricing Grid connected to Global Server Plans -->
+            ${(AtomXState.plans && AtomXState.plans.length > 0) ? `
+              <div class="pricing-grid">
+                ${AtomXState.plans.map(p => `
+                  <div class="pricing-card ${p.popular ? 'featured' : ''}" style="position:relative;">
+                    ${p.offerBadge ? `
+                      <div class="pricing-card-badge" style="background:linear-gradient(135deg, #FF6B00, #E60000); color:#FFF; font-weight:800; font-size:11px; padding:4px 10px; border-radius:20px; text-transform:uppercase;">
+                        🔥 ${p.offerBadge}
+                      </div>
+                    ` : (p.popular ? `<div class="pricing-card-badge">POPULAR</div>` : '')}
 
-            <!-- Growth Plan (Popular) -->
-            <div class="pricing-card featured">
-              <div class="pricing-card-badge">POPULAR</div>
-              <div style="font-size:13px; font-weight:700; color:var(--blue-primary);">GROWTH</div>
-              <div class="plan-price">$12 <span style="font-size:14px; color:var(--text-muted); font-weight:500;">/ mo</span></div>
-              <div style="font-size:14px; font-weight:600; color:var(--text-primary);">10,000 Credits</div>
-              <ul class="plan-feature-list">
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 10,000 AI replies</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> All reply styles</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Advanced queue</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Full history</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Priority generation</li>
-              </ul>
-              <button class="btn btn-primary btn-block" onclick="alert('Adding 10,000 credits to balance!'); AtomXState.currentUser.credits += 10000; renderCreditsPlans(document.getElementById('mainContentArea'));">Buy Credits</button>
-            </div>
-
-            <!-- Pro Plan -->
-            <div class="pricing-card">
-              <div style="font-size:13px; font-weight:700; color:var(--text-secondary);">PRO</div>
-              <div class="plan-price">$29 <span style="font-size:14px; color:var(--text-muted); font-weight:500;">/ mo</span></div>
-              <div style="font-size:14px; font-weight:600; color:var(--text-primary);">25,000 Credits</div>
-              <ul class="plan-feature-list">
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 25,000 AI replies</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Premium AI models</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Advanced agents</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Priority generation</li>
-                <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Advanced analytics</li>
-              </ul>
-              <button class="btn btn-secondary btn-block" onclick="alert('Adding 25,000 credits to balance!'); AtomXState.currentUser.credits += 25000; renderCreditsPlans(document.getElementById('mainContentArea'));">Buy Credits</button>
-            </div>
-          </div>
+                    <div style="font-size:13px; font-weight:700; color:${p.popular ? 'var(--blue-primary)' : 'var(--text-secondary)'}; text-transform:uppercase;">${p.name}</div>
+                    <div class="plan-price" style="margin:8px 0 4px 0;">
+                      $${p.price} <span style="font-size:14px; color:var(--text-muted); font-weight:500;">/ mo</span>
+                    </div>
+                    <div style="font-size:15px; font-weight:800; color:var(--blue-primary); margin-bottom:12px;">
+                      ⚡ ${(p.credits || 0).toLocaleString()} Credits
+                    </div>
+                    <ul class="plan-feature-list" style="margin-bottom:14px;">
+                      ${(p.features || []).map(f => `<li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ${f}</li>`).join('')}
+                    </ul>
+                    <button class="btn ${p.popular ? 'btn-primary' : 'btn-secondary'} btn-block" onclick="alert('Selected ${p.name} Plan (${(p.credits || 0).toLocaleString()} Credits)!'); AtomXState.currentUser.credits += ${p.credits || 0}; renderCreditsPlans(document.getElementById('mainContentArea'));">
+                      ${p.price === 0 ? 'Current Tier' : `Get ${p.name} ($${p.price})`}
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            ` : `
+              <div class="pricing-grid">
+                <!-- Free Plan -->
+                <div class="pricing-card">
+                  <div style="font-size:13px; font-weight:700; color:var(--text-secondary);">FREE</div>
+                  <div class="plan-price">$0 <span style="font-size:14px; color:var(--text-muted); font-weight:500;">/ mo</span></div>
+                  <div style="font-size:14px; font-weight:600; color:var(--text-primary);">100 Credits</div>
+                  <ul class="plan-feature-list">
+                    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 100 AI replies</li>
+                    <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Basic reply styles</li>
+                  </ul>
+                  <button class="btn btn-secondary btn-block">Current Plan</button>
+                </div>
+              </div>
+            `}
 
           <!-- USER REFERRAL PROGRAM DASHBOARD (LEVEL 1 DIRECT ONLY) -->
           <div class="atomx-card" style="margin-top:24px; padding:20px; background:linear-gradient(135deg, rgba(49,87,230,0.05), rgba(34,160,107,0.05)); border:1px solid var(--border-subtle);">
@@ -4144,11 +4141,17 @@ function openAdminUserProfileModal(userId) {
           <label style="display:block; margin:0 0 6px 0; font-size:13px; font-weight:700; color:var(--text-primary);">⭐ Subscription Plan Tier</label>
           <div style="display:flex; gap:10px; align-items:center;">
             <select id="modalPlanSelect" class="form-select" style="flex:1;">
-              <option value="Free Plan" ${user.plan === 'Free Plan' ? 'selected' : ''}>Free Plan (100 Credits)</option>
-              <option value="Starter Plan" ${user.plan === 'Starter Plan' ? 'selected' : ''}>Starter Plan (1,000 Credits)</option>
-              <option value="Growth Plan" ${user.plan === 'Growth Plan' ? 'selected' : ''}>Growth Plan (10,000 Credits)</option>
-              <option value="Pro Plan" ${user.plan === 'Pro Plan' ? 'selected' : ''}>Pro Plan (25,000 Credits)</option>
-              <option value="Enterprise Plan" ${user.plan === 'Enterprise Plan' ? 'selected' : ''}>Enterprise Plan (100,000 Credits)</option>
+              ${(AtomXState.plans && AtomXState.plans.length > 0) ? AtomXState.plans.map(p => {
+                const pName = p.name.toLowerCase().includes('plan') ? p.name : `${p.name} Plan`;
+                const isSel = (user.plan || '').toLowerCase() === pName.toLowerCase() || (user.plan || '').toLowerCase() === p.id.toLowerCase();
+                return `<option value="${pName}" ${isSel ? 'selected' : ''}>${pName} (${(p.credits || 0).toLocaleString()} Credits)</option>`;
+              }).join('') : `
+                <option value="Free Plan" ${user.plan === 'Free Plan' ? 'selected' : ''}>Free Plan (100 Credits)</option>
+                <option value="Starter Plan" ${user.plan === 'Starter Plan' ? 'selected' : ''}>Starter Plan (1,000 Credits)</option>
+                <option value="Growth Plan" ${user.plan === 'Growth Plan' ? 'selected' : ''}>Growth Plan (10,000 Credits)</option>
+                <option value="Pro Plan" ${user.plan === 'Pro Plan' ? 'selected' : ''}>Pro Plan (25,000 Credits)</option>
+                <option value="Enterprise Plan" ${user.plan === 'Enterprise Plan' ? 'selected' : ''}>Enterprise Plan (100,000 Credits)</option>
+              `}
             </select>
             <button class="btn btn-primary btn-sm" onclick="handleAdminUpdateUserPlan('${user.id}')" style="white-space:nowrap;">Update Plan</button>
           </div>
@@ -4390,10 +4393,16 @@ function openApprovalModal(name, email, handle = '@user', reqId = '', telegram =
         <div class="form-group">
           <label class="form-label">Plan Tier</label>
           <select class="form-select" id="approvalPlanSelect" onchange="onApprovalPlanChange(this.value)">
-            <option value="Free Plan">Free Plan (100 Credits)</option>
-            <option value="Growth Plan" selected>Growth Plan (10,000 Credits)</option>
-            <option value="Pro Plan">Pro Plan (25,000 Credits)</option>
-            <option value="Enterprise Plan">Enterprise Plan (100,000 Credits)</option>
+            ${(AtomXState.plans && AtomXState.plans.length > 0) ? AtomXState.plans.map(p => {
+              const pName = p.name.toLowerCase().includes('plan') ? p.name : `${p.name} Plan`;
+              const isSel = p.id === 'growth' || p.id === 'pro';
+              return `<option value="${pName}" data-credits="${p.credits || 1000}" ${isSel ? 'selected' : ''}>${pName} (${(p.credits || 0).toLocaleString()} Credits)</option>`;
+            }).join('') : `
+              <option value="Free Plan" data-credits="100">Free Plan (100 Credits)</option>
+              <option value="Growth Plan" data-credits="10000" selected>Growth Plan (10,000 Credits)</option>
+              <option value="Pro Plan" data-credits="25000">Pro Plan (25,000 Credits)</option>
+              <option value="Enterprise Plan" data-credits="100000">Enterprise Plan (100,000 Credits)</option>
+            `}
           </select>
         </div>
         <div class="form-group">
@@ -4415,12 +4424,16 @@ function openApprovalModal(name, email, handle = '@user', reqId = '', telegram =
 
 window.onApprovalPlanChange = function(planValue) {
   const bonus = 100;
-  let planCredits = 10000;
-  if (planValue === 'Free Plan') planCredits = 100;
-  else if (planValue === 'Growth Plan') planCredits = 10000;
-  else if (planValue === 'Pro Plan') planCredits = 25000;
-  else if (planValue === 'Enterprise Plan') planCredits = 100000;
-
+  const select = document.getElementById('approvalPlanSelect');
+  const opt = select ? select.options[select.selectedIndex] : null;
+  let planCredits = opt ? Number(opt.getAttribute('data-credits')) : 0;
+  if (!planCredits) {
+    if (planValue.includes('Free')) planCredits = 100;
+    else if (planValue.includes('Growth')) planCredits = 10000;
+    else if (planValue.includes('Pro')) planCredits = 25000;
+    else if (planValue.includes('Enterprise')) planCredits = 100000;
+    else planCredits = 5000;
+  }
   const total = planCredits + bonus;
   const input = document.getElementById('initialCreditsInput');
   const hint = document.getElementById('approvalCreditsHint');

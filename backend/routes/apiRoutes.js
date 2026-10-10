@@ -78,6 +78,7 @@ router.post('/admin/delete-user', requireAdmin, adminController.deleteUser);
 router.get('/admin/password-requests', requireAdmin, adminController.getPasswordRequests);
 router.post('/admin/resolve-password-request', requireAdmin, adminController.resolvePasswordRequest);
 router.get('/admin/plans', requireAdmin, adminController.getPlans);
+router.get('/plans', adminController.getPlans);
 router.post('/admin/save-plans', requireAdmin, adminController.savePlans);
 router.get('/admin/transactions', requireAdmin, adminController.getTransactions);
 router.post('/admin/transactions', requireAdmin, adminController.createTransaction);

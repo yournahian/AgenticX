@@ -241,10 +241,13 @@ const plansPath = path.join(__dirname, '../data/plans.json');
 const tmpPlansPath = path.join('/tmp', 'plans.json');
 let inMemoryPlans = null;
 let inMemoryFoundingOffer = null;
+let lastPlansFetchedAt = 0;
+const PLANS_CACHE_TTL = 3000; // 3 seconds TTL
 
 exports.getPlans = async (req, res) => {
   try {
-    if (inMemoryPlans) {
+    const now = Date.now();
+    if (inMemoryPlans && (now - lastPlansFetchedAt < PLANS_CACHE_TTL)) {
       return res.json({ plans: inMemoryPlans, foundingOffer: inMemoryFoundingOffer });
     }
     // Try Supabase first
@@ -257,6 +260,7 @@ exports.getPlans = async (req, res) => {
           if (loadedPlans) {
             inMemoryPlans = loadedPlans;
             inMemoryFoundingOffer = loadedOffer;
+            lastPlansFetchedAt = now;
             return res.json({ plans: loadedPlans, foundingOffer: loadedOffer });
           }
         }
