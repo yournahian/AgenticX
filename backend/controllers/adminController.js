@@ -1161,66 +1161,7 @@ exports.wipeAllUsers = async (req, res) => {
 exports.getReferrals = async (req, res) => {
   try {
     const referralService = require('../services/referralService');
-    let referrals = referralService.getAllReferrals();
-
-    // If no explicit referral records, dynamically construct from users and accessRequests with referral attribution
-    if (!referrals || referrals.length === 0) {
-      const users = await db.getAllUsers();
-      const requests = await db.getAccessRequests();
-      const derived = [];
-
-      // Check registered users
-      users.forEach(u => {
-        const refBy = u.referred_by || (u.use_case && u.use_case.match(/REF:(@?[\w_]+)/i) ? u.use_case.match(/REF:(@?[\w_]+)/i)[1] : null);
-        if (refBy && refBy !== 'Direct / —' && refBy !== 'Direct') {
-          const cleanRef = refBy.startsWith('@') ? refBy : `@${refBy}`;
-          derived.push({
-            id: `ref_u_${u.id}`,
-            referrer_handle: cleanRef,
-            referee_handle: u.handle || `@${u.email.split('@')[0]}`,
-            referee_name: u.full_name || u.name || 'User',
-            referee_email: u.email,
-            status: u.status === 'ACTIVE' ? 'APPROVED' : 'PENDING',
-            referrer_reward: 150,
-            referee_reward: 150,
-            created_at: u.created_at || new Date().toISOString(),
-            approved_at: u.status === 'ACTIVE' ? (u.created_at || new Date().toISOString()) : null,
-            first_purchase_status: u.plan_tier && !u.plan_tier.toLowerCase().includes('free') ? 'PAID' : 'NONE',
-            first_purchase_amount: u.plan_tier && u.plan_tier.toLowerCase().includes('pro') ? 29 : (u.plan_tier && u.plan_tier.toLowerCase().includes('growth') ? 12 : 0),
-            purchase_reward_credits: u.plan_tier && !u.plan_tier.toLowerCase().includes('free') ? 1200 : 0
-          });
-        }
-      });
-
-      // Check pending requests
-      requests.forEach(r => {
-        const refBy = r.referred_by || (r.use_case && r.use_case.match(/REF:(@?[\w_]+)/i) ? r.use_case.match(/REF:(@?[\w_]+)/i)[1] : null);
-        if (refBy && refBy !== 'Direct / —' && refBy !== 'Direct') {
-          const cleanRef = refBy.startsWith('@') ? refBy : `@${refBy}`;
-          if (!derived.some(d => d.referee_handle === r.handle || d.referee_email === r.email)) {
-            derived.push({
-              id: `ref_r_${r.id}`,
-              referrer_handle: cleanRef,
-              referee_handle: r.handle || `@${r.email.split('@')[0]}`,
-              referee_name: r.full_name || r.name || 'Applicant',
-              referee_email: r.email,
-              status: 'PENDING',
-              referrer_reward: 150,
-              referee_reward: 150,
-              created_at: r.created_at || new Date().toISOString(),
-              approved_at: null,
-              first_purchase_status: 'NONE',
-              first_purchase_amount: 0,
-              purchase_reward_credits: 0
-            });
-          }
-        }
-      });
-
-      if (derived.length > 0) {
-        referrals = derived;
-      }
-    }
+    const referrals = await referralService.syncReferralsWithDatabase();
 
     const totalReferrals = referrals.length;
     const approvedReferrals = referrals.filter(r => r.status === 'APPROVED').length;
@@ -1241,6 +1182,23 @@ exports.getReferrals = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch referrals: ' + err.message });
+  }
+};
+
+// Manually Approve Referral Action
+exports.approveReferral = async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Referral ID or referee handle required' });
+    const referralService = require('../services/referralService');
+    const updated = await referralService.approveReferral(id);
+    res.json({
+      success: true,
+      message: `Referral for ${updated.referee_handle} approved and 150+150 credits granted!`,
+      referral: updated
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to approve referral: ' + err.message });
   }
 };
 

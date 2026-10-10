@@ -250,11 +250,153 @@ module.exports = {
   },
 
   /**
-   * Get all referrals for Admin Dashboard
+   * Get all referrals for Admin Dashboard (syncs fresh with Supabase)
    */
-  getAllReferrals() {
+  async getAllReferrals() {
+    await initReferralsFromSupabase();
     return loadReferrals();
   },
+
+  /**
+   * Synchronize referral records dynamically with the active users database
+   */
+  async syncReferralsWithDatabase() {
+    await initReferralsFromSupabase();
+    let referrals = loadReferrals() || [];
+
+    try {
+      const users = await db.getAllUsers();
+      const requests = await db.getAccessRequests();
+
+      // 1. Discover any registered users who have referral attribution not yet tracked
+      users.forEach(u => {
+        const refBy = u.referred_by || (u.use_case && u.use_case.match(/REF:(@?[\w_]+)/i) ? u.use_case.match(/REF:(@?[\w_]+)/i)[1] : null);
+        if (refBy && refBy !== 'Direct / —' && refBy !== 'Direct') {
+          const cleanRef = refBy.startsWith('@') ? refBy : `@${refBy}`;
+          const uHandle = u.handle ? (u.handle.startsWith('@') ? u.handle : `@${u.handle}`) : `@${u.email.split('@')[0]}`;
+          const existing = referrals.find(r => 
+            (r.referee_handle || '').toLowerCase() === uHandle.toLowerCase() ||
+            (r.referee_email && u.email && r.referee_email.toLowerCase() === u.email.toLowerCase())
+          );
+
+          if (!existing) {
+            referrals.push({
+              id: `ref_u_${u.id}`,
+              referrer_handle: cleanRef,
+              referee_handle: uHandle,
+              referee_name: u.full_name || u.name || 'User',
+              referee_email: u.email,
+              status: u.status === 'ACTIVE' ? 'APPROVED' : 'PENDING',
+              referrer_reward: 150,
+              referee_reward: 150,
+              created_at: u.created_at || new Date().toISOString(),
+              approved_at: u.status === 'ACTIVE' ? (u.created_at || new Date().toISOString()) : null,
+              first_purchase_status: u.plan_tier && !u.plan_tier.toLowerCase().includes('free') ? 'REWARDED' : 'NONE',
+              first_purchase_amount: u.plan_tier && u.plan_tier.toLowerCase().includes('pro') ? 29 : (u.plan_tier && u.plan_tier.toLowerCase().includes('growth') ? 12 : 0),
+              purchase_reward_credits: u.plan_tier && !u.plan_tier.toLowerCase().includes('free') ? 1200 : 0
+            });
+          }
+        }
+      });
+
+      // 2. Discover pending requests with referral attribution
+      requests.forEach(r => {
+        const refBy = r.referred_by || (r.use_case && r.use_case.match(/REF:(@?[\w_]+)/i) ? r.use_case.match(/REF:(@?[\w_]+)/i)[1] : null);
+        if (refBy && refBy !== 'Direct / —' && refBy !== 'Direct') {
+          const cleanRef = refBy.startsWith('@') ? refBy : `@${refBy}`;
+          const rHandle = r.handle ? (r.handle.startsWith('@') ? r.handle : `@${r.handle}`) : `@${r.email.split('@')[0]}`;
+          const existing = referrals.find(d => 
+            (d.referee_handle || '').toLowerCase() === rHandle.toLowerCase() ||
+            (d.referee_email && r.email && d.referee_email.toLowerCase() === r.email.toLowerCase())
+          );
+
+          if (!existing) {
+            referrals.push({
+              id: `ref_r_${r.id}`,
+              referrer_handle: cleanRef,
+              referee_handle: rHandle,
+              referee_name: r.full_name || r.name || 'Applicant',
+              referee_email: r.email,
+              status: 'PENDING',
+              referrer_reward: 150,
+              referee_reward: 150,
+              created_at: r.created_at || new Date().toISOString(),
+              approved_at: null,
+              first_purchase_status: 'NONE',
+              first_purchase_amount: 0,
+              purchase_reward_credits: 0
+            });
+          }
+        }
+      });
+
+      // 3. Complete sync pass: cross-check every referral against active users table
+      for (const ref of referrals) {
+        const cleanRefHandle = (ref.referee_handle || '').toLowerCase().replace(/^@/, '');
+        const cleanRefEmail = (ref.referee_email || '').toLowerCase();
+
+        const userMatch = users.find(u => {
+          const uh = (u.handle || '').toLowerCase().replace(/^@/, '');
+          const ue = (u.email || '').toLowerCase();
+          return (uh && uh === cleanRefHandle) || (ue && ue === cleanRefEmail);
+        });
+
+        if (userMatch) {
+          if (userMatch.status === 'ACTIVE') {
+            ref.status = 'APPROVED';
+            ref.approved_at = ref.approved_at || userMatch.created_at || new Date().toISOString();
+          }
+          if (userMatch.plan_tier && !userMatch.plan_tier.toLowerCase().includes('free')) {
+            ref.first_purchase_status = 'REWARDED';
+            ref.first_purchase_amount = userMatch.plan_tier.toLowerCase().includes('pro') ? 29 : (userMatch.plan_tier.toLowerCase().includes('growth') ? 12 : 10);
+            ref.purchase_reward_credits = ref.first_purchase_amount * 100;
+          }
+        }
+      }
+
+      saveReferrals(referrals);
+    } catch (e) {
+      console.warn('[Referral Sync Warning]', e.message);
+    }
+
+    return referrals;
+  },
+
+  /**
+   * Manually approve a referral from admin panel
+   */
+  async approveReferral(idOrHandle) {
+    await initReferralsFromSupabase();
+    const referrals = loadReferrals();
+    const clean = String(idOrHandle).toLowerCase().replace(/^@/, '');
+    const ref = referrals.find(r => 
+      r.id === idOrHandle || 
+      (r.referee_handle || '').toLowerCase().replace(/^@/, '') === clean
+    );
+
+    if (!ref) throw new Error('Referral record not found');
+    ref.status = 'APPROVED';
+    ref.approved_at = new Date().toISOString();
+
+    // Reward referrer & referee if user records exist
+    try {
+      const referrerUser = await db.getUserByHandle(ref.referrer_handle);
+      if (referrerUser) {
+        await db.addCredits(referrerUser.id, 150, 'Referral Bonus', 'Referral System', `Referral bonus for ${ref.referee_handle}`);
+      }
+      const refereeUser = await db.getUserByHandle(ref.referee_handle);
+      if (refereeUser) {
+        await db.addCredits(refereeUser.id, 150, 'Referral Welcome Bonus', 'Referral System', `Welcome bonus via ${ref.referrer_handle}`);
+      }
+    } catch (e) {
+      console.warn('[Referral Reward Notice]', e.message);
+    }
+
+    saveReferrals(referrals);
+    return ref;
+  },
+
+  saveReferrals,
 
   /**
    * Get summary for an individual user

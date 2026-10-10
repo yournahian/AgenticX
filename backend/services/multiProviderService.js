@@ -1082,6 +1082,7 @@ async function addApiLog(entry) {
     id: Date.now() + '_' + Math.random().toString(36).substr(2, 4),
     timestamp: new Date().toLocaleTimeString(),
     date: new Date().toLocaleDateString(),
+    created_at: new Date().toISOString(),
     provider: entry.provider || 'unknown',
     model: entry.model || 'unknown',
     user: entry.user || entry.userHandle || '@user',

@@ -2719,13 +2719,66 @@ function renderAdminDashboard(container) {
   const past7Days = Array.from({ length: 7 }, (_, idx) => {
     const d = new Date(now);
     d.setDate(d.getDate() - (6 - idx));
+    const targetY = d.getFullYear();
+    const targetM = d.getMonth();
+    const targetD = d.getDate();
     const dayStr = idx === 6 ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' });
-    const dateKey = d.toISOString().slice(0, 10);
-    const count = ledger.filter(l => (l.date || '').includes(dateKey) || (l.created_at || '').includes(dateKey)).length
-      + logs.filter(l => (l.timestamp || '').includes(dateKey)).length;
-    return { day: dayStr, count };
+
+    // Match ledger items on same calendar day
+    const ledgerMatches = ledger.filter(l => {
+      const ts = l.created_at ? new Date(l.created_at) : (l.date ? new Date(l.date) : null);
+      if (!ts || isNaN(ts.getTime())) return false;
+      return ts.getFullYear() === targetY && ts.getMonth() === targetM && ts.getDate() === targetD;
+    }).length;
+
+    // Match logs on same calendar day
+    const logMatches = logs.filter(l => {
+      let ts = null;
+      if (l.created_at) ts = new Date(l.created_at);
+      else if (l.id && !isNaN(parseInt(l.id))) ts = new Date(parseInt(l.id));
+      else if (l.date) ts = new Date(l.date);
+      if (!ts || isNaN(ts.getTime())) return false;
+      return ts.getFullYear() === targetY && ts.getMonth() === targetM && ts.getDate() === targetD;
+    }).length;
+
+    const count = ledgerMatches + logMatches;
+    return { day: dayStr, count, isToday: idx === 6 };
   });
   const maxDayCount = Math.max(1, ...past7Days.map(p => p.count));
+
+  // Compute Model Reliability & Telemetry breakdown
+  const modelStatsMap = {};
+  logs.forEach(l => {
+    const m = l.model || 'Unknown';
+    if (!modelStatsMap[m]) modelStatsMap[m] = { model: m, success: 0, failed: 0, total: 0, latencies: [] };
+    modelStatsMap[m].total++;
+    if (l.status === 'SUCCESS' && (!l.statusCode || l.statusCode < 400)) {
+      modelStatsMap[m].success++;
+    } else {
+      modelStatsMap[m].failed++;
+    }
+    if (l.latencyMs && !isNaN(Number(l.latencyMs))) modelStatsMap[m].latencies.push(Number(l.latencyMs));
+  });
+
+  const uniqueModelsList = Object.keys(modelStatsMap);
+  const activeModelFilter = AtomXState.modelTelemetryFilter || 'ALL';
+
+  let totalSelected = 0, successSelected = 0, failedSelected = 0, selectedLatencies = [];
+  if (activeModelFilter === 'ALL') {
+    totalSelected = logs.length;
+    successSelected = logs.filter(l => l.status === 'SUCCESS' && (!l.statusCode || l.statusCode < 400)).length;
+    failedSelected = totalSelected - successSelected;
+    selectedLatencies = logs.map(l => Number(l.latencyMs)).filter(n => !isNaN(n) && n > 0);
+  } else if (modelStatsMap[activeModelFilter]) {
+    const mObj = modelStatsMap[activeModelFilter];
+    totalSelected = mObj.total;
+    successSelected = mObj.success;
+    failedSelected = mObj.failed;
+    selectedLatencies = mObj.latencies;
+  }
+  const modelSuccessRate = totalSelected > 0 ? ((successSelected / totalSelected) * 100).toFixed(1) : '100.0';
+  const modelFailRate = totalSelected > 0 ? ((failedSelected / totalSelected) * 100).toFixed(1) : '0.0';
+  const modelAvgLatency = selectedLatencies.length > 0 ? Math.round(selectedLatencies.reduce((a, b) => a + b, 0) / selectedLatencies.length) + 'ms' : '< 300ms';
 
   // Error rate check from telemetry
   const failedCalls = logs.filter(l => l.status === 'FAILED' || (l.statusCode && l.statusCode >= 400)).length;
@@ -2853,35 +2906,37 @@ function renderAdminDashboard(container) {
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                 <div>
                   <h3 style="font-size:15px; font-weight:700; margin:0;">📊 AI Generation & Activity Velocity</h3>
-                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Throughput distribution across recent generation periods</div>
+                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Throughput distribution across past 7 days (Ledger + Telemetry)</div>
                 </div>
-                <span class="badge badge-primary" style="font-size:10px;">${totalAIGenerations} Total Events</span>
+                <span class="badge badge-primary" style="font-size:10px;">${totalAIGenerations} Total Deductions</span>
               </div>
               <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:8px; padding:16px; min-height:160px; display:flex; flex-direction:column; justify-content:space-between;">
                 <div style="display:flex; align-items:flex-end; justify-content:space-between; height:120px; gap:8px; padding-top:10px;">
-                  ${past7Days.map(({ day, count }) => {
-                    const hPercent = totalAIGenerations === 0 ? 15 : Math.max(16, Math.min(100, Math.round((count / maxDayCount) * 100)));
+                  ${past7Days.map(({ day, count, isToday }) => {
+                    const hPercent = count === 0 ? 8 : Math.max(16, Math.min(100, Math.round((count / maxDayCount) * 100)));
+                    const barColor = isToday ? 'linear-gradient(180deg, #10b981 0%, rgba(16,185,129,0.3) 100%)' : 'linear-gradient(180deg, var(--blue-primary) 0%, rgba(59,130,246,0.3) 100%)';
                     return `
-                      <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end;">
-                        <div style="width:100%; max-width:28px; height:${hPercent}%; background:linear-gradient(180deg, var(--blue-primary) 0%, rgba(59,130,246,0.3) 100%); border-radius:4px 4px 0 0;" title="${day}: ${count} generations"></div>
-                        <span style="font-size:10px; color:var(--text-muted); font-weight:600;">${day}</span>
+                      <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end;" title="${day}: ${count} generations">
+                        <span style="font-size:9.5px; font-weight:700; color:${count > 0 ? 'var(--text-primary)' : 'var(--text-muted)'};">${count}</span>
+                        <div style="width:100%; max-width:28px; height:${hPercent}%; background:${barColor}; border-radius:4px 4px 0 0; transition: height 0.3s ease;"></div>
+                        <span style="font-size:10px; color:${isToday ? '#10b981' : 'var(--text-muted)'}; font-weight:700;">${day}</span>
                       </div>
                     `;
                   }).join('')}
                 </div>
                 <div style="border-top:1px solid var(--border-subtle); padding-top:10px; margin-top:8px; display:flex; justify-content:space-between; font-size:11px; color:var(--text-secondary);">
-                  <span>Active Model: <strong>${(AtomXState.currentModel || 'llama-3.3-70b-versatile')}</strong></span>
-                  <span>Avg Latency: <strong>${avgLatency}</strong></span>
+                  <span>Active Model: <strong style="color:var(--text-primary);">${(AtomXState.currentModel || 'llama-3.3-70b-versatile')}</strong></span>
+                  <span>Avg Latency: <strong style="color:var(--text-primary);">${avgLatency}</strong></span>
                 </div>
               </div>
             </div>
 
-            <!-- Credit Consumption & Ledger Balance Flow -->
+            <!-- Credit Consumption & Model Telemetry Flow -->
             <div class="atomx-card">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
                 <div>
-                  <h3 style="font-size:15px; font-weight:700; margin:0;">⚡ Credit Circulation & Consumption</h3>
-                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Balance allocation vs atomic consumption per reply</div>
+                  <h3 style="font-size:15px; font-weight:700; margin:0;">⚡ Credit Circulation & Model Health</h3>
+                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Circulating credit balances and per-model telemetry</div>
                 </div>
                 <button class="btn btn-secondary btn-xs" onclick="navigateToScreen('15')">View Ledger →</button>
               </div>
@@ -2907,8 +2962,31 @@ function renderAdminDashboard(container) {
                   </div>
                 </div>
 
-                <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:8px; padding:12px; margin-top:4px; font-size:11.5px; color:var(--text-secondary); line-height:1.4;">
-                  💡 <strong>Server Validation Active:</strong> Every comment generated via the Chrome Extension atomically validates balance and logs an immutable deduction record into the Credits Ledger.
+                <!-- Per-Model Telemetry Selector & Metrics -->
+                <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:8px; padding:12px; margin-top:2px; font-size:11.5px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-weight:700; color:var(--text-primary);">Model Telemetry:</span>
+                    <select class="form-control" style="font-size:11px; padding:2px 8px; width:auto; height:26px;" onchange="window.handleModelTelemetryFilterChange(this.value)">
+                      <option value="ALL" ${activeModelFilter === 'ALL' ? 'selected' : ''}>All Models (${logs.length} calls)</option>
+                      ${uniqueModelsList.map(m => `
+                        <option value="${escapeHtml(m)}" ${activeModelFilter === m ? 'selected' : ''}>${escapeHtml(m)} (${modelStatsMap[m].total})</option>
+                      `).join('')}
+                    </select>
+                  </div>
+                  <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; text-align:center;">
+                    <div style="background:var(--bg-card); padding:6px; border-radius:6px; border:1px solid var(--border-subtle);">
+                      <div style="font-size:10px; color:var(--text-muted);">Success Rate</div>
+                      <div style="font-size:13px; font-weight:800; color:#10b981;">${modelSuccessRate}%</div>
+                    </div>
+                    <div style="background:var(--bg-card); padding:6px; border-radius:6px; border:1px solid var(--border-subtle);">
+                      <div style="font-size:10px; color:var(--text-muted);">Fail Rate</div>
+                      <div style="font-size:13px; font-weight:800; color:${Number(modelFailRate) > 0 ? '#ef4444' : 'var(--text-muted)'};">${modelFailRate}%</div>
+                    </div>
+                    <div style="background:var(--bg-card); padding:6px; border-radius:6px; border:1px solid var(--border-subtle);">
+                      <div style="font-size:10px; color:var(--text-muted);">Avg Latency</div>
+                      <div style="font-size:13px; font-weight:800; color:var(--blue-primary);">${modelAvgLatency}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2964,6 +3042,13 @@ function renderAdminDashboard(container) {
     </div>
   `;
 }
+
+window.handleModelTelemetryFilterChange = function(modelName) {
+  AtomXState.activeModelFilter = modelName;
+  if (AtomXState.currentScreen === '12') {
+    renderCurrentScreen();
+  }
+};
 
 // -------------------------------------------------------------
 // SCREEN 23: DEDICATED AI ENGINE & TELEMETRY LOGS (ADMIN)
@@ -7123,6 +7208,7 @@ async function loadAdminServerData(preserveScroll = true) {
     if (ledgerRes && ledgerRes.ok) {
       const d = await ledgerRes.json();
       AtomXState.creditLedger = (d.ledger || []).map(l => ({
+        created_at: l.created_at,
         date: l.created_at ? new Date(l.created_at).toLocaleString() : 'Recently',
         user: l.user_name || l.users?.full_name || l.full_name || l.user || 'System User',
         action: l.action || 'AI Reply',

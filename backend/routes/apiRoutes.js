@@ -120,6 +120,7 @@ router.get('/referrals/stats', (req, res) => {
   res.json(stats);
 });
 router.get('/admin/referrals', requireAdmin, adminController.getReferrals);
+router.post('/admin/referrals/approve', requireAdmin, adminController.approveReferral);
 
 // Promotional Special Offers (FOUNDING 100)
 router.get('/offers/current', adminController.getOffer);
