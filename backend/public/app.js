@@ -8,6 +8,40 @@ const API_BASE = (typeof window !== 'undefined' && window.location.origin.includ
   ? 'http://localhost:5000'
   : '';
 
+// Secure HTML escaping helper to prevent Cross-Site Scripting (XSS)
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Automatic Authenticated Fetch Interceptor for Admin API Routes
+if (typeof window !== 'undefined' && window.fetch) {
+  const _origFetch = window.fetch;
+  window.fetch = function(resource, init = {}) {
+    const url = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
+    if (url.includes('/api/admin')) {
+      const token = sessionStorage.getItem('atomx_admin_token') || localStorage.getItem('atomx_admin_token') || '';
+      const pwd = (typeof AtomXState !== 'undefined' ? AtomXState.adminAccessKey : '') || localStorage.getItem('atomx_admin_password') || localStorage.getItem('atomx_admin_key') || '';
+      
+      init = init ? { ...init } : {};
+      const headers = new Headers(init.headers || (typeof resource === 'object' && resource.headers ? resource.headers : {}));
+      if (token && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+      if (pwd && !headers.has('x-admin-password')) {
+        headers.set('x-admin-password', pwd);
+      }
+      init.headers = headers;
+    }
+    return _origFetch.call(this, resource, init);
+  };
+}
+
 const AtomXState = {
   currentScreen: '12', // Default strictly to Admin Dashboard Overview
   currentMode: 'desktop', // desktop, tablet, mobile, extension, full

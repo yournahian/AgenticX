@@ -251,6 +251,8 @@ async function fetchLiveModels(provider, customApiKey = null, customBaseUrl = nu
     switch (prov) {
       case 'openai': {
         const baseUrl = (customBaseUrl || getOpenAIBaseUrl()).replace(/\/+$/, '');
+        const { isSafeUrl } = require('../middleware/authMiddleware');
+        if (!isSafeUrl(baseUrl)) throw new Error('Disallowed base URL destination');
         const isProxy = !baseUrl.includes('openai.com');
         const res = await fetch(`${baseUrl}/models`, {
           headers: { 'Authorization': `Bearer ${apiKey}` }
@@ -292,6 +294,8 @@ async function fetchLiveModels(provider, customApiKey = null, customBaseUrl = nu
 
       case 'anthropic': {
         const baseUrl = (customBaseUrl || getAnthropicBaseUrl()).replace(/\/+$/, '');
+        const { isSafeUrl } = require('../middleware/authMiddleware');
+        if (!isSafeUrl(baseUrl)) throw new Error('Disallowed base URL destination');
         const isProxy = !baseUrl.includes('anthropic.com');
 
         if (isProxy) {

@@ -6,9 +6,14 @@ const db = require('../config/db');
 
 exports.getBalance = async (req, res) => {
   try {
-    const userQuery = req.query.handle || req.query.email || req.query.userId || req.headers['x-user-handle'] || req.headers['x-user-id'];
-    let user = null;
+    let userQuery = req.query.handle || req.query.email || req.query.userId || req.headers['x-user-handle'] || req.headers['x-user-id'];
 
+    // BOLA Protection: If authenticated as standard user, restrict query to self
+    if (req.user && !req.admin && req.user.role !== 'ADMIN') {
+      userQuery = req.user.userId;
+    }
+
+    let user = null;
     if (userQuery) {
       const clean = String(userQuery).trim();
       if (clean.includes('@') && clean.includes('.')) {
@@ -50,12 +55,24 @@ exports.deductCredit = async (req, res) => {
     const { userId, handle, email, amount = 1, action = 'AI Reply', reason = 'Autonomous action' } = req.body;
     let target = null;
 
-    if (userId) target = await db.getUserById(userId);
-    if (!target && handle) target = await db.getUserByHandle(handle);
-    if (!target && email) target = await db.getUserByEmail(email);
+    // BOLA / IDOR Protection: If authenticated as regular user, strictly lock target to caller's own account
+    if (req.user && !req.admin && req.user.role !== 'ADMIN') {
+      target = await db.getUserById(req.user.userId);
+    } else {
+      if (userId) target = await db.getUserById(userId);
+      if (!target && handle) target = await db.getUserByHandle(handle);
+      if (!target && email) target = await db.getUserByEmail(email);
+    }
 
     if (!target) {
       return res.status(404).json({ error: 'User account not found for credit deduction' });
+    }
+
+    // Double check: Non-admin caller cannot deduct credits from someone else
+    if (req.user && !req.admin && req.user.role !== 'ADMIN') {
+      if (String(target.id) !== String(req.user.userId)) {
+        return res.status(403).json({ error: 'Forbidden: You cannot deduct credits from another account.' });
+      }
     }
 
     const numAmount = Math.max(1, parseInt(amount, 10) || 1);
@@ -75,9 +92,14 @@ exports.deductCredit = async (req, res) => {
 
 exports.getLedger = async (req, res) => {
   try {
-    const userQuery = req.query.handle || req.query.email || req.query.userId || req.headers['x-user-handle'] || req.headers['x-user-id'];
-    let user = null;
+    let userQuery = req.query.handle || req.query.email || req.query.userId || req.headers['x-user-handle'] || req.headers['x-user-id'];
 
+    // BOLA Protection: If authenticated as standard user, lock query to self
+    if (req.user && !req.admin && req.user.role !== 'ADMIN') {
+      userQuery = req.user.userId;
+    }
+
+    let user = null;
     if (userQuery) {
       const clean = String(userQuery).trim();
       if (clean.includes('@') && clean.includes('.')) user = await db.getUserByEmail(clean.toLowerCase());
@@ -85,7 +107,7 @@ exports.getLedger = async (req, res) => {
       if (!user) user = await db.getUserById(clean);
     }
 
-    const targetId = user?.id || req.headers['x-user-id'] || 1;
+    const targetId = user?.id || (req.user?.userId) || req.headers['x-user-id'] || 1;
     const ledger = await db.getLedger(targetId);
 
     res.json({

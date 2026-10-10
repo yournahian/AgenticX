@@ -4201,9 +4201,11 @@ async function deductCredits(amount = 1, action = 'AI Reply', reason = 'Autonomo
     const userId = state.user?.id;
 
     if (cleanHandle || email || userId) {
+      const reqHeaders = { 'Content-Type': 'application/json' };
+      if (state.authToken) reqHeaders['Authorization'] = `Bearer ${state.authToken}`;
       const res = await fetch(`${backendUrl}/api/credits/deduct`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: reqHeaders,
         body: JSON.stringify({
           userId,
           handle: cleanHandle,
@@ -4308,6 +4310,7 @@ async function loadServerState() {
         'currentUser', 'user', 'authToken', 'verifiedXHandle', 'pendingRequest'
       ]).catch(() => ({}));
       if (stored?.currentUser || stored?.user) state.user = stored.currentUser || stored.user;
+      if (stored?.authToken) state.authToken = stored.authToken;
       if (stored?.pendingRequest) state.pendingRequest = stored.pendingRequest;
       if (stored?.verifiedXHandle) {
         state.verifiedXHandle = stored.verifiedXHandle;

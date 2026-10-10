@@ -5,6 +5,7 @@
  */
 
 const supabase = require('./supabase');
+const bcrypt = require('bcryptjs');
 
 // Helper to resolve user UUID from either UUID or numeric fallback (e.g. 1)
 async function resolveUser(userIdOrId) {
@@ -102,7 +103,10 @@ module.exports = {
     if (!supabase) return true;
     const user = await resolveUser(userId);
     if (!user) throw new Error('User not found');
-    const { data, error } = await supabase.from('users').update({ password_hash: password }).eq('id', user.id).select();
+    const pwdStr = String(password || '').trim();
+    const isBcrypt = pwdStr.startsWith('$2a$') || pwdStr.startsWith('$2b$');
+    const finalHash = isBcrypt ? pwdStr : await bcrypt.hash(pwdStr, 10);
+    const { data, error } = await supabase.from('users').update({ password_hash: finalHash }).eq('id', user.id).select();
     if (error) throw new Error(error.message);
 
     // Automatically mark pending password reset request as resolved in credits_ledger
@@ -495,13 +499,27 @@ module.exports = {
 
     // Verify current / admin-provided password
     if (currentPassword) {
-      if (user.password_hash && user.password_hash !== currentPassword && user.password_hash !== 'approved_hash') {
-        throw new Error('Current / Admin-provided password is incorrect. Please check with your administrator.');
+      if (user.password_hash && user.password_hash !== 'approved_hash') {
+        const stored = (user.password_hash || '').trim();
+        const isBcrypt = stored.startsWith('$2a$') || stored.startsWith('$2b$');
+        let isMatch = false;
+        if (isBcrypt) {
+          isMatch = await bcrypt.compare(currentPassword, stored);
+        } else {
+          isMatch = (stored === currentPassword);
+        }
+        if (!isMatch) {
+          throw new Error('Current / Admin-provided password is incorrect. Please check with your administrator.');
+        }
       }
     }
 
+    const newPwdStr = String(newPassword || '').trim();
+    const isNewBcrypt = newPwdStr.startsWith('$2a$') || newPwdStr.startsWith('$2b$');
+    const finalNewHash = isNewBcrypt ? newPwdStr : await bcrypt.hash(newPwdStr, 10);
+
     const { data, error } = await supabase.from('users').update({
-      password_hash: newPassword,
+      password_hash: finalNewHash,
       status: 'ACTIVE'
     }).eq('id', user.id).select().single();
     if (error) throw new Error(error.message);

@@ -2,6 +2,8 @@
  * ATOMX ENGAGE — AUTH CONTROLLER (SUPABASE PERSISTENT)
  */
 const db = require('../config/db');
+const bcrypt = require('bcryptjs');
+const { generateToken } = require('../middleware/authMiddleware');
 
 exports.login = async (req, res) => {
   try {
@@ -35,7 +37,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    // STRICT PASSWORD VERIFICATION
+    // STRICT BCRYPT PASSWORD VERIFICATION
     const providedPass = (password || '').trim();
     if (!providedPass) {
       return res.status(400).json({ error: 'Password is required to sign in.' });
@@ -49,14 +51,32 @@ exports.login = async (req, res) => {
       });
     }
 
-    if (storedPass !== providedPass) {
+    const isBcrypt = storedPass.startsWith('$2a$') || storedPass.startsWith('$2b$');
+    let isMatch = false;
+    if (isBcrypt) {
+      isMatch = await bcrypt.compare(providedPass, storedPass);
+    } else {
+      if (storedPass === providedPass) {
+        isMatch = true;
+        // Transparently upgrade legacy plaintext password to secure bcrypt hash
+        db.updateUserPassword(user.id, providedPass).catch(console.error);
+      }
+    }
+
+    if (!isMatch) {
       return res.status(401).json({ error: 'Incorrect password. Please verify your password and try again.' });
     }
 
     const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : `@${cleanHandle || 'user'}`;
+    const token = generateToken({
+      userId: user.id,
+      handle: userHandle,
+      email: user.email,
+      role: user.role || 'USER'
+    }, '14d');
 
     res.json({
-      token: `atomx_session_${user.id}_${Date.now()}`,
+      token,
       user: {
         id: user.id,
         email: user.email,
@@ -322,11 +342,17 @@ exports.setPassword = async (req, res) => {
     user = await db.getUserById(user.id) || user;
 
     const userHandle = user.handle ? (user.handle.startsWith('@') ? user.handle : '@' + user.handle) : (cleanHandle ? `@${cleanHandle}` : '@user');
+    const token = generateToken({
+      userId: user.id,
+      handle: userHandle,
+      email: user.email,
+      role: user.role || 'USER'
+    }, '14d');
 
     res.json({
       success: true,
       message: '✓ Password set successfully! You are now logged in.',
-      token: `atomx_session_${user.id}_${Date.now()}`,
+      token,
       user: {
         id: user.id,
         email: user.email,
@@ -429,7 +455,7 @@ exports.changePassword = async (req, res) => {
 
 exports.getCurrentUser = async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.userId || req.headers['x-user-id'] || 1;
     const user = await db.getUserById(userId);
 
     if (!user) {
@@ -466,9 +492,15 @@ exports.adminLogin = (req, res) => {
     });
   }
 
+  const token = generateToken({
+    role: 'ADMIN',
+    name: 'Administrator',
+    email: 'admin@atomx.io'
+  }, '7d');
+
   res.json({
     success: true,
-    token: `atomx_admin_token_${Date.now()}`,
+    token,
     role: 'ADMIN',
     admin: {
       name: 'Administrator',

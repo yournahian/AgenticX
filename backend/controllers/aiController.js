@@ -16,10 +16,22 @@ exports.getProviders = (req, res) => {
   });
 };
 
+const { isSafeUrl } = require('../middleware/authMiddleware');
+
 exports.getProviderModels = async (req, res) => {
   const provider = req.params.provider || 'openai';
   const customKey = req.query.key || null;
   const customBaseUrl = req.query.baseUrl || null;
+
+  // SSRF Protection: Only authenticated administrators can specify custom base URLs
+  if (customBaseUrl) {
+    if (!req.admin && (!req.user || req.user.role !== 'ADMIN')) {
+      return res.status(403).json({ error: 'Specifying custom API base URLs is restricted to administrators.' });
+    }
+    if (!isSafeUrl(customBaseUrl)) {
+      return res.status(400).json({ error: 'Invalid or disallowed base URL. Private IP ranges and loopbacks are blocked.' });
+    }
+  }
 
   try {
     const result = await multiProviderService.fetchLiveModels(provider, customKey, customBaseUrl);
@@ -53,10 +65,16 @@ exports.generateReply = async (req, res) => {
 
   // 1. Resolve user server-side reliably
   let user = null;
-  const cleanReqHandle = (reqHandle || '').replace(/^@/, '').trim();
-  if (cleanReqHandle && cleanReqHandle !== 'user') user = await db.getUserByHandle(cleanReqHandle);
-  if (!user && reqEmail) user = await db.getUserByEmail(reqEmail);
-  if (!user && rawUserId && rawUserId !== '1' && rawUserId !== 'default_member') user = await db.getUserById(rawUserId);
+
+  // BOLA Protection: If authenticated via JWT as regular user, strictly lock to caller's own account
+  if (req.user && !req.admin && req.user.role !== 'ADMIN' && req.user.userId) {
+    user = await db.getUserById(req.user.userId);
+  } else {
+    const cleanReqHandle = (reqHandle || '').replace(/^@/, '').trim();
+    if (cleanReqHandle && cleanReqHandle !== 'user') user = await db.getUserByHandle(cleanReqHandle);
+    if (!user && reqEmail) user = await db.getUserByEmail(reqEmail);
+    if (!user && rawUserId && rawUserId !== '1' && rawUserId !== 'default_member') user = await db.getUserById(rawUserId);
+  }
 
   if (!user) {
     const allUsers = await db.getAllUsers();
