@@ -590,12 +590,15 @@ function updateAllPauseButtonsUI(isPaused) {
     'pauseAutoUnfollowBtn',
     'pauseReciprocatorBtn'
   ];
+  const PAUSE_BTN_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>`;
+  const RESUME_BTN_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>`;
   pauseButtonIds.forEach(id => {
     const btn = document.getElementById(id);
     if (btn) {
-      btn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
-      btn.style.background = isPaused ? '#059669' : '#D97706';
-      btn.style.borderColor = isPaused ? '#059669' : '#D97706';
+      btn.innerHTML = isPaused ? `${RESUME_BTN_SVG}Resume` : `${PAUSE_BTN_SVG}Pause`;
+      btn.style.background = isPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : '';
+      btn.style.borderColor = isPaused ? 'rgba(52, 211, 153, 0.6)' : '';
+      btn.style.color = isPaused ? '#34D399' : '';
     }
   });
 
@@ -652,10 +655,13 @@ function updateTelegramProgressUI(raidState) {
     if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
     if (stopBtn) stopBtn.style.display = 'inline-block';
     if (pauseBtn) {
-      pauseBtn.style.display = 'inline-block';
-      pauseBtn.textContent = raidState.isPaused ? '▶️ Resume' : '⏸️ Pause';
-      pauseBtn.style.background = raidState.isPaused ? '#059669' : '#D97706';
-      pauseBtn.style.borderColor = raidState.isPaused ? '#059669' : '#D97706';
+      pauseBtn.style.display = 'inline-flex';
+      const pSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>`;
+      const rSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>`;
+      pauseBtn.innerHTML = raidState.isPaused ? `${rSvg}Resume` : `${pSvg}Pause`;
+      pauseBtn.style.background = raidState.isPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : '';
+      pauseBtn.style.borderColor = raidState.isPaused ? 'rgba(52, 211, 153, 0.6)' : '';
+      pauseBtn.style.color = raidState.isPaused ? '#34D399' : '';
     }
     if (skipBtn) skipBtn.style.display = 'inline-block';
     if (tgStateBadge) tgStateBadge.textContent = raidState.isPaused ? 'PAUSED' : (raidState.stateBadge || 'ENGAGING');
@@ -788,16 +794,13 @@ function updateAgentWorkflowProgressUI(wf) {
     if (startBtn) startBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'inline-block';
     if (pauseBtn) {
-      pauseBtn.style.display = 'inline-block';
-      pauseBtn.textContent = wf.isPaused ? '▶️ Resume' : '⏸️ Pause';
-      pauseBtn.style.background = wf.isPaused
-        ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-        : 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
-      pauseBtn.style.borderColor = wf.isPaused ? 'rgba(52, 211, 153, 0.45)' : 'rgba(251, 191, 36, 0.45)';
-      pauseBtn.style.boxShadow = wf.isPaused
-        ? '0 3px 12px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
-        : '0 3px 12px rgba(217, 119, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
-      pauseBtn.style.color = '#FFFFFF';
+      pauseBtn.style.display = 'inline-flex';
+      const pSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>`;
+      const rSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>`;
+      pauseBtn.innerHTML = wf.isPaused ? `${rSvg}Resume` : `${pSvg}Pause`;
+      pauseBtn.style.background = wf.isPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : '';
+      pauseBtn.style.borderColor = wf.isPaused ? 'rgba(52, 211, 153, 0.6)' : '';
+      pauseBtn.style.color = wf.isPaused ? '#34D399' : '';
     }
     if (skipBtn) skipBtn.style.display = 'inline-block';
     if (badge) badge.textContent = wf.isPaused ? 'PAUSED' : (wf.stateBadge || 'RUNNING');
@@ -866,19 +869,17 @@ function updateAllPauseButtonsUI(isPaused) {
   const pauseBtns = document.querySelectorAll(
     '#pauseAudienceBuilderBtn, #pauseSorsaBoosterBtn, #pauseFollowerIncreaseBtn, #pauseReplyBackBtn, #pauseAutoUnfollowBtn, #pauseReciprocatorBtn, #pauseTgEngageBtn'
   );
-  const pauseIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
-  const playIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg>`;
+  const pauseIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>`;
+  const playIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>`;
 
   pauseBtns.forEach(btn => {
     btn.innerHTML = isPaused ? `${playIcon}Resume` : `${pauseIcon}Pause`;
     btn.style.background = isPaused
-      ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-      : 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
-    btn.style.borderColor = isPaused ? 'rgba(52, 211, 153, 0.45)' : 'rgba(251, 191, 36, 0.45)';
-    btn.style.boxShadow = isPaused
-      ? '0 3px 12px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
-      : '0 3px 12px rgba(217, 119, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
-    btn.style.color = '#FFFFFF';
+      ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)'
+      : '';
+    btn.style.borderColor = isPaused ? 'rgba(52, 211, 153, 0.6)' : '';
+    btn.style.color = isPaused ? '#34D399' : '';
+    btn.style.boxShadow = '';
   });
 
   const badges = document.querySelectorAll(
@@ -1895,7 +1896,7 @@ function initAgentListeners() {
     const tgCountdown = document.getElementById('tgCountdownText');
 
     if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
-    if (pauseBtn) { pauseBtn.style.display = 'inline-block'; pauseBtn.textContent = '⏸️ Pause'; }
+    if (pauseBtn) { pauseBtn.style.display = 'inline-flex'; pauseBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>Pause`; }
     if (skipBtn) skipBtn.style.display = 'inline-block';
     if (stopBtn) stopBtn.style.display = 'inline-block';
     if (progressCard) progressCard.style.display = 'block';
@@ -6774,7 +6775,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
   const stopBtn      = document.getElementById('stopTgEngageBtn');
 
   if (progressCard) progressCard.style.display = 'block';
-  if (pauseBtn) { pauseBtn.style.display = 'inline-block'; pauseBtn.textContent = '⏸️ Pause'; }
+  if (pauseBtn) { pauseBtn.style.display = 'inline-flex'; pauseBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>Pause`; }
   if (skipBtn) skipBtn.style.display = 'inline-block';
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (tgStateBadge) tgStateBadge.textContent = 'ENGAGING';
