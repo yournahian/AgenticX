@@ -225,6 +225,22 @@ function getLoggedInUserHandle() {
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
       if (clean && clean.length > 1 && !RESERVED_X_PATHS.includes(clean)) return clean;
     }
+
+    // 8. Twitter React avatar container testid: data-testid="UserAvatar-Container-<handle>"
+    const topAvatarContainer = document.querySelector(
+      'button[data-testid="TopNavBar_UserMenu_Button"] [data-testid^="UserAvatar-Container-"], ' +
+      'div[data-testid="TopNavBar_UserMenu_Button"] [data-testid^="UserAvatar-Container-"], ' +
+      '[data-testid="TopNavBar"] [data-testid^="UserAvatar-Container-"], ' +
+      'header [data-testid^="UserAvatar-Container-"], ' +
+      'div[data-testid="inline_reply"] [data-testid^="UserAvatar-Container-"]'
+    );
+    if (topAvatarContainer) {
+      const tid = topAvatarContainer.getAttribute('data-testid') || '';
+      const match = tid.match(/UserAvatar-Container-([\w_]{1,30})/i);
+      if (match && !RESERVED_X_PATHS.includes(match[1].toLowerCase())) {
+        return match[1].toLowerCase();
+      }
+    }
   } catch (e) {}
   return null;
 }

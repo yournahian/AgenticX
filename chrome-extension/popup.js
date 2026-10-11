@@ -169,6 +169,67 @@ let autoUnfollowWorkingTabId = null;
 let reciprocatorWorkingTabId = null;
 let tgWorkingTabId = null; // Telegram Group Engage working tab
 
+// ─────────────────────────────────────────────────────────────────────
+// ROBUST TAB HELPERS (DESKTOP & MOBILE BROWSER COMPATIBLE)
+// Works seamlessly on Chrome Desktop, Kiwi, Lemur, Mises, and Yandex.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Safely query the active or open Twitter / X tab across desktop and mobile */
+async function getActiveTwitterTab() {
+  if (typeof chrome === 'undefined' || !chrome.tabs || typeof chrome.tabs.query !== 'function') return null;
+  try {
+    // 1. Check active tab in current window
+    const currentTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+    if (currentTabs && currentTabs[0] && (currentTabs[0].url?.includes('x.com') || currentTabs[0].url?.includes('twitter.com'))) {
+      return currentTabs[0];
+    }
+    // 2. Mobile browsers (Kiwi, Lemur) where windowId/currentWindow may be omitted
+    const activeTabs = await chrome.tabs.query({ active: true }).catch(() => []);
+    if (activeTabs && activeTabs[0] && (activeTabs[0].url?.includes('x.com') || activeTabs[0].url?.includes('twitter.com'))) {
+      return activeTabs[0];
+    }
+    // 3. Fallback: Any open X / Twitter tab
+    const xTabs = await chrome.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] }).catch(() => []);
+    if (xTabs && xTabs.length > 0) return xTabs[0];
+
+    // 4. Fallback: All open tabs check
+    const allTabs = await chrome.tabs.query({}).catch(() => []);
+    const matching = (allTabs || []).find(t => t.url && (t.url.includes('x.com') || t.url.includes('twitter.com')));
+    if (matching) return matching;
+  } catch (e) {}
+  return null;
+}
+
+/** Safely query all open X/Twitter tabs */
+async function safeQueryXTabs() {
+  if (typeof chrome === 'undefined' || !chrome.tabs || typeof chrome.tabs.query !== 'function') return [];
+  try {
+    const tabs = await chrome.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] }).catch(() => []);
+    if (tabs && tabs.length > 0) return tabs;
+    const all = await chrome.tabs.query({}).catch(() => []);
+    return (all || []).filter(t => t.url && (t.url.includes('x.com') || t.url.includes('twitter.com')));
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Safely send a message to a tab */
+function safeSendTabMessage(tabId, message) {
+  if (!tabId || typeof chrome === 'undefined' || !chrome.tabs?.sendMessage) return;
+  try {
+    chrome.tabs.sendMessage(tabId, message).catch(() => null);
+  } catch (e) {}
+}
+
+/** Broadcast a message to all open X/Twitter tabs */
+async function broadcastToXTabs(message) {
+  try {
+    const tabs = await safeQueryXTabs();
+    tabs.forEach(t => { if (t.id) safeSendTabMessage(t.id, message); });
+  } catch (e) {}
+}
+
+
 async function syncFloatingHud(tabId, data = {}) {
   const isStopping = data.isStopped === true || data.stateBadge === 'STOPPED' || data.stateBadge === 'DONE';
   const cleanData = {
@@ -997,13 +1058,8 @@ async function handleToggleWorkflowPause() {
 
   chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
 
-  chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
-    if (tabs && tabs.length > 0) {
-      tabs.forEach(t => {
-        if (t.id) chrome.tabs.sendMessage(t.id, { type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
-      });
-    }
-  });
+  // Broadcast pause/resume to all open X tabs (mobile-safe — no-op if chrome.tabs unavailable)
+  broadcastToXTabs({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused });
 
   showExtToast(newPaused ? 'Workflow Paused' : 'Workflow Resumed', newPaused ? '⏸️' : '▶️');
 }
@@ -1012,13 +1068,8 @@ async function handleSkipWorkflowItem() {
   await chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
   chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
 
-  chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
-    if (tabs && tabs.length > 0) {
-      tabs.forEach(t => {
-        if (t.id) chrome.tabs.sendMessage(t.id, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
-      });
-    }
-  });
+  // Broadcast skip to all open X tabs (mobile-safe — no-op if chrome.tabs unavailable)
+  broadcastToXTabs({ type: 'SKIP_WORKFLOW_ITEM' });
   showExtToast('Skipping current item...', '⏭️');
 }
 
@@ -2033,9 +2084,9 @@ function initAgentListeners() {
     state.isPaused = false;
     // Tell background to abort
     chrome.runtime.sendMessage({ type: 'BG_ABORT_TG_RAID' }).catch(() => null);
-    // Also abort any local running instance
+    // Also abort any local running instance (mobile-safe)
     if (tgWorkingTabId) {
-      chrome.tabs.sendMessage(tgWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+      safeSendTabMessage(tgWorkingTabId, { type: 'ABORT_WORKFLOW' });
       tgWorkingTabId = null;
     }
     syncFloatingHud(null, {
@@ -2141,18 +2192,9 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
   chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
 
-  if (typeof chrome !== 'undefined' && chrome.tabs) {
-    chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
-      if (tabs && tabs.length > 0) {
-        tabs.forEach(t => {
-          if (t.id) {
-            chrome.tabs.sendMessage(t.id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
-            chrome.tabs.sendMessage(t.id, { type: 'UPDATE_FLOATING_HUD', data: stoppedHud, hud: stoppedHud }).catch(() => null);
-          }
-        });
-      }
-    });
-  }
+  // Broadcast abort/HUD update to all open X tabs (mobile-safe — no-op if chrome.tabs unavailable)
+  broadcastToXTabs({ type: 'ABORT_WORKFLOW' });
+  broadcastToXTabs({ type: 'UPDATE_FLOATING_HUD', data: stoppedHud, hud: stoppedHud });
 
   updateAgentWorkflowProgressUI(stoppedWf);
   updateAllStopButtonsUI();
@@ -2596,9 +2638,9 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   // Agent 6: Reply Back (A6, Posts, Fully Auto)
   document.getElementById('replyBackUseCurrentTabBtn')?.addEventListener('click', async () => {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com')) && tabs[0].url.includes('/status/')) {
-        const cleanUrl = tabs[0].url.split('?')[0];
+      const activeTab = await getActiveTwitterTab();
+      if (activeTab?.url && (activeTab.url.includes('twitter.com') || activeTab.url.includes('x.com')) && activeTab.url.includes('/status/')) {
+        const cleanUrl = activeTab.url.split('?')[0];
         const in1 = document.getElementById('myTweetUrlInput1');
         const in2 = document.getElementById('myTweetUrlInput2');
         const in3 = document.getElementById('myTweetUrlInput3');
@@ -2613,10 +2655,10 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
         }
         showExtToast('Current Post Linked to Reply Back', '⚡');
       } else {
-        alert('Please open your tweet/post on Twitter / X in your active browser tab first.');
+        alert('Please open your tweet/post on Twitter / X in your active browser tab first, or paste the link manually.');
       }
     } catch (e) {
-      console.warn('Could not query current tab:', e);
+      alert('Please paste your tweet URL into the input field below.');
     }
   });
 
@@ -2658,7 +2700,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   document.getElementById('stopAutoUnfollowBtn')?.addEventListener('click', () => {
     broadcastAbortToAllTabsAndStorage('Auto Unfollow');
     if (autoUnfollowWorkingTabId) {
-      chrome.tabs.sendMessage(autoUnfollowWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+    safeSendTabMessage(autoUnfollowWorkingTabId, { type: 'ABORT_WORKFLOW' });
       safeRemoveTab(autoUnfollowWorkingTabId);
       autoUnfollowWorkingTabId = null;
     }
@@ -5344,7 +5386,7 @@ async function syncServerStateNetwork() {
     }
 
     // IF SERVER CONFIRMS USER IS NOT FOUND (DATA WIPED FRESH), PURGE LOCAL CACHE IMMEDIATELY!
-    if (!stData || stData.status === 'NOT_FOUND' || stData.status === 'REJECTED') {
+    if (stData && (stData.status === 'NOT_FOUND' || stData.status === 'REJECTED')) {
       console.log('[ATOMX] User account not found on server (wiped/fresh). Resetting extension session.');
       await purgeExtLocalUserSession();
       return;
@@ -5570,61 +5612,58 @@ async function checkAccountVerificationLock() {
   if (extCredits) extCredits.textContent = `${(state.credits || 0).toLocaleString()} Credits`;
 
 
-  // Real-time tab check with active Twitter/X tab or any open Twitter tab
+  // Real-time tab check with active Twitter/X tab
   try {
-    let checkTab = null;
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const activeTab = tabs && tabs[0];
-    if (activeTab && (activeTab.url?.includes('x.com') || activeTab.url?.includes('twitter.com'))) {
-      checkTab = activeTab;
-    } else {
-      const xTabs = await chrome.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] });
-      if (xTabs && xTabs.length > 0) {
-        checkTab = xTabs[0];
-      }
-    }
-
-    if (checkTab) {
+    const checkTab = await getActiveTwitterTab();
+    if (checkTab && checkTab.id) {
       const response = await chrome.tabs.sendMessage(checkTab.id, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }).catch(() => null);
-        state.activeTwitterHandle = (response.rawHandle || '').toLowerCase().trim();
-        if (!state.activeTwitterHandle) {
-          if (response.isDefinitelyLoggedOut) {
-            // Twitter is open but definitely logged out
+      if (response && typeof response === 'object') {
+        const currentHandle = (response.rawHandle || '').toLowerCase().trim();
+        if (currentHandle) {
+          state.activeTwitterHandle = currentHandle;
+          if (currentHandle !== verifiedHandle) {
+            // Definite Mismatch: Active tab is logged into a different account
             if (mismatchBanner) {
               mismatchBanner.style.display = 'block';
               if (mismatchExpected) mismatchExpected.textContent = displayHandle;
-              if (mismatchActual) mismatchActual.textContent = 'Not Logged In on X';
+              if (mismatchActual) mismatchActual.textContent = `@${currentHandle}`;
             }
             if (barBadge) {
-              barBadge.textContent = 'NOT LOGGED IN ON X';
+              barBadge.textContent = 'ID MISMATCH';
               barBadge.style.color = '#EF4444';
               barBadge.style.background = 'rgba(239, 68, 68, 0.15)';
             }
             if (barDot) barDot.style.background = '#EF4444';
-            return { isAllowed: false, reason: 'X_NOT_LOGGED_IN' };
-          } else {
-            // Active authenticated session on Twitter (e.g. Mobile browser where sidebar is collapsed)
-            state.activeTwitterHandle = verifiedHandle;
+            return { isAllowed: false, reason: 'ID_MISMATCH', current: currentHandle };
           }
-        } else if (state.activeTwitterHandle !== verifiedHandle) {
-          // Twitter is logged into another ID
+        } else if (response.isDefinitelyLoggedOut === true) {
+          // Twitter page is open and definitely logged out
           if (mismatchBanner) {
             mismatchBanner.style.display = 'block';
             if (mismatchExpected) mismatchExpected.textContent = displayHandle;
-            if (mismatchActual) mismatchActual.textContent = `@${state.activeTwitterHandle}`;
+            if (mismatchActual) mismatchActual.textContent = 'Not Logged In on X';
           }
           if (barBadge) {
-            barBadge.textContent = 'ID MISMATCH';
+            barBadge.textContent = 'NOT LOGGED IN ON X';
             barBadge.style.color = '#EF4444';
             barBadge.style.background = 'rgba(239, 68, 68, 0.15)';
           }
           if (barDot) barDot.style.background = '#EF4444';
-          return { isAllowed: false, reason: 'ID_MISMATCH', current: state.activeTwitterHandle };
+          return { isAllowed: false, reason: 'X_NOT_LOGGED_IN' };
+        } else {
+          // Active authenticated session on Twitter (e.g. Mobile browser where drawer is collapsed)
+          state.activeTwitterHandle = verifiedHandle;
         }
+      } else {
+        // Content script not yet attached or mobile tab response pending — trust verified handle
+        state.activeTwitterHandle = verifiedHandle;
       }
+    } else {
+      // No active Twitter tab detected — trust verified handle
+      state.activeTwitterHandle = verifiedHandle;
     }
   } catch (e) {
-    console.warn('Tab handle verification notice:', e);
+    state.activeTwitterHandle = verifiedHandle;
   }
 
   // Matched and locked
@@ -6504,9 +6543,8 @@ function updateCreditUI() {
 // Auto detect tweet on Twitter/X active tab
 async function autoDetectTweet() {
   try {
-    const tabs = await chrome.tabs?.query({ active: true, currentWindow: true });
-    if (!tabs || !tabs[0]) return;
-    const tab = tabs[0];
+    const tab = await getActiveTwitterTab();
+    if (!tab) return;
     state.activeTabId = tab.id;
 
     if (tab.url && (tab.url.includes('twitter.com') || tab.url.includes('x.com'))) {
@@ -6636,10 +6674,14 @@ async function handleInsertTweet() {
   if (!replyText) return;
 
   try {
-    const tabs = await chrome.tabs?.query({ active: true, currentWindow: true });
-    if (!tabs || !tabs[0]) return;
+    const tab = await getActiveTwitterTab();
+    if (!tab || !tab.id) {
+      navigator.clipboard?.writeText(replyText);
+      alert('Copied to clipboard! (Paste it directly into the tweet reply box on X).');
+      return;
+    }
 
-    chrome.tabs.sendMessage(tabs[0].id, {
+    chrome.tabs.sendMessage(tab.id, {
       type: 'INJECT_REPLY_TEXT',
       replyText: replyText
     }, (res) => {
@@ -6648,8 +6690,10 @@ async function handleInsertTweet() {
         alert('Copied to clipboard! (Click on the tweet reply box on X to paste).');
       } else {
         const btn = document.getElementById('insertTweetBtn');
-        btn.textContent = '✓ Inserted!';
-        setTimeout(() => { btn.textContent = '✓ Insert into X'; }, 1500);
+        if (btn) {
+          btn.textContent = '✓ Inserted!';
+          setTimeout(() => { btn.textContent = '✓ Insert into X'; }, 1500);
+        }
       }
     });
   } catch (e) {
@@ -6665,16 +6709,8 @@ function triggerStopAutomation() {
   state.isAborted = true;
   console.log('[ATOMX] Stop automation requested by user.');
 
-  // Broadcast abort signal to all Twitter / X tabs
-  chrome.tabs?.query({}, (tabs) => {
-    (tabs || []).forEach(tab => {
-      if (tab.url && (tab.url.includes('twitter.com') || tab.url.includes('x.com'))) {
-        chrome.tabs.sendMessage(tab.id, { type: 'ABORT_WORKFLOW' }, () => {
-          if (chrome.runtime?.lastError) { /* ignore */ }
-        });
-      }
-    });
-  });
+  // Broadcast abort signal to all Twitter / X tabs (mobile-safe — no-op if chrome.tabs unavailable)
+  broadcastToXTabs({ type: 'ABORT_WORKFLOW' });
 
   setAutomationRunningUI(false);
 
