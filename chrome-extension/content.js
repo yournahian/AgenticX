@@ -1321,6 +1321,8 @@ function ensureFloatingHud() {
 function updateFloatingHud(data = {}) {
   if (data.isStopped || data.stateBadge === 'STOPPED') {
     isWorkflowAborted = true;
+  } else if (data.active || data.isNewWorkflow) {
+    isWorkflowAborted = false;
   }
 
   // If explicitly requested a new workflow, clear dismiss flag
@@ -1449,23 +1451,28 @@ function updateFloatingHud(data = {}) {
   const stopBtn = hud.querySelector('#hud-stop-btn');
   const dismissBtn = hud.querySelector('#hud-dismiss-btn');
 
-  if (data.isStopped || data.stateBadge === 'DONE' || data.stateBadge === 'STOPPED') {
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (pauseBtn) pauseBtn.style.display = 'none';
-    if (skipBtn) skipBtn.style.display = 'none';
-    if (dismissBtn) dismissBtn.style.display = 'flex';
-  } else {
+  const isFinished = Boolean(data.isStopped) && (data.stateBadge === 'DONE' || data.stateBadge === 'STOPPED');
+  const isRunning = Boolean(data.active) || (!isFinished && data.stateBadge !== 'DONE' && data.stateBadge !== 'STOPPED');
+
+  if (isRunning) {
     if (stopBtn) stopBtn.style.display = 'flex';
     if (pauseBtn) {
       pauseBtn.style.display = 'flex';
       const isPaused = data.stateBadge === 'PAUSED' || isHudWorkflowPaused;
-      pauseBtn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
-      pauseBtn.style.color = isPaused ? '#34D399' : '#FBBF24';
-      pauseBtn.style.background = isPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
-      pauseBtn.style.borderColor = isPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
+      pauseBtn.innerHTML = isPaused
+        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg><span id="hud-pause-text">Resume</span>`
+        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg><span id="hud-pause-text">Pause</span>`;
+      pauseBtn.style.color = isPaused ? '#D1FAE5' : '#FEF3C7';
+      pauseBtn.style.background = isPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : 'linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%)';
+      pauseBtn.style.borderColor = isPaused ? 'rgba(52, 211, 153, 0.6)' : 'rgba(251, 191, 36, 0.55)';
     }
     if (skipBtn) skipBtn.style.display = 'flex';
     if (dismissBtn) dismissBtn.style.display = 'none';
+  } else {
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    if (dismissBtn) dismissBtn.style.display = 'flex';
   }
 
   // Real-time synchronization to storage so popup progress tracker stays 1:1 in sync
@@ -2669,6 +2676,187 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
 }
 
 /**
+ * Find the Following button on a Twitter profile page.
+ * Supports both standard Twitter profiles (button with "Following" text / data-testid)
+ * and Creator profiles with Subscriptions enabled (where "Following" is represented
+ * by the [👤✓] icon button situated immediately to the left of the purple "Subscribe" button).
+ */
+function findProfileFollowingButton() {
+  const allButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+
+  // 1. Standard Profile Check:
+  const standardBtn = allButtons.find(b => {
+    const txt = (b.innerText || '').trim();
+    const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    return (
+      txt === 'Following' ||
+      txt.includes('Following') ||
+      testId.includes('unfollow') ||
+      aria === 'following' ||
+      aria.startsWith('following @') ||
+      aria.includes('following')
+    );
+  });
+  if (standardBtn) {
+    return { button: standardBtn, isSubscribeLayout: false };
+  }
+
+  // 2. Creator Profile with "Subscribe" button:
+  const subscribeBtn = allButtons.find(b => {
+    const txt = (b.innerText || '').trim().toLowerCase();
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    return txt === 'subscribe' || aria === 'subscribe' || aria.startsWith('subscribe to') || aria.includes('subscribe');
+  });
+
+  if (subscribeBtn) {
+    // Check siblings or preceding buttons within the same container
+    const parent = subscribeBtn.parentElement;
+    if (parent) {
+      const containerBtns = Array.from(parent.querySelectorAll('button, div[role="button"]'));
+      const subIdx = containerBtns.indexOf(subscribeBtn);
+      if (subIdx > 0) {
+        return { button: containerBtns[subIdx - 1], isSubscribeLayout: true };
+      }
+    }
+
+    // Fallback: search in allButtons preceding subscribeBtn
+    const globalIdx = allButtons.indexOf(subscribeBtn);
+    if (globalIdx > 0) {
+      for (let i = globalIdx - 1; i >= Math.max(0, globalIdx - 4); i--) {
+        const candidate = allButtons[i];
+        const rect = candidate.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && rect.top < 650) {
+          return { button: candidate, isSubscribeLayout: true };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find the Follow button on a Twitter profile page.
+ * Supports standard profiles and Creator profiles with Subscriptions.
+ */
+function findProfileFollowButton() {
+  const allButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+
+  // 1. Standard Follow button:
+  const standardFollowBtn = allButtons.find(b => {
+    const txt = (b.innerText || '').trim();
+    const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    return (
+      (txt === 'Follow' || testId.endsWith('-follow') || aria.startsWith('follow @') || aria === 'follow') &&
+      !txt.includes('Following') &&
+      !testId.includes('unfollow') &&
+      !aria.includes('following')
+    );
+  });
+  if (standardFollowBtn) return standardFollowBtn;
+
+  // 2. Creator profile check:
+  const subscribeBtn = allButtons.find(b => {
+    const txt = (b.innerText || '').trim().toLowerCase();
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    return txt === 'subscribe' || aria === 'subscribe' || aria.startsWith('subscribe to') || aria.includes('subscribe');
+  });
+
+  if (subscribeBtn) {
+    const parent = subscribeBtn.parentElement;
+    if (parent) {
+      const containerBtns = Array.from(parent.querySelectorAll('button, div[role="button"]'));
+      const subIdx = containerBtns.indexOf(subscribeBtn);
+      if (subIdx > 0) {
+        const candidate = containerBtns[subIdx - 1];
+        const txt = (candidate.innerText || '').trim();
+        const testId = (candidate.getAttribute('data-testid') || '').toLowerCase();
+        if (!txt.includes('Following') && !testId.includes('unfollow')) {
+          return candidate;
+        }
+      }
+    }
+    const globalIdx = allButtons.indexOf(subscribeBtn);
+    if (globalIdx > 0) {
+      for (let i = globalIdx - 1; i >= Math.max(0, globalIdx - 4); i--) {
+        const candidate = allButtons[i];
+        const txt = (candidate.innerText || '').trim();
+        const testId = (candidate.getAttribute('data-testid') || '').toLowerCase();
+        const rect = candidate.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && rect.top < 650 && !txt.includes('Following') && !testId.includes('unfollow')) {
+          return candidate;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Executes unfollow on a profile page.
+ * Handles both standard confirmation dialogs and the Creator Subscribe layout
+ * where clicking [👤✓] expands "Unfollow @username" button before confirmation.
+ */
+async function executeProfileUnfollowAction(followingInfo, targetHandle = '') {
+  if (!followingInfo || !followingInfo.button) return false;
+  const btn = followingInfo.button;
+
+  console.log(`[ATOMX] Initiating unfollow on @${targetHandle} (Subscribe layout: ${followingInfo.isSubscribeLayout})...`);
+
+  // 1. Click following button or [👤✓] icon button
+  btn.click();
+  await sleep(550);
+
+  // 2. If it expanded/revealed an "Unfollow @username" option (as seen in Subscribe profiles):
+  const findRevealedOption = () => {
+    const items = Array.from(document.querySelectorAll('button, div[role="button"], div[role="menuitem"], span[role="button"]'));
+    const cleanHandle = (targetHandle || '').replace(/^@/, '').toLowerCase();
+    return items.find(el => {
+      const txt = (el.innerText || '').trim().toLowerCase();
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      const testId = (el.getAttribute('data-testid') || '').toLowerCase();
+
+      // Don't mistake the confirmation dialog's final confirm button for the revealed menu
+      if (testId.includes('confirmationsheetconfirm')) return false;
+
+      const hasUnfollow = txt.startsWith('unfollow') || aria.startsWith('unfollow') || testId.includes('unfollow');
+      const matchesHandle = cleanHandle ? (txt.includes(cleanHandle) || aria.includes(cleanHandle)) : true;
+      return hasUnfollow && matchesHandle;
+    });
+  };
+
+  const revealedBtn = findRevealedOption();
+  if (revealedBtn && revealedBtn !== btn) {
+    console.log(`[ATOMX] Found expanded unfollow button ("${revealedBtn.innerText.trim()}"). Clicking...`);
+    revealedBtn.click();
+    await sleep(550);
+  }
+
+  // 3. Confirm Unfollow via Twitter confirmation dialog / sheet if presented
+  const confirmBtn = await waitForElement(
+    'button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"]',
+    2200
+  ) || Array.from(document.querySelectorAll('div[role="dialog"] button, div[role="alertdialog"] button, button')).find(b => {
+    const txt = (b.innerText || '').trim().toLowerCase();
+    const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+    return testId.includes('confirmationsheetconfirm') || txt === 'unfollow';
+  });
+
+  if (confirmBtn) {
+    console.log('[ATOMX] Confirming unfollow modal...');
+    confirmBtn.click();
+    await sleep(800);
+    return true;
+  }
+
+  await sleep(500);
+  return true;
+}
+
+/**
  * Agent 1: Audience Builder Per-Profile Interaction (Phase D)
  * Smoothly deep-scrolls profile page past header/bio/tabs, skips pinned posts,
  * centers the creator's real recent post on screen, likes it, generates AI reply adhering
@@ -2720,37 +2908,23 @@ async function engageAndFollowProfile(options = {}) {
   }
 
   try {
-    // Step 1: Follow & Smart Unfollow Status Check
-    const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-    const alreadyBtn = buttons.find(b => {
-      const txt = (b.innerText || '').trim();
-      const testId = b.getAttribute('data-testid') || '';
-      return txt === 'Following' || testId.includes('unfollow') || txt.includes('Following');
-    });
-
+    // Step 1: Follow & Smart Unfollow Status Check (supports both standard and Subscribe layouts)
+    const followingInfo = findProfileFollowingButton();
     const pageText = (document.body ? document.body.innerText : '') || '';
     const hasFollowsYouBadge = pageText.includes('Follows you');
 
     // Smart Unfollow Strategy for Sorsa Booster:
     // If target does not follow back and we already follow them -> unfollow first, engage on posts, then re-follow!
-    if (autoUnfollow && alreadyBtn && !hasFollowsYouBadge && !isWorkflowItemSkipped && !isWorkflowAborted) {
-      console.log(`[ATOMX] @${targetHandle} does not follow back. Executing Unfollow First strategy...`);
-      alreadyBtn.click();
-      await sleep(500);
-      const confirmUnfollowBtn = await waitForElement('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"]', 2000) ||
-                                 Array.from(document.querySelectorAll('button, div[role="button"]')).find(b => (b.innerText || '').trim() === 'Unfollow');
-      if (confirmUnfollowBtn) {
-        confirmUnfollowBtn.click();
+    if (autoUnfollow && followingInfo && !hasFollowsYouBadge && !isWorkflowItemSkipped && !isWorkflowAborted) {
+      console.log(`[ATOMX] @${targetHandle} does not follow back. Executing Unfollow First strategy (Subscribe layout: ${followingInfo.isSubscribeLayout})...`);
+      const unfollowDone = await executeProfileUnfollowAction(followingInfo, targetHandle);
+      if (unfollowDone) {
         unfollowedFirst = true;
         await sleep(900);
       }
-    } else if (!alreadyBtn && followPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
-      // Standard Follow action if requested and not yet following
-      const followBtn = buttons.find(b => {
-        const txt = (b.innerText || '').trim();
-        const testId = b.getAttribute('data-testid') || '';
-        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
-      });
+    } else if (!followingInfo && followPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
+      // Follow action if requested and not yet following
+      const followBtn = findProfileFollowButton();
       if (followBtn && !isWorkflowItemSkipped && !isWorkflowAborted) {
         await simulateHumanFollowClick(followBtn);
         followed = true;
@@ -2921,12 +3095,7 @@ async function engageAndFollowProfile(options = {}) {
       console.log(`[ATOMX] Re-following @${targetHandle} after engagement...`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       await sleep(800);
-      const reButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-      const reFollowBtn = reButtons.find(b => {
-        const txt = (b.innerText || '').trim();
-        const testId = b.getAttribute('data-testid') || '';
-        return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
-      });
+      const reFollowBtn = findProfileFollowButton();
       if (reFollowBtn) {
         await simulateHumanFollowClick(reFollowBtn);
         followed = true;
@@ -2940,7 +3109,7 @@ async function engageAndFollowProfile(options = {}) {
 
     return {
       success: true,
-      alreadyFollowing: !!alreadyBtn && !unfollowedFirst,
+      alreadyFollowing: !!followingInfo && !unfollowedFirst,
       followed,
       unfollowedFirst,
       handle: targetHandle,
@@ -3215,6 +3384,17 @@ async function executeAutoUnfollowStep(params = {}) {
     followBtn.click();
     await sleep(600);
 
+    // Support expanded/revealed menuitem or button if rendered
+    const revealedMenu = Array.from(document.querySelectorAll('button, div[role="button"], div[role="menuitem"]')).find(b => {
+      const txt = (b.innerText || '').trim().toLowerCase();
+      const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+      return (txt.startsWith('unfollow') || testId.includes('unfollow')) && !testId.includes('confirmationsheetconfirm');
+    });
+    if (revealedMenu && revealedMenu !== followBtn) {
+      revealedMenu.click();
+      await sleep(500);
+    }
+
     // Confirm dialog: click "Unfollow" in confirmation modal
     const confirmBtn = await waitForElement('button[data-testid="confirmationSheetConfirm"]', 2500);
     if (confirmBtn) {
@@ -3223,7 +3403,11 @@ async function executeAutoUnfollowStep(params = {}) {
       return { success: true, action: 'UNFOLLOWED', handle: href };
     } else {
       // Try fallback modal confirmation
-      const modalBtn = Array.from(document.querySelectorAll('div[role="dialog"] button')).find(b => (b.innerText || '').trim().toLowerCase() === 'unfollow');
+      const modalBtn = Array.from(document.querySelectorAll('div[role="dialog"] button, div[role="alertdialog"] button, button')).find(b => {
+        const txt = (b.innerText || '').trim().toLowerCase();
+        const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+        return testId.includes('confirmationsheetconfirm') || txt === 'unfollow';
+      });
       if (modalBtn) {
         modalBtn.click();
         await sleep(700);

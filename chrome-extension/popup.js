@@ -170,15 +170,32 @@ let reciprocatorWorkingTabId = null;
 let tgWorkingTabId = null; // Telegram Group Engage working tab
 
 async function syncFloatingHud(tabId, data = {}) {
+  const isStopping = data.isStopped === true || data.stateBadge === 'STOPPED' || data.stateBadge === 'DONE';
+  const cleanData = {
+    ...data,
+    isStopped: isStopping,
+    active: !isStopping
+  };
+  if (!isStopping) {
+    cleanData.isNewWorkflow = data.isNewWorkflow !== undefined ? data.isNewWorkflow : true;
+    if (!cleanData.stateBadge || cleanData.stateBadge === 'STOPPED' || cleanData.stateBadge === 'DONE') {
+      cleanData.stateBadge = 'ACTIVE';
+    }
+  }
+
   // 1. Save state to chrome.storage.local so all tabs hydrate it immediately
   try {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      if (!data.isStopped) {
+      if (!isStopping) {
         await chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
       }
       const stored = await chrome.storage.local.get(['atomx_active_hud']).catch(() => ({}));
       const current = stored?.atomx_active_hud || {};
-      const merged = { ...current, ...data, active: !data.isStopped };
+      const merged = { ...current, ...cleanData };
+      if (!isStopping) {
+        merged.isStopped = false;
+        merged.active = true;
+      }
       await chrome.storage.local.set({ atomx_active_hud: merged }).catch(() => null);
     }
   } catch (e) {}
@@ -186,7 +203,7 @@ async function syncFloatingHud(tabId, data = {}) {
   // 2. Broadcast UPDATE_FLOATING_HUD to active tab and all Twitter/X tabs
   if (typeof chrome !== 'undefined' && chrome.tabs) {
     try {
-      const payload = { ...data, active: !data.isStopped };
+      const payload = { ...cleanData };
       const tabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }).catch(() => []);
       for (const t of tabs) {
         chrome.tabs.sendMessage(t.id, {
@@ -198,13 +215,13 @@ async function syncFloatingHud(tabId, data = {}) {
       if (activeTab && activeTab.id) {
         chrome.tabs.sendMessage(activeTab.id, {
           type: 'UPDATE_FLOATING_HUD',
-          data
+          data: payload
         }).catch(() => null);
       }
       if (tabId && (!activeTab || activeTab.id !== tabId)) {
         chrome.tabs.sendMessage(tabId, {
           type: 'UPDATE_FLOATING_HUD',
-          data
+          data: payload
         }).catch(() => null);
       }
     } catch (e) {}
