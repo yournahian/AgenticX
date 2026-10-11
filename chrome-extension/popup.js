@@ -692,7 +692,7 @@ function updateTelegramProgressUI(raidState) {
       }
     }
   } else if (raidState.isStopped) {
-    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
@@ -700,7 +700,7 @@ function updateTelegramProgressUI(raidState) {
     if (tgStatus) tgStatus.textContent = raidState.statusText || 'Workflow stopped by user.';
     if (tgCountdown) tgCountdown.style.display = 'none';
   } else if (done + skipped >= total && total > 0) {
-    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
@@ -1998,7 +1998,7 @@ function initAgentListeners() {
       if (chrome.runtime?.lastError || !res?.ok) {
         // Background relay failed — fall back to popup-based execution
         executeAutonomousRaidWorkflow(filtered.freshTweets, actions).finally(() => {
-          if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+          if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
           if (pauseBtn) pauseBtn.style.display = 'none';
           if (skipBtn) skipBtn.style.display = 'none';
           if (stopBtn) stopBtn.style.display = 'none';
@@ -2033,7 +2033,7 @@ function initAgentListeners() {
     const tgStateBadge = document.getElementById('tgStateBadge');
     const tgStatus = document.getElementById('tgLiveStatusText');
     const tgCountdown = document.getElementById('tgCountdownText');
-    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch Auto Engage'; }
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
@@ -6690,7 +6690,7 @@ function setAutomationRunningUI(isRunning) {
     updateReplyTargetSummaryUI();
     if (runTgBtn) {
       runTgBtn.disabled = false;
-      runTgBtn.textContent = '▶ Launch Auto Engage';
+      runTgBtn.textContent = '▶ Launch';
     }
   }
 }
@@ -7110,7 +7110,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
     updateCreditUI();
     const runBtnFinal = document.getElementById('runTgEngageBtn');
     const stopBtnFinal = document.getElementById('stopTgEngageBtn');
-    if (runBtnFinal) { runBtnFinal.disabled = false; runBtnFinal.textContent = '▶ Launch Auto Engage'; }
+    if (runBtnFinal) { runBtnFinal.disabled = false; runBtnFinal.textContent = '▶ Launch'; }
     if (stopBtnFinal) stopBtnFinal.style.display = 'none';
   }
 }

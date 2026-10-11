@@ -408,6 +408,23 @@ async function simulateHumanFollowClick(followBtn) {
 }
 
 /**
+ * Detects whether a tweet/article has already been liked by the logged-in user.
+ * Checks for data-testid="unlike" or aria-labels indicating existing like status.
+ */
+function isPostAlreadyLiked(targetArticle) {
+  if (!targetArticle) return false;
+  if (targetArticle.querySelector('button[data-testid="unlike"], div[data-testid="unlike"], [data-testid="unlike"]')) {
+    return true;
+  }
+  const buttons = Array.from(targetArticle.querySelectorAll('button, div[role="button"]'));
+  return buttons.some(b => {
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+    return testId.includes('unlike') || aria.includes('unlike') || aria.startsWith('liked');
+  });
+}
+
+/**
  * 100% reliable Like Click with zero random skips.
  * Dispatches full pointer events and renders a pulse effect so the heart visibly turns pink/red.
  */
@@ -415,7 +432,7 @@ async function simulateHumanLikeClick(targetArticle) {
   if (!targetArticle) return false;
 
   // Check if already liked
-  if (targetArticle.querySelector('button[data-testid="unlike"], div[data-testid="unlike"], [data-testid="unlike"]')) {
+  if (isPostAlreadyLiked(targetArticle)) {
     return true; // Already liked
   }
 
@@ -1140,19 +1157,19 @@ function ensureFloatingHud() {
 
       <!-- Action Controls: Pause/Resume, Skip, Stop -->
       <div style="display: flex; gap: 7px; margin-top: 6px;">
-        <button id="hud-pause-btn" style="flex: 1; padding: 7.5px 0; background: linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%); border: 1px solid rgba(251, 191, 36, 0.55); border-radius: 8px; color: #FEF3C7; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 3px 10px rgba(245, 158, 11, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Pause or Resume current workflow">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>
+        <button id="hud-pause-btn" style="flex: 1; padding: 7.5px 0; background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(251, 191, 36, 0.55); border-radius: 8px; color: #FFFFFF; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 0 10px rgba(245, 158, 11, 0.2); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Pause or Resume current workflow">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="#FBBF24"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>
           <span id="hud-pause-text">Pause</span>
         </button>
-        <button id="hud-skip-action-btn" style="flex: 1; padding: 7.5px 0; background: linear-gradient(135deg, rgba(59, 130, 246, 0.25) 0%, rgba(37, 99, 235, 0.38) 100%); border: 1px solid rgba(96, 165, 250, 0.55); border-radius: 8px; color: #EFF6FF; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 3px 10px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.2); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Skip current tweet/profile link immediately">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 19L14 12L5 5v14z"/><rect x="16" y="5" width="3" height="14" rx="1.5"/></svg>
+        <button id="hud-skip-action-btn" style="flex: 1; padding: 7.5px 0; background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(96, 165, 250, 0.55); border-radius: 8px; color: #FFFFFF; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 0 10px rgba(59, 130, 246, 0.22); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Skip current tweet/profile link immediately">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="#60A5FA"><path d="M5 19L14 12L5 5v14z"/><rect x="16" y="5" width="3" height="14" rx="1.5"/></svg>
           <span>Skip</span>
         </button>
-        <button id="hud-stop-btn" style="flex: 1; padding: 7.5px 0; background: linear-gradient(135deg, rgba(239, 68, 68, 0.25) 0%, rgba(220, 38, 38, 0.4) 100%); border: 1px solid rgba(248, 113, 113, 0.6); border-radius: 8px; color: #FEF2F2; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 3px 10px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Completely abort and stop workflow">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5.5" y="5.5" width="13" height="13" rx="3.5"/></svg>
-          <span>Stop</span>
+        <button id="hud-stop-btn" style="flex: 1; padding: 7.5px 0; background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(248, 113, 113, 0.6); border-radius: 8px; color: #FFFFFF; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 0 10px rgba(239, 68, 68, 0.25); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Completely abort and stop workflow">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="#F87171"><rect x="5.5" y="5.5" width="13" height="13" rx="3.5"/></svg>
+          <span>STOP</span>
         </button>
-        <button id="hud-dismiss-btn" style="flex: 1; padding: 7.5px 0; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 8px; color: #CBD5E1; font-size: 11px; font-weight: 700; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 4px;" title="Dismiss HUD">
+        <button id="hud-dismiss-btn" style="flex: 1; padding: 7.5px 0; background: rgba(30, 41, 59, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; color: #FFFFFF; font-size: 11px; font-weight: 700; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 4px;" title="Dismiss HUD">
           Dismiss
         </button>
       </div>
@@ -1166,11 +1183,12 @@ function ensureFloatingHud() {
     const pauseBtn = hud.querySelector('#hud-pause-btn');
     if (pauseBtn) {
       pauseBtn.innerHTML = isHudWorkflowPaused
-        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg><span id="hud-pause-text">Resume</span>`
-        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg><span id="hud-pause-text">Pause</span>`;
-      pauseBtn.style.color = isHudWorkflowPaused ? '#D1FAE5' : '#FEF3C7';
-      pauseBtn.style.background = isHudWorkflowPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : 'linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%)';
+        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="#34D399"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg><span id="hud-pause-text">Resume</span>`
+        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="#FBBF24"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg><span id="hud-pause-text">Pause</span>`;
+      pauseBtn.style.color = '#FFFFFF';
+      pauseBtn.style.background = 'rgba(30, 41, 59, 0.75)';
       pauseBtn.style.borderColor = isHudWorkflowPaused ? 'rgba(52, 211, 153, 0.6)' : 'rgba(251, 191, 36, 0.55)';
+      pauseBtn.style.boxShadow = isHudWorkflowPaused ? '0 0 10px rgba(16, 185, 129, 0.2)' : '0 0 10px rgba(245, 158, 11, 0.2)';
     }
     const badge = hud.querySelector('#hud-badge');
     if (badge) {
@@ -1460,11 +1478,12 @@ function updateFloatingHud(data = {}) {
       pauseBtn.style.display = 'flex';
       const isPaused = data.stateBadge === 'PAUSED' || isHudWorkflowPaused;
       pauseBtn.innerHTML = isPaused
-        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg><span id="hud-pause-text">Resume</span>`
-        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg><span id="hud-pause-text">Pause</span>`;
-      pauseBtn.style.color = isPaused ? '#D1FAE5' : '#FEF3C7';
-      pauseBtn.style.background = isPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : 'linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%)';
+        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="#34D399"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg><span id="hud-pause-text">Resume</span>`
+        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="#FBBF24"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg><span id="hud-pause-text">Pause</span>`;
+      pauseBtn.style.color = '#FFFFFF';
+      pauseBtn.style.background = 'rgba(30, 41, 59, 0.75)';
       pauseBtn.style.borderColor = isPaused ? 'rgba(52, 211, 153, 0.6)' : 'rgba(251, 191, 36, 0.55)';
+      pauseBtn.style.boxShadow = isPaused ? '0 0 10px rgba(16, 185, 129, 0.2)' : '0 0 10px rgba(245, 158, 11, 0.2)';
     }
     if (skipBtn) skipBtn.style.display = 'flex';
     if (dismissBtn) dismissBtn.style.display = 'none';
@@ -2957,12 +2976,24 @@ async function engageAndFollowProfile(options = {}) {
       return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
     }
 
+    // Global Rule for Increase Sorsa Score & Audience Builder:
+    // Filter out pinned posts and any posts that are already liked!
     const validRecentArticles = allArticles.filter(art => {
       const socialCtx = art.querySelector('div[data-testid="socialContext"]')?.innerText?.toLowerCase() || '';
-      return !socialCtx.includes('pinned') && !socialCtx.includes('pin');
+      const isPinned = socialCtx.includes('pinned') || socialCtx.includes('pin');
+      return !isPinned && !isPostAlreadyLiked(art);
     });
 
-    const candidatePosts = validRecentArticles.length > 0 ? validRecentArticles : allArticles;
+    const candidatePosts = validRecentArticles.length > 0
+      ? validRecentArticles
+      : allArticles.filter(art => !isPostAlreadyLiked(art));
+
+    // If all posts on this target profile are already liked, auto-skip the profile immediately!
+    if (candidatePosts.length === 0) {
+      console.log(`[ATOMX] Recent posts for @${targetHandle} are already liked. Auto-skipping profile as per global rule.`);
+      return { success: true, skipped: true, ignored: true, reason: 'Recent posts already liked' };
+    }
+
     const targetRecentPost = candidatePosts[0];
 
     // Determine how many posts to engage
@@ -2978,6 +3009,10 @@ async function engageAndFollowProfile(options = {}) {
     if (likePosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
       for (const art of postsSlice) {
         if (isWorkflowAborted || isWorkflowItemSkipped) break;
+        if (isPostAlreadyLiked(art)) {
+          console.log(`[ATOMX] Post already liked. Skipping.`);
+          continue;
+        }
         const ok = await simulateHumanLikeClick(art);
         if (ok) {
           likesDone++;
@@ -4424,6 +4459,18 @@ async function executeFollowersListCycle(params = {}) {
       return;
     }
 
+    // Global Rule: If post is already liked, auto-skip immediately!
+    if (isPostAlreadyLiked(art)) {
+      console.log(`[ATOMX FOLLOWERS] Post by @${authorHandle || 'user'} is already liked. Auto-skipping as per global rule.`);
+      skippedCount++;
+      updateFloatingHud({
+        skipped: skippedCount,
+        statusText: `Post by @${authorHandle || 'user'} already liked. Auto-skipping to next...`
+      });
+      window.scrollBy({ top: 450, behavior: 'smooth' });
+      return;
+    }
+
     const statusMsg = `Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}...`;
     updateFloatingHud({
       title: 'Followers Increase',
@@ -4633,8 +4680,7 @@ async function executeFollowersListCycle(params = {}) {
           continue;
         }
 
-        const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
-        if (alreadyLiked) {
+        if (isPostAlreadyLiked(art)) {
           engagedTweets[tweetId] = Date.now();
           if (!processedTweetIds.has(tweetId)) {
             processedTweetIds.add(tweetId);
@@ -4793,8 +4839,7 @@ async function executeFollowersListCycle(params = {}) {
           continue;
         }
 
-        const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
-        if (alreadyLiked) {
+        if (isPostAlreadyLiked(art)) {
           engagedTweets[tweetId] = Date.now();
           skippedCount++;
           updateFloatingHud({
