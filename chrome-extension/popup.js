@@ -25,17 +25,26 @@ async function getOrCreateReusedTab(existingTabId, targetUrl) {
     }
   }
 
-  // 2. Check for active tab in current window if already on X / Twitter
+  // 2. Check for active tab in current window
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const activeTab = tabs && tabs[0];
-    if (activeTab && activeTab.id && activeTab.url && (activeTab.url.includes('x.com') || activeTab.url.includes('twitter.com'))) {
+    if (activeTab && activeTab.id) {
       await chrome.tabs.update(activeTab.id, { url: targetUrl, active: true });
       return activeTab.id;
     }
   } catch (e) {}
 
-  // 3. Check for ANY open Twitter / X tab in any window so we reuse it instead of opening new windows/tabs
+  // 3. Check for active tab in last focused window
+  try {
+    const [lastTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (lastTab && lastTab.id) {
+      await chrome.tabs.update(lastTab.id, { url: targetUrl, active: true });
+      return lastTab.id;
+    }
+  } catch (e) {}
+
+  // 4. Check for ANY open Twitter / X tab in any window so we reuse it instead of opening new tabs
   try {
     const openTwitterTabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] });
     if (openTwitterTabs && openTwitterTabs.length > 0 && openTwitterTabs[0]?.id) {
@@ -45,7 +54,17 @@ async function getOrCreateReusedTab(existingTabId, targetUrl) {
     }
   } catch (e) {}
 
-  // 4. Fallback: only if no Twitter tab exists anywhere, open a single tab in the current window and reuse it
+  // 5. Check for ANY open tab anywhere in browser to reuse in-place
+  try {
+    const allTabs = await chrome.tabs.query({});
+    if (allTabs && allTabs.length > 0 && allTabs[0]?.id) {
+      const tabToUse = allTabs[0];
+      await chrome.tabs.update(tabToUse.id, { url: targetUrl, active: true });
+      return tabToUse.id;
+    }
+  } catch (e) {}
+
+  // 6. Absolute fallback: only if browser has 0 tabs open
   const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
   return newTab.id;
 }
@@ -2827,9 +2846,9 @@ async function startDefaulterAuditWorkflow() {
   state.isAborted = false;
 
   try {
-    const tab = await chrome.tabs.create({ url: postUrl, active: false });
-    defaulterActiveTabId = tab.id;
-    await waitForTabComplete(tab.id);
+    const tabId = await getOrCreateReusedTab(defaulterActiveTabId, postUrl);
+    defaulterActiveTabId = tabId;
+    await waitForTabComplete(tabId);
     await sleep(3000);
 
     if (state.isAborted) return;
@@ -3008,9 +3027,9 @@ async function startTgLiveRaidWorkflow() {
   updateAgentConsole('Live Raid Active', 'Recording-friendly tab created. Tab will stay open for proof recording.');
 
   try {
-    // 1. OPEN TAB WITH active: true SO SCREEN RECORDER CAN CAPTURE IT
-    const initialTab = await chrome.tabs.create({ url: tweetLinks[0], active: true });
-    tgLiveWorkingTabId = initialTab.id;
+    // 1. REUSE TAB SO SCREEN RECORDER CAN CAPTURE IT IN-PLACE
+    const initialTabId = await getOrCreateReusedTab(tgLiveWorkingTabId, tweetLinks[0]);
+    tgLiveWorkingTabId = initialTabId;
 
     for (let i = 0; i < tweetLinks.length; i++) {
       if (state.isAborted) break;
@@ -3166,10 +3185,14 @@ async function startCommenterReciprocatorWorkflow() {
 
   // Delegate immediately to background service worker — survives extension popup closing!
   const backendUrl = await getBackendUrl();
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
   chrome.runtime.sendMessage({
     type: 'BG_START_AGENT_WORKFLOW',
     agentId: 'reciprocator',
     title: 'Commenter Reciprocator',
+    tabId,
     items: [],
     options: {
       postUrl,
@@ -4140,7 +4163,18 @@ async function startAudienceBuilderWorkflow() {
   if (stopBtn) stopBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
   if (stateBadge) stateBadge.textContent = 'SCANNING';
-  if (statusText) statusText.textContent = 'Opening Twitter List to discover top engaged tweets & commenters...';
+  if (statusText) statusText.textContent = 'Opening Twitter List to discover top engaged posts & comments...';
+
+  const doneEl = document.getElementById('audienceDoneCount');
+  const colEl = document.getElementById('audienceCollectedCount');
+  const skipEl = document.getElementById('audienceSkippedCount');
+  const barEl = document.getElementById('audienceProgressBar');
+  const qInd = document.getElementById('audienceQueueIndicator');
+  if (doneEl) doneEl.textContent = '0';
+  if (colEl) colEl.textContent = String(targetCount);
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (qInd) qInd.textContent = `Profile 0/${targetCount}`;
 
   syncFloatingHud(null, {
     title: 'Audience Builder',
@@ -4150,7 +4184,7 @@ async function startAudienceBuilderWorkflow() {
     collected: targetCount,
     skipped: 0,
     progressPercent: 5,
-    statusText: 'Opening Twitter List to discover top engaged tweets & commenters...'
+    statusText: 'Opening Twitter List to discover top engaged posts & comments...'
   });
 
   const listId = extractTwitterListId(targetUrl);
@@ -4158,10 +4192,14 @@ async function startAudienceBuilderWorkflow() {
   const searchFeedUrl = listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : targetUrl;
 
   const backendUrl = await getBackendUrl();
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
   chrome.runtime.sendMessage({
     type: 'BG_START_AGENT_WORKFLOW',
     agentId: 'audience',
     title: 'Audience Builder',
+    tabId,
     items: [],
     options: {
       feedUrl: canonicalListUrl,
@@ -4269,6 +4307,17 @@ async function startSorsaScoreBoosterWorkflow() {
   if (statusText) statusText.textContent = `Starting Sorsa Booster (${mode === 'sequential' ? 'Mode 1: Sequential' : 'Mode 2: Deduplication Window'})...`;
 
   const totalEffective = Math.min(cleanHandles.length, targetCount);
+  const doneEl = document.getElementById('sorsaDoneCount');
+  const colEl = document.getElementById('sorsaCollectedCount');
+  const skipEl = document.getElementById('sorsaSkippedCount');
+  const barEl = document.getElementById('sorsaProgressBar');
+  const qInd = document.getElementById('sorsaQueueIndicator');
+  if (doneEl) doneEl.textContent = '0';
+  if (colEl) colEl.textContent = String(totalEffective);
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (qInd) qInd.textContent = `Account 0/${totalEffective}`;
+
   syncFloatingHud(null, {
     title: 'Sorsa Booster',
     stateBadge: 'RUNNING',
@@ -4281,10 +4330,14 @@ async function startSorsaScoreBoosterWorkflow() {
   });
 
   const backendUrl = await getBackendUrl();
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
   chrome.runtime.sendMessage({
     type: 'BG_START_AGENT_WORKFLOW',
     agentId: 'sorsa',
     title: 'Sorsa Booster',
+    tabId,
     items: cleanHandles.map(h => ({ handle: `@${h}`, cleanHandle: h })),
     options: {
       mode,
@@ -4384,6 +4437,17 @@ async function startFollowersIncreaseWorkflow() {
   if (stateBadge) stateBadge.textContent = 'SCANNING';
   if (statusText) statusText.textContent = 'Opening Twitter List to engage recent posts...';
 
+  const doneEl = document.getElementById('followerDoneCount');
+  const colEl = document.getElementById('followerCollectedCount');
+  const skipEl = document.getElementById('followerSkippedCount');
+  const barEl = document.getElementById('followerProgressBar');
+  const qInd = document.getElementById('followerQueueIndicator');
+  if (doneEl) doneEl.textContent = '0';
+  if (colEl) colEl.textContent = String(targetCount);
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '0%';
+  if (qInd) qInd.textContent = `Profile 0/${targetCount}`;
+
   syncFloatingHud(null, {
     title: 'Followers Increase',
     stateBadge: 'SCANNING',
@@ -4400,10 +4464,14 @@ async function startFollowersIncreaseWorkflow() {
   const searchFeedUrl = listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : targetUrl;
 
   const backendUrl = await getBackendUrl();
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
   chrome.runtime.sendMessage({
     type: 'BG_START_AGENT_WORKFLOW',
     agentId: 'followers',
     title: 'Followers Increase',
+    tabId,
     items: [],
     options: {
       feedUrl: canonicalListUrl,
@@ -4501,10 +4569,14 @@ async function startReplyBackLoopWorkflow() {
 
   // Delegate to background service worker — survives extension popup closing!
   const backendUrl = await getBackendUrl();
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
   chrome.runtime.sendMessage({
     type: 'BG_START_AGENT_WORKFLOW',
     agentId: 'replyback',
     title: 'Reply Back Loop',
+    tabId,
     items: postUrls.map(u => ({ tweetUrl: u })),
     options: {
       delaySec,

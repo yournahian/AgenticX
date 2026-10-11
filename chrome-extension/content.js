@@ -114,9 +114,10 @@ async function sleep(ms) {
   while (Date.now() - start < ms) {
     if (isWorkflowAborted || isWorkflowItemSkipped) break;
     // If paused via HUD or extension, freeze here until resumed
-    while (isHudWorkflowPaused && !isWorkflowAborted) {
+    while (isHudWorkflowPaused && !isWorkflowAborted && !isWorkflowItemSkipped) {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
+    if (isWorkflowAborted || isWorkflowItemSkipped) break;
     const remaining = Math.min(100, ms - (Date.now() - start));
     if (remaining > 0) {
       await new Promise(resolve => setTimeout(resolve, remaining));
@@ -1399,8 +1400,7 @@ function updateFloatingHud(data = {}) {
     } else if (data.countdownText) {
       const match = data.countdownText.match(/(\d+:\d+|\d+s|\d+)/);
       timerBadgeEl.textContent = match ? (match[0].includes('s') || match[0].includes(':') ? `⏱️ ${match[0]}` : `⏱️ ${match[0]}s`) : '⚡ Active';
-    } else {
-      // Do NOT overwrite timerBadge if it is currently counting down!
+    } else if (data.stateBadge !== 'PACING') {
       const currentText = (timerBadgeEl.textContent || '').trim();
       if (!currentText.startsWith('⏱️') && !currentText.includes(':')) {
         timerBadgeEl.textContent = '⚡ Active';
@@ -1736,6 +1736,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Agent 1: Audience Builder — Find, mark/like, and extract next unvisited comment in thread
+  if (message.type === 'FIND_AND_LIKE_NEXT_UNPROCESSED_COMMENT') {
+    findAndLikeNextUnprocessedComment(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ found: false, error: err.message }));
+    return true;
+  }
+
   // Agent 1: Audience Builder — Follow & engage user on page
   if (message.type === 'FOLLOW_USER_ON_PAGE' || message.type === 'AUDIENCE_ENGAGE_AND_FOLLOW') {
     engageAndFollowProfile(message)
@@ -1904,6 +1912,7 @@ function sanitizeClientComment(text, maxWords = 10) {
 
 async function executeAutonomousTweetWorkflow(params) {
   isWorkflowAborted = false;
+  isWorkflowItemSkipped = false;
 
   // 1-to-1 Verified Account Enforcement
   if (params.verifiedXHandle) {
@@ -1943,10 +1952,8 @@ async function executeAutonomousTweetWorkflow(params) {
   }
 
   // USER RULE 2: If user already commented on this post, AUTO-IGNORE!
-  // In engagement raids, commenting is the core task. Never post duplicate comments on the same tweet!
   if (actions.comment && isAlreadyCommented) {
     console.log('[ATOMX] User already commented on this post previously. Auto-ignoring.');
-    // If like was also requested and not yet liked, give a quick free courtesy like
     if (actions.like && !isAlreadyLiked) {
       try {
         const likeBtn = mainArticle.querySelector('button[data-testid="like"]');
@@ -1990,8 +1997,12 @@ async function executeAutonomousTweetWorkflow(params) {
     };
   }
 
+  if (isWorkflowItemSkipped || isWorkflowAborted) {
+    return { success: true, skipped: true, ignored: true, reason: 'Skipped by user', performed };
+  }
+
   // 3. Auto-Follow Creator FIRST (Naturally executed at top of post while avatar & header are in full view)
-  if (actions.follow && !isWorkflowAborted) {
+  if (actions.follow && !isWorkflowAborted && !isWorkflowItemSkipped) {
     try {
       // 1. Look inside mainArticle author header
       let followBtn = Array.from(mainArticle.querySelectorAll('button, div[role="button"]')).find(b => {
@@ -2025,7 +2036,7 @@ async function executeAutonomousTweetWorkflow(params) {
         }
       }
 
-      if (followBtn) {
+      if (followBtn && !isWorkflowItemSkipped && !isWorkflowAborted) {
         await simulateHumanFollowClick(followBtn);
         performed.push('Followed Creator ➕');
         await sleep(400);
@@ -2040,18 +2051,18 @@ async function executeAutonomousTweetWorkflow(params) {
     }
   }
 
-  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+  if (isWorkflowItemSkipped || isWorkflowAborted) return { success: true, skipped: true, ignored: true, reason: 'Skipped by user', performed };
 
   // 4. Natural Reading Scroll: Smoothly scroll down through post to bring action bar & comment box into view together
-  if (actions.scroll !== false && !isWorkflowAborted) {
+  if (actions.scroll !== false && !isWorkflowAborted && !isWorkflowItemSkipped) {
     await smoothScrollPostForReading(mainArticle);
     performed.push('Scrolled & hydrated');
   }
 
-  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+  if (isWorkflowItemSkipped || isWorkflowAborted) return { success: true, skipped: true, ignored: true, reason: 'Skipped by user', performed };
 
   // 5. Auto-Like Action (MAIN POST ONLY) — 100% reliable execution with visual pulse
-  if (shouldLike && !isWorkflowAborted) {
+  if (shouldLike && !isWorkflowAborted && !isWorkflowItemSkipped) {
     try {
       const likedOk = await simulateHumanLikeClick(mainArticle);
       if (likedOk) {
@@ -2063,10 +2074,10 @@ async function executeAutonomousTweetWorkflow(params) {
     }
   }
 
-  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+  if (isWorkflowItemSkipped || isWorkflowAborted) return { success: true, skipped: true, ignored: true, reason: 'Skipped by user', performed };
 
   // 6. Auto-Repost Action (MAIN POST ONLY)
-  if (actions.repost && !isWorkflowAborted) {
+  if (actions.repost && !isWorkflowAborted && !isWorkflowItemSkipped) {
     try {
       const isAlreadyReposted = !!mainArticle.querySelector('button[data-testid="unretweet"], div[data-testid="unretweet"]');
       if (isAlreadyReposted) {
@@ -2085,7 +2096,7 @@ async function executeAutonomousTweetWorkflow(params) {
               return txt === 'Repost' || txt === 'Retweet';
             });
           }
-          if (confirmBtn) {
+          if (confirmBtn && !isWorkflowItemSkipped && !isWorkflowAborted) {
             confirmBtn.click();
             performed.push('Reposted 🔁');
             await sleep(500);
@@ -2097,10 +2108,10 @@ async function executeAutonomousTweetWorkflow(params) {
     }
   }
 
-  if (isWorkflowAborted) return { success: false, aborted: true, performed };
+  if (isWorkflowItemSkipped || isWorkflowAborted) return { success: true, skipped: true, ignored: true, reason: 'Skipped by user', performed };
 
   // 7. Auto-Comment Action with Live Contextual AI Generation & Human-Like Typing
-  if (shouldComment && !isWorkflowAborted) {
+  if (shouldComment && !isWorkflowAborted && !isWorkflowItemSkipped) {
     try {
       // Step A: Extract the REAL TWEET TEXT directly from Twitter DOM
       const tweetData = extractTweetData(mainArticle);
@@ -2134,6 +2145,8 @@ async function executeAutonomousTweetWorkflow(params) {
           console.warn('[ATOMX] Error communicating with background worker:', genErr);
         }
       }
+
+      if (isWorkflowItemSkipped || isWorkflowAborted) return { success: true, skipped: true, ignored: true, reason: 'Skipped by user', performed };
 
       if (!commentToPost) {
         commentToPost = 'Spot on insight. Focused execution is key.';
@@ -2493,6 +2506,120 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
 }
 
 /**
+ * Agent 1: Audience Builder In-Thread Comment Scanner & Marker
+ * Inspects comments on the current tweet status post directly.
+ * Skips comments that are already liked (tracked from previous sessions).
+ * For the next unliked comment:
+ *  - Likes the comment on the post (serves as permanent visual & DOM tracking marker)
+ *  - Returns the commenter's handle so the same tab visits their profile, engages, and goes back.
+ */
+async function findAndLikeNextUnprocessedComment(options = {}) {
+  isWorkflowItemSkipped = false;
+  const verifiedHandle = (options.verifiedXHandle || '').toLowerCase().replace(/^@/, '').trim();
+  const mainAuthor = (options.mainAuthor || '').toLowerCase().replace(/^@/, '').trim();
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
+
+  let persistedHistory = {};
+  try {
+    const stored = await new Promise(r => {
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.get(['atomx_audience_engaged_history'], r);
+      } else r({});
+    });
+    if (stored?.atomx_audience_engaged_history && typeof stored.atomx_audience_engaged_history === 'object') {
+      persistedHistory = stored.atomx_audience_engaged_history;
+    }
+  } catch (e) {}
+
+  const maxScrollAttempts = 20;
+  const seenHandlesInThisScan = new Set();
+
+  for (let s = 0; s < maxScrollAttempts; s++) {
+    if (isWorkflowAborted || isWorkflowItemSkipped) {
+      return { found: false, aborted: true };
+    }
+
+    const mainArticle = getMainPostArticle();
+    const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    const commentArticles = allArticles.filter(a => a !== mainArticle);
+
+    for (const art of commentArticles) {
+      if (isWorkflowAborted || isWorkflowItemSkipped) {
+        return { found: false, aborted: true };
+      }
+
+      const data = extractTweetData(art);
+      const cleanHandle = (data.authorHandle || '').replace('@', '').toLowerCase().trim();
+      if (!cleanHandle) continue;
+
+      // Skip user's own handle or post creator's handle
+      if (cleanHandle === loggedInHandle || cleanHandle === verifiedHandle || (mainAuthor && cleanHandle === mainAuthor)) {
+        continue;
+      }
+
+      // CRITICAL: Check if this comment is ALREADY liked (already processed & tracked!)
+      const isAlreadyLiked = !!art.querySelector('button[data-testid="unlike"]');
+      if (isAlreadyLiked) {
+        // Already processed in this or previous session! Skip!
+        continue;
+      }
+
+      // 24h deduplication check
+      const lastTime = persistedHistory[cleanHandle];
+      if (lastTime && (Date.now() - lastTime < 24 * 3600 * 1000)) {
+        continue;
+      }
+
+      if (seenHandlesInThisScan.has(cleanHandle)) continue;
+      seenHandlesInThisScan.add(cleanHandle);
+
+      // Found a fresh, unliked comment!
+      art.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(500);
+
+      // 1. LIKE the comment on the post to track it & notify commenter!
+      const likeBtn = art.querySelector('button[data-testid="like"]');
+      let commentLiked = false;
+      if (likeBtn) {
+        try {
+          likeBtn.click();
+          commentLiked = true;
+          console.log(`[ATOMX AUDIENCE] Successfully liked comment by @${cleanHandle} on post!`);
+          await sleep(600);
+        } catch (likeErr) {
+          console.warn('[ATOMX AUDIENCE] Like comment click notice:', likeErr);
+        }
+      }
+
+      return {
+        found: true,
+        cleanHandle,
+        handle: `@${cleanHandle}`,
+        authorName: data.authorName || cleanHandle,
+        commentText: (data.text || '').slice(0, 100),
+        commentLiked
+      };
+    }
+
+    // Check for "Show replies" buttons
+    const showBtns = Array.from(document.querySelectorAll('button[role="button"], div[role="button"]')).filter(b => {
+      const txt = (b.innerText || '').toLowerCase();
+      return txt.includes('show replies') || txt.includes('show more replies') || txt.includes('show probability') || txt.includes('hidden replies');
+    });
+    if (showBtns.length > 0) {
+      showBtns[0].click();
+      await sleep(800);
+    }
+
+    // Scroll down to reveal more comments
+    window.scrollBy({ top: 800, behavior: 'smooth' });
+    await sleep(850);
+  }
+
+  return { found: false, exhausted: true };
+}
+
+/**
  * Agent 1: Audience Builder Per-Profile Interaction (Phase D)
  * Smoothly deep-scrolls profile page past header/bio/tabs, skips pinned posts,
  * centers the creator's real recent post on screen, likes it, generates AI reply adhering
@@ -2500,6 +2627,7 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
  */
 async function engageAndFollowProfile(options = {}) {
   isWorkflowAborted = false;
+  isWorkflowItemSkipped = false;
 
   // 1-to-1 Verified Account Enforcement
   if (options.verifiedXHandle) {
@@ -2531,6 +2659,10 @@ async function engageAndFollowProfile(options = {}) {
     return { success: false, aborted: true, rateLimited: true, error: 'Twitter Rate Limit detected' };
   }
 
+  if (isWorkflowItemSkipped || isWorkflowAborted) {
+    return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
+  }
+
   try {
     // Step 1: Follow & Smart Unfollow Status Check
     const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
@@ -2545,7 +2677,7 @@ async function engageAndFollowProfile(options = {}) {
 
     // Smart Unfollow Strategy for Sorsa Booster:
     // If target does not follow back and we already follow them -> unfollow first, engage on posts, then re-follow!
-    if (autoUnfollow && alreadyBtn && !hasFollowsYouBadge) {
+    if (autoUnfollow && alreadyBtn && !hasFollowsYouBadge && !isWorkflowItemSkipped && !isWorkflowAborted) {
       console.log(`[ATOMX] @${targetHandle} does not follow back. Executing Unfollow First strategy...`);
       alreadyBtn.click();
       await sleep(500);
@@ -2556,30 +2688,43 @@ async function engageAndFollowProfile(options = {}) {
         unfollowedFirst = true;
         await sleep(900);
       }
-    } else if (!alreadyBtn && followPosts) {
+    } else if (!alreadyBtn && followPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
       // Standard Follow action if requested and not yet following
       const followBtn = buttons.find(b => {
         const txt = (b.innerText || '').trim();
         const testId = b.getAttribute('data-testid') || '';
         return (txt === 'Follow' || testId.endsWith('-follow')) && !txt.includes('Following') && !testId.includes('unfollow');
       });
-      if (followBtn) {
+      if (followBtn && !isWorkflowItemSkipped && !isWorkflowAborted) {
         await simulateHumanFollowClick(followBtn);
         followed = true;
         await sleep(500);
       }
     }
 
+    if (isWorkflowItemSkipped || isWorkflowAborted) {
+      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
+    }
+
     // Step 2: Smooth scroll down past profile header/bio with human hydration
     await smoothScrollAndHydrate(550, 900);
+
+    if (isWorkflowItemSkipped || isWorkflowAborted) {
+      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
+    }
 
     // Step 3: Wait for timeline posts to hydrate with retry scrolling
     let allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     if (allArticles.length === 0) {
       for (let retries = 0; retries < 4 && allArticles.length === 0; retries++) {
+        if (isWorkflowItemSkipped || isWorkflowAborted) break;
         await smoothScrollAndHydrate(400, 1000);
         allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
       }
+    }
+
+    if (isWorkflowItemSkipped || isWorkflowAborted) {
+      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
     }
 
     const validRecentArticles = allArticles.filter(art => {
@@ -2600,9 +2745,9 @@ async function engageAndFollowProfile(options = {}) {
     const postsSlice = candidatePosts.slice(0, numPostsToEngage);
 
     // Step 4: Like selected posts
-    if (likePosts) {
+    if (likePosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
       for (const art of postsSlice) {
-        if (isWorkflowAborted) break;
+        if (isWorkflowAborted || isWorkflowItemSkipped) break;
         const ok = await simulateHumanLikeClick(art);
         if (ok) {
           likesDone++;
@@ -2611,10 +2756,14 @@ async function engageAndFollowProfile(options = {}) {
       }
     }
 
+    if (isWorkflowItemSkipped || isWorkflowAborted) {
+      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
+    }
+
     // Step 5: Repost selected posts
-    if (repostPosts) {
+    if (repostPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
       for (const art of postsSlice) {
-        if (isWorkflowAborted) break;
+        if (isWorkflowAborted || isWorkflowItemSkipped) break;
         const ok = await simulateHumanRepostClick(art);
         if (ok) {
           repostDone++;
@@ -2623,8 +2772,12 @@ async function engageAndFollowProfile(options = {}) {
       }
     }
 
+    if (isWorkflowItemSkipped || isWorkflowAborted) {
+      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
+    }
+
     // Step 6: Generate AI Reply and comment on the primary recent post
-    if (replyPosts && targetRecentPost && !isWorkflowAborted) {
+    if (replyPosts && targetRecentPost && !isWorkflowAborted && !isWorkflowItemSkipped) {
       try {
         const tweetData = extractTweetData(targetRecentPost);
         const tweetText = tweetData.text || '';
