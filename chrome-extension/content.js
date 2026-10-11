@@ -1095,15 +1095,18 @@ function ensureFloatingHud() {
       </div>
 
       <!-- Action Controls: Pause/Resume, Skip, Stop -->
-      <div style="display: flex; gap: 6px; margin-top: 2px;">
-        <button id="hud-pause-btn" style="flex: 1; padding: 7px 0; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 8px; color: #FBBF24; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Pause or Resume current workflow">
-          ⏸️ Pause
+      <div style="display: flex; gap: 6px; margin-top: 4px;">
+        <button id="hud-pause-btn" style="flex: 1; padding: 7px 0; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 8px; color: #FBBF24; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;" title="Pause or Resume current workflow">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          <span id="hud-pause-text">Pause</span>
         </button>
-        <button id="hud-skip-action-btn" style="flex: 1; padding: 7px 0; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); border-radius: 8px; color: #60A5FA; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Skip current tweet/profile link immediately">
-          ⏭️ Skip
+        <button id="hud-skip-action-btn" style="flex: 1; padding: 7px 0; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); border-radius: 8px; color: #60A5FA; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;" title="Skip current tweet/profile link immediately">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          <span>Skip</span>
         </button>
-        <button id="hud-stop-btn" style="flex: 1; padding: 7px 0; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 8px; color: #F87171; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.15s ease;" title="Completely abort and stop workflow">
-          ⏹️ Stop
+        <button id="hud-stop-btn" style="flex: 1; padding: 7px 0; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 8px; color: #F87171; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;" title="Completely abort and stop workflow">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          <span>Stop</span>
         </button>
         <button id="hud-dismiss-btn" style="flex: 1; padding: 7px 0; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 8px; color: #CBD5E1; font-size: 11px; font-weight: 700; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 4px;" title="Dismiss HUD">
           Dismiss
@@ -1118,7 +1121,9 @@ function ensureFloatingHud() {
     isHudWorkflowPaused = !isHudWorkflowPaused;
     const pauseBtn = hud.querySelector('#hud-pause-btn');
     if (pauseBtn) {
-      pauseBtn.textContent = isHudWorkflowPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.innerHTML = isHudWorkflowPaused
+        ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span id="hud-pause-text">Resume</span>`
+        : `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg><span id="hud-pause-text">Pause</span>`;
       pauseBtn.style.color = isHudWorkflowPaused ? '#34D399' : '#FBBF24';
       pauseBtn.style.background = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
       pauseBtn.style.borderColor = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
@@ -4212,11 +4217,12 @@ async function executeFollowersListCycle(params = {}) {
   }
 
   // =========================================================================
-  // STRATEGY 2: "NEWEST TWEETS FIRST" (Chronological downward scroll)
+  // STRATEGY 2: "NEWEST TWEETS FIRST" (Chronological downward engagement from top)
+  // Engages directly on timeline cards from top to bottom until targetCount is met.
+  // Skips already-engaged posts and advances to next post down.
   // =========================================================================
   else {
-    const maxRecentScrolls = 65;
-    let consecutiveOlderCount = 0;
+    const maxRecentScrolls = 75;
     let consecutiveEmptyScrolls = 0;
 
     for (let s = 0; s < maxRecentScrolls; s++) {
@@ -4234,7 +4240,6 @@ async function executeFollowersListCycle(params = {}) {
 
       const initialEngaged = engagedCount;
       const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
-      let foundOlderInPass = 0;
 
       for (const art of articles) {
         if (isWorkflowAborted || engagedCount >= targetCount) break;
@@ -4249,58 +4254,51 @@ async function executeFollowersListCycle(params = {}) {
         // Skip own tweets
         if (authorHandle && authorHandle === loggedInHandle) continue;
 
-        // Check timeframe freshness
-        const timeEl = art.querySelector('time');
-        const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
-        const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
-        const ageMs = Date.now() - timestamp;
-        if (ageMs > freshnessMs) {
-          foundOlderInPass++;
-          continue;
-        }
-
-        // Skip if already engaged on this tweet -> KEEP SCROLLING!
+        // Skip if already engaged on this tweet -> Skip and advance to next post down!
         if (engagedTweets[tweetId]) {
           skippedCount++;
           updateFloatingHud({
             skipped: skippedCount,
-            statusText: `Skipping already engaged post by @${authorHandle || 'user'}... Scrolling deeper...`
+            statusText: `Skipping already engaged post by @${authorHandle || 'user'}... Continuing down...`
           });
           continue;
         }
+
         const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
         if (alreadyLiked) {
           engagedTweets[tweetId] = Date.now();
           skippedCount++;
           updateFloatingHud({
             skipped: skippedCount,
-            statusText: `Skipping already liked post by @${authorHandle || 'user'}... Scrolling deeper...`
+            statusText: `Skipping already liked post by @${authorHandle || 'user'}... Continuing down...`
           });
           continue;
         }
 
-        // STRICT: Root posts only
+        // STRICT: Root posts only (skip comments/replies in timeline)
         const artText = (art.innerText || '');
         const hasReplyingText = /replying to/i.test(artText);
         const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
         const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
         if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
 
-        // Weak & Spam filter
+        // Filter out spam
         const tweetText = (tweetData.text || '').trim();
         const words = tweetText.split(/\s+/).filter(Boolean);
-        if (tweetText.length < 15 || words.length < 4) continue;
+        if (tweetText.length < 10 || words.length < 3) continue;
         const lowerText = tweetText.toLowerCase();
         const spamKeywords = [
-          'airdrop', 'send 0.1 eth', 'send eth', 'giveaway bot', 'dm to claim',
-          'presale', 'free mint', 'claim your free', 'airdrop bot', 'pump',
-          'drop wallet', 'drop address', 'whitelist slot'
+          'airdrop bot', 'send 0.1 eth', 'send eth', 'giveaway bot', 'dm to claim',
+          'presale', 'free mint', 'claim your free', 'drop wallet', 'drop address', 'whitelist slot'
         ];
         if (spamKeywords.some(kw => lowerText.includes(kw))) continue;
 
-        // QUALIFYING RECENT POST FOUND!
+        // QUALIFYING RECENT POST FROM TOP FOUND — ENGAGE DIRECTLY ON TIMELINE CARD!
+        console.log(`[ATOMX FOLLOWERS] Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}`);
         await performActionsOnTweet(art, tweetData, tweetId, authorHandle);
       }
+
+      if (engagedCount >= targetCount) break;
 
       if (engagedCount === initialEngaged) {
         consecutiveEmptyScrolls++;
@@ -4308,23 +4306,18 @@ async function executeFollowersListCycle(params = {}) {
         consecutiveEmptyScrolls = 0;
       }
 
-      if (foundOlderInPass > 3) {
-        consecutiveOlderCount++;
-        if (consecutiveOlderCount >= 3) {
-          console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}).`);
-          break;
-        }
-      } else {
-        consecutiveOlderCount = 0;
+      if (consecutiveEmptyScrolls >= 10) {
+        console.log('[ATOMX FOLLOWERS] Reached end of scrollable feed.');
+        break;
       }
 
-      if (consecutiveEmptyScrolls >= 10) break;
+      // Smooth scroll down to bring next tweets into view
       await smoothScrollAndHydrate(700, 1000);
     }
 
     if (engagedCount === 0 && !isWorkflowAborted) {
-      console.log(`[ATOMX FOLLOWERS] No unengaged posts found in timeframe (${freshness}).`);
-      const emptyMsg = `No unengaged posts found in selected timeframe (${freshness}).`;
+      console.log(`[ATOMX FOLLOWERS] No unengaged posts found in current feed.`);
+      const emptyMsg = `No unengaged posts found in current list feed.`;
       updateFloatingHud({
         title: 'Followers Increase',
         stateBadge: 'DONE',

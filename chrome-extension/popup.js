@@ -279,6 +279,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
       state.isPaused = false;
       updateAllPauseButtonsUI(false);
       setAutomationRunningUI(false);
+      if (typeof updateAllStopButtonsUI === 'function') {
+        updateAllStopButtonsUI();
+      }
       console.log('[ATOMX] Workflow aborted via message signal.');
       sendResponse({ success: true });
       return true;
@@ -815,12 +818,47 @@ function updateAgentWorkflowProgressUI(wf) {
   }
 }
 
+function updateAllStopButtonsUI() {
+  const configs = [
+    { startBtn: 'runAudienceBuilderBtn', stopBtn: 'stopAudienceBuilderBtn', pauseBtn: 'pauseAudienceBuilderBtn', skipBtn: 'skipAudienceBuilderBtn', badge: 'audienceStateBadge', status: 'audienceLiveStatusText' },
+    { startBtn: 'runSorsaBoosterBtn', stopBtn: 'stopSorsaBoosterBtn', pauseBtn: 'pauseSorsaBoosterBtn', skipBtn: 'skipSorsaBoosterBtn', badge: 'sorsaStateBadge', status: 'sorsaLiveStatusText' },
+    { startBtn: 'runFollowerIncreaseBtn', stopBtn: 'stopFollowerIncreaseBtn', pauseBtn: 'pauseFollowerIncreaseBtn', skipBtn: 'skipFollowerIncreaseBtn', badge: 'followerStateBadge', status: 'followerLiveStatusText' },
+    { startBtn: 'runReplyBackBtn', stopBtn: 'stopReplyBackBtn', pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn', badge: 'replyBackStateBadge', status: 'replyBackLiveStatusText' },
+    { startBtn: 'runAutoUnfollowBtn', stopBtn: 'stopAutoUnfollowBtn', pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn', badge: 'unfollowStateBadge', status: 'unfollowLiveStatusText' },
+    { startBtn: 'runReciprocatorBtn', stopBtn: 'stopReciprocatorBtn', pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn', badge: 'reciprocatorStateBadge', status: 'reciprocatorLiveStatusText' },
+    { startBtn: 'runTgEngageBtn', stopBtn: 'stopTgEngageBtn', pauseBtn: 'pauseTgEngageBtn', skipBtn: 'skipTgEngageBtn', badge: 'tgStateBadge', status: 'tgLiveStatus' }
+  ];
+
+  configs.forEach(cfg => {
+    const start = document.getElementById(cfg.startBtn);
+    const stop = document.getElementById(cfg.stopBtn);
+    const pause = cfg.pauseBtn ? document.getElementById(cfg.pauseBtn) : null;
+    const skip = cfg.skipBtn ? document.getElementById(cfg.skipBtn) : null;
+    const badge = cfg.badge ? document.getElementById(cfg.badge) : null;
+    const status = cfg.status ? document.getElementById(cfg.status) : null;
+    if (start) start.style.display = 'block';
+    if (stop) stop.style.display = 'none';
+    if (pause) pause.style.display = 'none';
+    if (skip) skip.style.display = 'none';
+    if (badge) badge.textContent = 'STOPPED';
+    if (status && (status.textContent.includes('Engaging') || status.textContent.includes('Visiting') || status.textContent.includes('Opening') || status.textContent.includes('Scanning'))) {
+      status.textContent = 'Workflow stopped by user.';
+    }
+  });
+
+  setAutomationRunningUI(false);
+  updateAllPauseButtonsUI(false);
+}
+
 function updateAllPauseButtonsUI(isPaused) {
   const pauseBtns = document.querySelectorAll(
     '#pauseAudienceBuilderBtn, #pauseSorsaBoosterBtn, #pauseFollowerIncreaseBtn, #pauseReplyBackBtn, #pauseAutoUnfollowBtn, #pauseReciprocatorBtn, #pauseTgEngageBtn'
   );
+  const pauseIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+  const playIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg>`;
+
   pauseBtns.forEach(btn => {
-    btn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
+    btn.innerHTML = isPaused ? `${playIcon}Resume` : `${pauseIcon}Pause`;
     btn.style.background = isPaused
       ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
       : 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
@@ -948,10 +986,12 @@ function initBackgroundWorkflowSync() {
     if (changes.atomx_tg_raid && changes.atomx_tg_raid.newValue) {
       updateTelegramProgressUI(changes.atomx_tg_raid.newValue);
     }
-    if (changes.atomx_agent_workflow && changes.atomx_agent_workflow.newValue) {
-      updateAgentWorkflowProgressUI(changes.atomx_agent_workflow.newValue);
-    } else if (changes.atomx_active_hud && changes.atomx_active_hud.newValue) {
-      updateAgentWorkflowProgressUI(changes.atomx_active_hud.newValue);
+    const wf = changes.atomx_agent_workflow?.newValue || changes.atomx_active_hud?.newValue;
+    if (wf) {
+      if (wf.isStopped || wf.stateBadge === 'STOPPED') {
+        updateAllStopButtonsUI();
+      }
+      updateAgentWorkflowProgressUI(wf);
     }
   });
 }
@@ -2009,6 +2049,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   }
 
   updateAgentWorkflowProgressUI(stoppedWf);
+  updateAllStopButtonsUI();
 }
 
   // Unified Agent Controls: Stop, Pause, Skip for all agents
