@@ -112,21 +112,39 @@ body {
 }
 
 .icon-btn {
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  background: rgba(241, 245, 249, 0.7);
+  border: 1px solid rgba(203, 213, 225, 0.7);
+  border-radius: 8px;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 5px;
-  display: flex;
+  padding: 6px 8px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
 .icon-btn:hover {
-  background: #F3F4F6;
-  color: var(--text-primary);
+  background: #FFFFFF;
+  color: var(--blue-primary);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] .icon-btn,
+body.dark .icon-btn {
+  background: rgba(30, 41, 59, 0.6);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #94A3B8;
+}
+
+[data-theme="dark"] .icon-btn:hover,
+body.dark .icon-btn:hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: #F8FAFC;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Modern Segmented Navigation Tabs */
@@ -382,35 +400,60 @@ body {
   border-color: var(--blue-primary);
 }
 
-/* Primary Button */
+/* Primary Button — Modern Web3 High-Tech Gradient & Glow */
 .primary-btn {
-  background: var(--blue-primary);
-  border: none;
+  position: relative;
+  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 50%, #1E40AF 100%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   color: #FFFFFF;
-  border-radius: var(--radius-sm);
-  padding: 10px;
-  font-weight: 600;
-  font-size: 13px;
+  border-radius: 9px;
+  padding: 9.5px 14px;
+  font-weight: 700;
+  font-size: 11.5px;
+  letter-spacing: 0.35px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  box-shadow: 0 2px 6px rgba(49, 87, 230, 0.25);
-  transition: background 0.15s ease, transform 0.05s ease;
+  gap: 7px;
+  box-shadow: 0 4px 14px -1px rgba(37, 99, 235, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+  user-select: none;
+}
+
+.primary-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  transform: skewX(-20deg);
+  transition: 0.65s ease;
 }
 
 .primary-btn:hover {
-  background: var(--blue-hover);
+  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 50%, #1D4ED8 100%);
+  box-shadow: 0 6px 20px -1px rgba(37, 99, 235, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-1.5px);
+}
+
+.primary-btn:hover::after {
+  left: 140%;
 }
 
 .primary-btn:active {
-  transform: translateY(1px);
+  transform: translateY(1px) scale(0.985);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
 }
 
 .primary-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .cost-tag {
@@ -590,20 +633,135 @@ body {
   color: var(--text-primary);
 }
 
+/* Secondary Buttons — Modern Glassmorphism & Subtle Depth */
 .secondary-btn {
   background: #FFFFFF;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-primary);
+  border: 1px solid rgba(203, 213, 225, 0.85);
+  color: #334155;
   font-weight: 600;
-  font-size: 12px;
-  padding: 8px;
-  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  padding: 8px 12px;
+  border-radius: 9px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
 }
 
 .secondary-btn:hover {
-  background: #F3F4F6;
+  background: #F8FAFC;
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #2563EB;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.09);
+}
+
+.secondary-btn:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+/* Compact Control Row Buttons (.mini-btn) */
+.mini-btn {
+  padding: 8px 12px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.25px !important;
+  border-radius: 8px !important;
+  line-height: 1.2 !important;
+}
+
+/* Special High-Tech Control Buttons: Reset, Pause, Skip, Stop */
+/* Reset Buttons */
+button[id^="reset"] {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%) !important;
+  border: 1px solid #CBD5E1 !important;
+  color: #475569 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+}
+
+button[id^="reset"]:hover {
+  background: #FFFFFF !important;
+  border-color: #38BDF8 !important;
+  color: #0284C7 !important;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.18) !important;
+  transform: translateY(-1.5px);
+}
+
+/* Pause Buttons */
+button[id^="pause"] {
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important;
+  border: 1px solid rgba(251, 191, 36, 0.45) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 3px 12px rgba(217, 119, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+button[id^="pause"]:hover {
+  background: linear-gradient(135deg, #FBBF24 0%, #F59E0B 100%) !important;
+  box-shadow: 0 5px 16px rgba(217, 119, 6, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  transform: translateY(-1.5px);
+}
+
+/* Skip Buttons */
+button[id^="skip"] {
+  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%) !important;
+  border: 1px solid rgba(96, 165, 250, 0.45) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 3px 12px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+button[id^="skip"]:hover {
+  background: linear-gradient(135deg, #60A5FA 0%, #3B82F6 100%) !important;
+  box-shadow: 0 5px 16px rgba(37, 99, 235, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  transform: translateY(-1.5px);
+}
+
+/* Stop Buttons */
+button[id^="stop"] {
+  background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%) !important;
+  border: 1px solid rgba(248, 113, 113, 0.45) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 3px 12px rgba(220, 38, 38, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+button[id^="stop"]:hover {
+  background: linear-gradient(135deg, #F87171 0%, #EF4444 100%) !important;
+  box-shadow: 0 5px 16px rgba(220, 38, 38, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  transform: translateY(-1.5px);
+}
+
+/* Dark Theme Overrides for Buttons */
+[data-theme="dark"] .secondary-btn,
+body.dark .secondary-btn {
+  background: rgba(30, 41, 59, 0.75);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #E2E8F0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .secondary-btn:hover,
+body.dark .secondary-btn:hover {
+  background: rgba(51, 65, 85, 0.9);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: #60A5FA;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] button[id^="reset"],
+body.dark button[id^="reset"] {
+  background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%) !important;
+  border-color: #334155 !important;
+  color: #94A3B8 !important;
+}
+
+[data-theme="dark"] button[id^="reset"]:hover,
+body.dark button[id^="reset"]:hover {
+  background: #1E293B !important;
+  border-color: #38BDF8 !important;
+  color: #38BDF8 !important;
 }
 
 /* History List */

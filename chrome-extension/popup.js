@@ -775,8 +775,14 @@ function updateAgentWorkflowProgressUI(wf) {
     if (pauseBtn) {
       pauseBtn.style.display = 'inline-block';
       pauseBtn.textContent = wf.isPaused ? '▶️ Resume' : '⏸️ Pause';
-      pauseBtn.style.background = wf.isPaused ? '#059669' : '#D97706';
-      pauseBtn.style.borderColor = wf.isPaused ? '#059669' : '#D97706';
+      pauseBtn.style.background = wf.isPaused
+        ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+        : 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
+      pauseBtn.style.borderColor = wf.isPaused ? 'rgba(52, 211, 153, 0.45)' : 'rgba(251, 191, 36, 0.45)';
+      pauseBtn.style.boxShadow = wf.isPaused
+        ? '0 3px 12px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
+        : '0 3px 12px rgba(217, 119, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
+      pauseBtn.style.color = '#FFFFFF';
     }
     if (skipBtn) skipBtn.style.display = 'inline-block';
     if (badge) badge.textContent = wf.isPaused ? 'PAUSED' : (wf.stateBadge || 'RUNNING');
@@ -815,8 +821,14 @@ function updateAllPauseButtonsUI(isPaused) {
   );
   pauseBtns.forEach(btn => {
     btn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
-    btn.style.background = isPaused ? '#059669' : '#D97706';
-    btn.style.borderColor = isPaused ? '#059669' : '#D97706';
+    btn.style.background = isPaused
+      ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+      : 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)';
+    btn.style.borderColor = isPaused ? 'rgba(52, 211, 153, 0.45)' : 'rgba(251, 191, 36, 0.45)';
+    btn.style.boxShadow = isPaused
+      ? '0 3px 12px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)'
+      : '0 3px 12px rgba(217, 119, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
+    btn.style.color = '#FFFFFF';
   });
 
   const badges = document.querySelectorAll(
