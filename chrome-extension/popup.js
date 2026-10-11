@@ -5586,22 +5586,26 @@ async function checkAccountVerificationLock() {
 
     if (checkTab) {
       const response = await chrome.tabs.sendMessage(checkTab.id, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }).catch(() => null);
-      if (response && response.success) {
         state.activeTwitterHandle = (response.rawHandle || '').toLowerCase().trim();
         if (!state.activeTwitterHandle) {
-          // Twitter is open but no user is logged in
-          if (mismatchBanner) {
-            mismatchBanner.style.display = 'block';
-            if (mismatchExpected) mismatchExpected.textContent = displayHandle;
-            if (mismatchActual) mismatchActual.textContent = 'Not Logged In on X';
+          if (response.isDefinitelyLoggedOut) {
+            // Twitter is open but definitely logged out
+            if (mismatchBanner) {
+              mismatchBanner.style.display = 'block';
+              if (mismatchExpected) mismatchExpected.textContent = displayHandle;
+              if (mismatchActual) mismatchActual.textContent = 'Not Logged In on X';
+            }
+            if (barBadge) {
+              barBadge.textContent = 'NOT LOGGED IN ON X';
+              barBadge.style.color = '#EF4444';
+              barBadge.style.background = 'rgba(239, 68, 68, 0.15)';
+            }
+            if (barDot) barDot.style.background = '#EF4444';
+            return { isAllowed: false, reason: 'X_NOT_LOGGED_IN' };
+          } else {
+            // Active authenticated session on Twitter (e.g. Mobile browser where sidebar is collapsed)
+            state.activeTwitterHandle = verifiedHandle;
           }
-          if (barBadge) {
-            barBadge.textContent = 'NOT LOGGED IN ON X';
-            barBadge.style.color = '#EF4444';
-            barBadge.style.background = 'rgba(239, 68, 68, 0.15)';
-          }
-          if (barDot) barDot.style.background = '#EF4444';
-          return { isAllowed: false, reason: 'X_NOT_LOGGED_IN' };
         } else if (state.activeTwitterHandle !== verifiedHandle) {
           // Twitter is logged into another ID
           if (mismatchBanner) {

@@ -150,41 +150,80 @@ function getMainPostArticle() {
 }
 
 /**
- * Detect the logged-in user's Twitter handle from navigation/profile links
+ * Detect the logged-in user's Twitter handle from navigation/profile links.
+ * Supports both Desktop and Mobile browsers (Kiwi, Lemur, Mises, Yandex).
  */
 function getLoggedInUserHandle() {
+  const RESERVED_X_PATHS = [
+    'home', 'explore', 'notifications', 'messages', 'i', 'compose',
+    'settings', 'search', 'hashtag', 'lists', 'communities', 'verified-orgs-signup', 'login', 'signup'
+  ];
+
   try {
-    // 1. AppTabBar_Profile_Link href="/<handle>"
+    // 1. Desktop & Tablet Primary Navigation: a[data-testid="AppTabBar_Profile_Link"]
     const profileLink = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
     if (profileLink) {
       const href = profileLink.getAttribute('href') || '';
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
-      if (clean && !['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(clean)) {
+      if (clean && !RESERVED_X_PATHS.includes(clean)) {
         return clean;
       }
     }
-    // 2. SideNav_AccountSwitcher_Button inner text contains @<handle>
+
+    // 2. Desktop SideNav Account Switcher: button or div[data-testid="SideNav_AccountSwitcher_Button"]
     const switcher = document.querySelector('div[data-testid="SideNav_AccountSwitcher_Button"], button[data-testid="SideNav_AccountSwitcher_Button"]');
     if (switcher) {
       const text = switcher.innerText || switcher.textContent || '';
       const match = text.match(/@([\w_]{1,30})/);
       if (match) return match[1].toLowerCase();
     }
-    // 3. Header/Nav link check
-    const sideNavLinks = document.querySelectorAll('header nav a[role="link"]');
-    for (const link of sideNavLinks) {
-      const href = link.getAttribute('href') || '';
+
+    // 3. Mobile Navigation Drawer Profile Link: a[data-testid="SideNav_Profile_Link"]
+    const sideNavProfile = document.querySelector('a[data-testid="SideNav_Profile_Link"]');
+    if (sideNavProfile) {
+      const href = sideNavProfile.getAttribute('href') || '';
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
-      if (clean && !['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'settings'].includes(clean) && clean.length > 1) {
+      if (clean && !RESERVED_X_PATHS.includes(clean)) {
         return clean;
       }
     }
-    // 4. Check profile links in primary navigation
-    const navProfileLink = document.querySelector('header a[href^="/"][aria-label*="Profile" i], nav a[href^="/"][aria-label*="Profile" i]');
+
+    // 4. Mobile Drawer Account Switcher (if mounted):
+    const mobileDrawerSwitcher = document.querySelector('div[data-testid="AccountSwitcher_Account_Button"]');
+    if (mobileDrawerSwitcher) {
+      const text = mobileDrawerSwitcher.innerText || mobileDrawerSwitcher.textContent || '';
+      const match = text.match(/@([\w_]{1,30})/);
+      if (match) return match[1].toLowerCase();
+    }
+
+    // 5. Mobile Top Bar User Menu Avatar (button[data-testid="TopNavBar_UserMenu_Button"]):
+    const topUserMenu = document.querySelector('div[data-testid="TopNavBar_UserMenu_Button"], button[data-testid="TopNavBar_UserMenu_Button"]');
+    if (topUserMenu) {
+      const aria = topUserMenu.getAttribute('aria-label') || '';
+      const match = aria.match(/@([\w_]{1,30})/);
+      if (match) return match[1].toLowerCase();
+      const img = topUserMenu.querySelector('img');
+      const alt = (img?.getAttribute('alt') || '').trim();
+      const altMatch = alt.match(/@([\w_]{1,30})/);
+      if (altMatch) return altMatch[1].toLowerCase();
+    }
+
+    // 6. Tweet Status Page: User's own avatar in the inline reply box (universal on PC and Mobile)
+    const inlineReplyUser = document.querySelector('div[data-testid="inline_reply"] a[role="link"][href^="/"]');
+    if (inlineReplyUser) {
+      const href = inlineReplyUser.getAttribute('href') || '';
+      const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
+      if (clean && !RESERVED_X_PATHS.includes(clean)) {
+        return clean;
+      }
+    }
+
+    // 7. Primary Navigation bar specifically (scoped to navigation container only, NEVER whole header):
+    const navProfileLink = document.querySelector('nav[aria-label="Primary Navigation"] a[href^="/"][aria-label*="Profile" i], nav a[href^="/"][aria-label*="Profile" i]');
     if (navProfileLink) {
       const href = navProfileLink.getAttribute('href') || '';
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
-      if (clean && clean.length > 1) return clean;
+      if (clean && clean.length > 1 && !RESERVED_X_PATHS.includes(clean)) return clean;
     }
   } catch (e) {}
   return null;
@@ -192,7 +231,9 @@ function getLoggedInUserHandle() {
 
 function isDefinitelyLoggedOut() {
   try {
-    return !!document.querySelector('a[data-testid="loginButton"], a[href*="/login"], a[data-testid="signupButton"], div[data-testid="BottomBar"] a[href*="/login"]');
+    return !!document.querySelector(
+      'a[data-testid="loginButton"], a[href*="/login"], a[data-testid="signupButton"], div[data-testid="BottomBar"] a[href*="/login"], div[data-testid="LoggedOutBottomBar"]'
+    );
   } catch (e) {
     return false;
   }
@@ -1206,12 +1247,13 @@ function ensureFloatingHud() {
   }
 
   const hud = document.createElement('div');
-  hud.id = 'atomx-floating-hud';
+  const isMobileScreen = window.innerWidth <= 480;
   hud.style.cssText = `
     position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 330px;
+    bottom: ${isMobileScreen ? '10px' : '24px'};
+    right: ${isMobileScreen ? '8px' : '24px'};
+    width: ${isMobileScreen ? 'calc(100vw - 16px)' : '330px'};
+    max-width: 360px;
     background: rgba(15, 23, 42, 0.95);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
