@@ -990,11 +990,42 @@ function initBackgroundWorkflowSync() {
     } else if (res?.atomx_active_hud) {
       updateAgentWorkflowProgressUI(res.atomx_active_hud);
     }
+    if (res?.atomx_account_lock_warning) {
+      const w = res.atomx_account_lock_warning;
+      const banner = document.getElementById('accountMismatchBanner');
+      const exp = document.getElementById('mismatchExpectedHandle');
+      const act = document.getElementById('mismatchActualHandle');
+      if (banner && exp && act) {
+        exp.textContent = `@${(w.expected || '').replace(/^@/, '')}`;
+        act.textContent = `@${(w.current || '').replace(/^@/, '')}`;
+        banner.style.display = 'block';
+      }
+    }
+  });
+
+  // Wire close button on mismatch banner inside popup
+  document.getElementById('closeMismatchBannerBtn')?.addEventListener('click', () => {
+    const banner = document.getElementById('accountMismatchBanner');
+    if (banner) banner.style.display = 'none';
+    chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
   });
 
   // Listen to background updates in real-time
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.atomx_account_lock_warning) {
+      const w = changes.atomx_account_lock_warning.newValue;
+      const banner = document.getElementById('accountMismatchBanner');
+      const exp = document.getElementById('mismatchExpectedHandle');
+      const act = document.getElementById('mismatchActualHandle');
+      if (w && banner && exp && act) {
+        exp.textContent = `@${(w.expected || '').replace(/^@/, '')}`;
+        act.textContent = `@${(w.current || '').replace(/^@/, '')}`;
+        banner.style.display = 'block';
+      } else if (!w && banner) {
+        banner.style.display = 'none';
+      }
+    }
     if (changes.atomx_workflow_paused !== undefined) {
       state.isPaused = !!changes.atomx_workflow_paused.newValue;
       updateAllPauseButtonsUI(state.isPaused);
@@ -3986,17 +4017,35 @@ function loadSorsaCuratedList(listKey) {
   if (!textarea) return;
 
   if (!listKey || listKey === 'custom') {
+    delete textarea.dataset.hiddenHandles;
+    delete state.sorsaCuratedTargets;
+    textarea.readOnly = false;
+    textarea.value = '';
+    textarea.style.color = '';
+    textarea.style.fontStyle = 'normal';
+    if (badge) badge.textContent = '0 accounts ready';
     return;
   }
 
   const lists = state.curatedLists || FALLBACK_CURATED_LISTS;
   const item = lists[listKey];
   if (item && Array.isArray(item.targets) && item.targets.length > 0) {
-    textarea.value = item.targets.join(', ');
+    textarea.dataset.hiddenHandles = JSON.stringify(item.targets);
+    state.sorsaCuratedTargets = item.targets;
+    textarea.value = `🔒 ${item.name} (${item.targets.length} Verified Ecosystem Accounts Loaded)\n\n[Protected List: Proprietary account handles are secured and hidden from view.]`;
+    textarea.readOnly = true;
+    textarea.style.color = '#94A3B8';
+    textarea.style.fontStyle = 'italic';
     const count = item.targets.length;
     if (badge) badge.textContent = `${count} accounts ready (${item.name})`;
     showExtToast(`Loaded ${count} accounts (${item.name})`, '⭐');
   } else {
+    delete textarea.dataset.hiddenHandles;
+    delete state.sorsaCuratedTargets;
+    textarea.readOnly = false;
+    textarea.value = '';
+    textarea.style.color = '';
+    textarea.style.fontStyle = 'normal';
     if (badge) badge.textContent = `0 accounts ready`;
   }
 }
@@ -4238,23 +4287,43 @@ async function startSorsaScoreBoosterWorkflow() {
     return;
   }
 
-  const rawInput = (document.getElementById('sorsaHandlesInput')?.value || '').trim();
+  const sorsaTextarea = document.getElementById('sorsaHandlesInput');
+  let cleanHandles = [];
+  const seen = new Set();
 
-  // Strict check: Block Twitter list URLs
-  if (extractTwitterListUrl(rawInput)) {
-    alert('⚠️ Increase Sorsa Score ONLY accepts .CSV file uploads or usernames (e.g. @cz_binance, @vitalikbuterin).\n\nTwitter List URLs are NOT supported here. Please use Audience Builder or Followers Increase for List URLs.');
-    return;
+  if (sorsaTextarea?.dataset?.hiddenHandles) {
+    try {
+      const hiddenList = JSON.parse(sorsaTextarea.dataset.hiddenHandles);
+      if (Array.isArray(hiddenList) && hiddenList.length > 0) {
+        for (const h of hiddenList) {
+          const clean = (h || '').trim().replace(/^@/, '');
+          const lower = clean.toLowerCase();
+          if (clean && !seen.has(lower)) {
+            seen.add(lower);
+            cleanHandles.push(clean);
+          }
+        }
+      }
+    } catch (e) {}
   }
 
-  const rawItems = rawInput.split(/[\n,]+/).map(s => s.trim().replace(/^@/, '')).filter(Boolean);
-  const seen = new Set();
-  const cleanHandles = [];
-  for (const h of rawItems) {
-    const lower = h.toLowerCase();
-    if (lower.includes('/') || lower.includes('http') || lower.includes('.com')) continue;
-    if (!seen.has(lower)) {
-      seen.add(lower);
-      cleanHandles.push(h);
+  if (cleanHandles.length === 0) {
+    const rawInput = (sorsaTextarea?.value || '').trim();
+
+    // Strict check: Block Twitter list URLs
+    if (extractTwitterListUrl(rawInput)) {
+      alert('⚠️ Increase Sorsa Score ONLY accepts .CSV file uploads or usernames (e.g. @cz_binance, @vitalikbuterin).\n\nTwitter List URLs are NOT supported here. Please use Audience Builder or Followers Increase for List URLs.');
+      return;
+    }
+
+    const rawItems = rawInput.split(/[\n,]+/).map(s => s.trim().replace(/^@/, '')).filter(Boolean);
+    for (const h of rawItems) {
+      const lower = h.toLowerCase();
+      if (lower.includes('/') || lower.includes('http') || lower.includes('.com')) continue;
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        cleanHandles.push(h);
+      }
     }
   }
 

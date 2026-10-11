@@ -214,47 +214,20 @@ function showAccountMismatchModal(expectedHandle, actualHandle) {
   const existing = document.getElementById('atomx-account-mismatch-banner');
   if (existing) existing.remove();
 
-  const banner = document.createElement('div');
-  banner.id = 'atomx-account-mismatch-banner';
-  banner.style.cssText = `
-    position: fixed;
-    top: 24px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #0f172a;
-    color: #f8fafc;
-    border: 2px solid #ef4444;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.7);
-    border-radius: 12px;
-    padding: 16px 22px;
-    z-index: 999999999;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    max-width: 460px;
-    width: 90%;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  `;
-  banner.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <div style="display:flex; align-items:center; gap:8px; font-weight:800; font-size:15px; color:#ef4444;">
-        <span>⚠️</span>
-        <span>ATOMX ENGAGE — Account Lock</span>
-      </div>
-      <button id="atomx-close-mismatch" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:16px;">✕</button>
-    </div>
-    <div style="font-size:13px; color:#e2e8f0; line-height:1.5;">
-      This extension is <strong>strictly locked</strong> to your approved X ID: <strong style="color:#60a5fa;">@${expectedHandle}</strong>.
-      <br>
-      Active Twitter tab is logged in as: <strong style="color:#ef4444;">@${actualHandle || 'No account logged in'}</strong>.
-    </div>
-    <div style="font-size:12px; color:#94a3b8; margin-top:2px;">
-      👉 Please switch or log into <strong>@${expectedHandle}</strong> on Twitter to enable automated actions.
-    </div>
-  `;
-  document.body.appendChild(banner);
-  document.getElementById('atomx-close-mismatch')?.addEventListener('click', () => banner.remove());
-  setTimeout(() => banner.remove(), 12000);
+  // Route lock warning strictly inside the Extension (do not pollute Twitter DOM)
+  chrome.storage.local.set({
+    atomx_account_lock_warning: {
+      expected: expectedHandle,
+      current: actualHandle,
+      timestamp: Date.now()
+    }
+  }).catch(() => null);
+
+  chrome.runtime.sendMessage({
+    type: 'ACCOUNT_LOCK_WARNING',
+    expected: expectedHandle,
+    current: actualHandle
+  }).catch(() => null);
 }
 
 async function verifyAccountLockOrAbort(expectedHandle) {

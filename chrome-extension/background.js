@@ -765,11 +765,13 @@ async function verifyTabAccountLock(tabId, expectedHandle, workflow) {
 
     if (current && current !== expected) {
       console.warn(`[ATOMX BG] ACCOUNT LOCK MISMATCH DETECTED! Active: @${current}, Expected: @${expected}`);
-      await sendMessageToTab(tabId, {
-        type: 'SHOW_ACCOUNT_MISMATCH_MODAL',
-        expected,
-        current
-      }, 5000).catch(() => null);
+      await chrome.storage.local.set({
+        atomx_account_lock_warning: {
+          expected,
+          current,
+          timestamp: Date.now()
+        }
+      }).catch(() => null);
 
       if (workflow) {
         workflow.active = false;

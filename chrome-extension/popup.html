@@ -64,14 +64,19 @@
       <span id="barMatchBadge" style="font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10B981;">1-TO-1 LOCKED</span>
     </div>
 
-    <!-- Real-Time Twitter Account Mismatch Alert Banner -->
-    <div id="accountMismatchBanner" style="display:none; padding:8px 14px; background:rgba(239,68,68,0.12); border-bottom:1px solid rgba(239,68,68,0.3); font-size:11px; color:#DC2626; line-height:1.4;">
-      <div style="font-weight:700; display:flex; align-items:center; gap:5px; margin-bottom:2px;">
-        <span>⚠️</span>
-        <span>Account Mismatch on X.com</span>
+    <!-- Real-Time Twitter Account Mismatch Alert Banner inside Extension -->
+    <div id="accountMismatchBanner" style="display:none; margin:8px 10px 4px 10px; padding:10px 12px; background:linear-gradient(135deg, rgba(239, 68, 68, 0.16) 0%, rgba(185, 28, 28, 0.25) 100%); border:1px solid rgba(239, 68, 68, 0.5); border-radius:8px; font-size:11px; color:#FCA5A5; line-height:1.45; box-shadow:0 4px 12px rgba(239, 68, 68, 0.15);">
+      <div style="font-weight:800; font-size:11.5px; color:#F87171; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span style="display:flex; align-items:center; gap:5px;">
+          <span>🔒</span>
+          <span>Account Lock Warning</span>
+        </span>
+        <button id="closeMismatchBannerBtn" style="background:none; border:none; color:#FCA5A5; font-size:13px; cursor:pointer; padding:0 2px; line-height:1;" title="Dismiss Warning">✕</button>
       </div>
       <div id="accountMismatchDesc">
-        Extension is locked to your verified ID <strong id="mismatchExpectedHandle">@handle</strong>. Active tab is logged in as <strong id="mismatchActualHandle">@other</strong>. Please switch accounts on Twitter to operate.
+        This extension is strictly locked to approved ID: <strong id="mismatchExpectedHandle" style="color:#60A5FA;">@handle</strong>.<br>
+        Active Twitter tab is logged in as: <strong id="mismatchActualHandle" style="color:#EF4444;">@other</strong>.<br>
+        <span style="font-size:10px; color:#E2E8F0; margin-top:3px; display:inline-block;">👉 Please switch accounts on Twitter to enable automated actions.</span>
       </div>
     </div>
 
@@ -348,7 +353,7 @@
                 </div>
               </div>
 
-              <div style="display:flex; gap:6px; margin-top:8px;">
+              <div class="agent-action-row" style="display:flex; gap:5px; margin-top:6px; width:100%; box-sizing:border-box; align-items:stretch;">
                 <button class="primary-btn mini-btn" id="runTgEngageBtn" style="flex:2; margin-top:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg> Launch Auto Engage</button>
                 <button class="secondary-btn mini-btn" id="cleanTgInputBtn" style="flex:1; margin-top:0;" title="Filter text to only show fresh canonical links"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Clean Text</button>
                 <button class="secondary-btn mini-btn" id="resetTelegramQueueBtn" style="flex:1; margin-top:0;" title="Reset Queue & Counters"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg> Reset</button>
@@ -485,7 +490,7 @@
               </div>
 
               <!-- Action Buttons -->
-              <div style="display:flex; gap:6px; margin-top:6px;">
+              <div class="agent-action-row" style="display:flex; gap:5px; margin-top:6px; width:100%; box-sizing:border-box; align-items:stretch;">
                 <button class="primary-btn mini-btn" id="runAudienceBuilderBtn" style="flex:2; margin-top:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg> START AUDIENCE BUILDER</button>
                 <button class="secondary-btn mini-btn" id="resetAudienceQueueBtn" style="flex:1; margin-top:0;" title="Reset Queue & History"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg> Reset</button>
                 <button class="secondary-btn mini-btn" id="pauseAudienceBuilderBtn" style="flex:1; margin-top:0; display:none;" title="Pause / Resume workflow"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg> Pause</button>
@@ -660,7 +665,7 @@
                 </div>
               </div>
 
-              <div style="display:flex; gap:6px; margin-top:6px;">
+              <div class="agent-action-row" style="display:flex; gap:5px; margin-top:6px; width:100%; box-sizing:border-box; align-items:stretch;">
                 <button class="primary-btn mini-btn" id="runSorsaBoosterBtn" style="flex:2; margin-top:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg> LAUNCH SORSA BOOSTER</button>
                 <button class="secondary-btn mini-btn" id="resetSorsaQueueBtn" style="flex:1; margin-top:0;" title="Reset Queue & History"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg> Reset</button>
                 <button class="secondary-btn mini-btn" id="pauseSorsaBoosterBtn" style="flex:1; margin-top:0; display:none;" title="Pause / Resume workflow"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg> Pause</button>
@@ -794,7 +799,7 @@
                 </div>
               </div>
 
-              <div style="display:flex; gap:6px; margin-top:6px;">
+              <div class="agent-action-row" style="display:flex; gap:5px; margin-top:6px; width:100%; box-sizing:border-box; align-items:stretch;">
                 <button class="primary-btn mini-btn" id="runFollowerIncreaseBtn" style="flex:2; margin-top:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg> START AUTO FOLLOWER GROWTH</button>
                 <button class="secondary-btn mini-btn" id="resetFollowerQueueBtn" style="flex:1; margin-top:0;" title="Reset Queue & Counters"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg> Reset</button>
                 <button class="secondary-btn mini-btn" id="pauseFollowerIncreaseBtn" style="flex:1; margin-top:0; display:none;" title="Pause / Resume workflow"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg> Pause</button>
@@ -905,7 +910,7 @@
               </div>
 
               <!-- Action Buttons -->
-              <div style="display:flex; gap:6px; margin-top:2px;">
+              <div class="agent-action-row" style="display:flex; gap:5px; margin-top:6px; width:100%; box-sizing:border-box; align-items:stretch;">
                 <button class="primary-btn mini-btn" id="runReplyBackBtn" style="flex:2; margin-top:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg> START AUTO REPLY BACK</button>
                 <button class="secondary-btn mini-btn" id="resetReplyBackQueueBtn" style="flex:1; margin-top:0;" title="Reset Queue & Counters"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg> Reset</button>
                 <button class="secondary-btn mini-btn" id="pauseReplyBackBtn" style="flex:1; margin-top:0; display:none;" title="Pause / Resume workflow"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg> Pause</button>

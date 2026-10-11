@@ -680,96 +680,161 @@ body.dark .icon-btn:hover {
   display: none !important;
 }
 
-/* Modernized Agent Action Buttons (Reset, Pause, Skip, Stop) */
+/* Agent Action Control Rows */
+.agent-action-row {
+  display: flex !important;
+  gap: 5px !important;
+  margin-top: 6px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  align-items: stretch !important;
+}
+
+/* Primary Action Launch Buttons (.mini-btn) */
+.primary-btn.mini-btn {
+  height: 31px !important;
+  min-height: 31px !important;
+  max-height: 31px !important;
+  padding: 0 8px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  border-radius: 8px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+}
+
+/* Clean Text Button (Telegram Engage) */
+#cleanTgInputBtn {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.22) 0%, rgba(71, 85, 105, 0.35) 100%) !important;
+  border: 1px solid rgba(148, 163, 184, 0.45) !important;
+  border-radius: 8px !important;
+  color: #E2E8F0 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.2px !important;
+  height: 31px !important;
+  min-height: 31px !important;
+  max-height: 31px !important;
+  padding: 0 6px !important;
+  box-sizing: border-box !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
+}
+
+#cleanTgInputBtn:hover {
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.35) 0%, rgba(100, 116, 139, 0.5) 100%) !important;
+  border-color: rgba(203, 213, 225, 0.6) !important;
+  color: #FFFFFF !important;
+}
+
+/* Agent Action Buttons (Reset, Pause, Skip, Stop) — Identical to Floating HUD */
 button[id^="reset"],
 button[id^="pause"],
 button[id^="skip"],
 button[id^="stop"] {
-  border-radius: 7px;
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.2px;
-  height: 29px;
-  padding: 0 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  transition: all 0.16s ease;
-  user-select: none;
-  outline: none;
-  white-space: nowrap;
-  cursor: pointer;
+  border-radius: 8px !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.2px !important;
+  height: 31px !important;
+  min-height: 31px !important;
+  max-height: 31px !important;
+  padding: 0 4px !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  user-select: none !important;
+  outline: none !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 button[id^="reset"] svg,
 button[id^="pause"] svg,
 button[id^="skip"] svg,
 button[id^="stop"] svg {
-  flex-shrink: 0;
-  width: 12px;
-  height: 12px;
-  display: inline-block;
-  vertical-align: middle;
+  flex-shrink: 0 !important;
+  width: 12px !important;
+  height: 12px !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
 }
 
-/* Reset Button — Clean Slate Glass */
+/* Reset Button — HUD Matched Frosted Slate Glass */
 button[id^="reset"] {
-  background: rgba(30, 41, 59, 0.7);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  color: #94A3B8;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.22) 0%, rgba(71, 85, 105, 0.35) 100%) !important;
+  border: 1px solid rgba(148, 163, 184, 0.45) !important;
+  color: #E2E8F0 !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
 }
 
 button[id^="reset"]:hover {
-  background: rgba(51, 65, 85, 0.9);
-  border-color: rgba(56, 189, 248, 0.5);
-  color: #38BDF8;
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.35) 0%, rgba(100, 116, 139, 0.5) 100%) !important;
+  border-color: rgba(203, 213, 225, 0.6) !important;
+  color: #FFFFFF !important;
   transform: translateY(-1px);
 }
 
-/* Pause Button — Vibrant Amber Glow */
+/* Pause Button — HUD Matched Vibrant Amber Glow */
 button[id^="pause"] {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(217, 119, 6, 0.3) 100%);
-  border: 1px solid rgba(251, 191, 36, 0.5);
-  color: #FBBF24;
-  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.15);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%) !important;
+  border: 1px solid rgba(251, 191, 36, 0.55) !important;
+  color: #FEF3C7 !important;
+  box-shadow: 0 3px 10px rgba(245, 158, 11, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
 }
 
 button[id^="pause"]:hover {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.35) 0%, rgba(217, 119, 6, 0.45) 100%);
-  border-color: rgba(251, 191, 36, 0.75);
-  color: #FDE68A;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.38) 0%, rgba(217, 119, 6, 0.5) 100%) !important;
+  border-color: rgba(251, 191, 36, 0.8) !important;
+  color: #FFFFFF !important;
   transform: translateY(-1px);
 }
 
-/* Skip Button — Sky / Cyan Glow */
+/* Skip Button — HUD Matched Electric Sky Blue Glow */
 button[id^="skip"] {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.2) 0%, rgba(2, 132, 199, 0.3) 100%);
-  border: 1px solid rgba(56, 189, 248, 0.5);
-  color: #38BDF8;
-  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.15);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.25) 0%, rgba(37, 99, 235, 0.38) 100%) !important;
+  border: 1px solid rgba(96, 165, 250, 0.55) !important;
+  color: #EFF6FF !important;
+  box-shadow: 0 3px 10px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
 }
 
 button[id^="skip"]:hover {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.35) 0%, rgba(2, 132, 199, 0.45) 100%);
-  border-color: rgba(56, 189, 248, 0.75);
-  color: #BAE6FD;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4) 0%, rgba(37, 99, 235, 0.55) 100%) !important;
+  border-color: rgba(147, 197, 253, 0.8) !important;
+  color: #FFFFFF !important;
   transform: translateY(-1px);
 }
 
-/* Stop Button — Crimson Glow */
+/* Stop Button — HUD Matched Crimson Glow */
 button[id^="stop"] {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(220, 38, 38, 0.3) 100%);
-  border: 1px solid rgba(248, 113, 113, 0.5);
-  color: #F87171;
-  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.15);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.25) 0%, rgba(220, 38, 38, 0.4) 100%) !important;
+  border: 1px solid rgba(248, 113, 113, 0.6) !important;
+  color: #FEF2F2 !important;
+  box-shadow: 0 3px 10px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
 }
 
 button[id^="stop"]:hover {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.35) 0%, rgba(220, 38, 38, 0.45) 100%);
-  border-color: rgba(248, 113, 113, 0.75);
-  color: #FECACA;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.4) 0%, rgba(220, 38, 38, 0.55) 100%) !important;
+  border-color: rgba(252, 165, 165, 0.8) !important;
+  color: #FFFFFF !important;
   transform: translateY(-1px);
 }
 
