@@ -1009,9 +1009,8 @@ async function processAgentWorkflowStep() {
   // Scans list feed within timeframe, filters posts, queues top items, and engages directly.
   // =========================================================================
   if (agentId === 'followers' && (!items || items.length === 0)) {
-    const rawFeedUrl = options.feedUrl || (options.listId
-      ? `https://x.com/search?q=${encodeURIComponent(`list:${options.listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`
-      : 'https://x.com');
+    const canonicalListUrl = options.targetListUrl || (options.listId ? `https://x.com/i/lists/${options.listId}` : null);
+    const rawFeedUrl = canonicalListUrl || options.feedUrl || 'https://x.com';
     const targetCount = Number(options.targetCount) || 8;
     const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
 
@@ -1026,7 +1025,7 @@ async function processAgentWorkflowStep() {
       const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
       if (!lockCheck.ok) return;
 
-      const discRes = await sendMessageToTab(tabId, {
+      let discRes = await sendMessageToTab(tabId, {
         type: 'DISCOVER_TOP_ACTIVE_LIST_TWEETS',
         targetCount,
         freshness: options.freshness || '1h',
@@ -1034,13 +1033,23 @@ async function processAgentWorkflowStep() {
         verifiedXHandle
       }, 300000);
 
-      const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
-      if (discRes?.aborted || chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
-        console.log('[ATOMX BG] Followers Increase cycle stopped/aborted by user.');
-        return;
-      }
+      let topTweets = Array.isArray(discRes?.topTweets) ? discRes.topTweets : [];
 
-      const topTweets = Array.isArray(discRes?.topTweets) ? discRes.topTweets : [];
+      // Fallback: If canonical list yielded 0 tweets and searchFeedUrl exists, try search URL
+      if (topTweets.length === 0 && options.searchFeedUrl && options.searchFeedUrl !== rawFeedUrl) {
+        console.log('[ATOMX BG] Followers list returned 0 tweets, trying search URL fallback...');
+        await getOrCreateReusedTab(tabId, options.searchFeedUrl);
+        await waitForTabLoad(tabId, 15000);
+        await delay(3000);
+        discRes = await sendMessageToTab(tabId, {
+          type: 'DISCOVER_TOP_ACTIVE_LIST_TWEETS',
+          targetCount,
+          freshness: options.freshness || '1h',
+          sortPriority: options.sortPriority || 'active',
+          verifiedXHandle
+        }, 300000);
+        topTweets = Array.isArray(discRes?.topTweets) ? discRes.topTweets : [];
+      }
       if (topTweets.length === 0) {
         workflow.active = false;
         workflow.successCount = 0;
@@ -1095,9 +1104,8 @@ async function processAgentWorkflowStep() {
   // then visits each commenter profile to engage on recent posts (random 1-2 or user specified).
   // =========================================================================
   if (agentId === 'audience' && (!items || items.length === 0)) {
-    const rawFeedUrl = options.feedUrl || (options.listId
-      ? `https://x.com/search?q=${encodeURIComponent(`list:${options.listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`
-      : options.targetListUrl || 'https://x.com');
+    const canonicalListUrl = options.targetListUrl || (options.listId ? `https://x.com/i/lists/${options.listId}` : null);
+    const rawFeedUrl = canonicalListUrl || options.feedUrl || 'https://x.com';
     const targetCount = Number(options.targetCount) || 10;
 
     await syncAgentHud(workflow, `Finding most engaged recent tweets from Twitter List...`, 'SCANNING', 10);
@@ -1113,13 +1121,27 @@ async function processAgentWorkflowStep() {
       if (!lockCheck.ok) return;
 
       // Step A: Discover top engaged tweets (highest reply counts) in timeframe
-      const topTweetsRes = await sendMessageToTab(tabId, {
+      let topTweetsRes = await sendMessageToTab(tabId, {
         type: 'DISCOVER_TOP_ENGAGED_LIST_TWEETS',
         freshness: options.freshness || '2h',
         targetCount
       }, 60000);
 
-      const topTweets = Array.isArray(topTweetsRes?.topTweets) ? topTweetsRes.topTweets : [];
+      let topTweets = Array.isArray(topTweetsRes?.topTweets) ? topTweetsRes.topTweets : [];
+
+      // Fallback: If canonical list yielded 0 tweets and searchFeedUrl exists, try search URL
+      if (topTweets.length === 0 && options.searchFeedUrl && options.searchFeedUrl !== rawFeedUrl) {
+        console.log('[ATOMX BG] Audience list returned 0 tweets, trying search URL fallback...');
+        await getOrCreateReusedTab(tabId, options.searchFeedUrl);
+        await waitForTabLoad(tabId, 15000);
+        await delay(3000);
+        topTweetsRes = await sendMessageToTab(tabId, {
+          type: 'DISCOVER_TOP_ENGAGED_LIST_TWEETS',
+          freshness: options.freshness || '2h',
+          targetCount
+        }, 60000);
+        topTweets = Array.isArray(topTweetsRes?.topTweets) ? topTweetsRes.topTweets : [];
+      }
 
       let collectedCommenters = [];
       const seenHandles = new Set();
@@ -1168,7 +1190,9 @@ async function processAgentWorkflowStep() {
           const repliers = Array.isArray(threadRes?.profiles) ? threadRes.profiles : (Array.isArray(threadRes) ? threadRes : []);
           for (const rep of repliers) {
             const clean = (rep.cleanHandle || rep.handle || '').toLowerCase().replace(/^@/, '').trim();
-            if (!clean || seenHandles.has(clean) || persistedHistory[clean]) continue;
+            const lastTime = persistedHistory[clean];
+            // Only skip if engaged within 24h (not permanent!)
+            if (!clean || seenHandles.has(clean) || (lastTime && (Date.now() - lastTime < 24 * 3600 * 1000))) continue;
             seenHandles.add(clean);
             collectedCommenters.push({
               cleanHandle: clean,
@@ -1179,9 +1203,25 @@ async function processAgentWorkflowStep() {
         }
       }
 
+      // Step C: If top tweet thread comments were 0, fall back to top tweet authors so the agent ALWAYS has targets
+      if (collectedCommenters.length === 0 && topTweets.length > 0) {
+        console.log('[ATOMX BG] No thread comments found; targeting top post creators from the list.');
+        for (const t of topTweets) {
+          const author = (t.author || '').toLowerCase().replace(/^@/, '').trim();
+          const lastTime = persistedHistory[author];
+          if (!author || seenHandles.has(author) || (lastTime && (Date.now() - lastTime < 24 * 3600 * 1000))) continue;
+          seenHandles.add(author);
+          collectedCommenters.push({
+            cleanHandle: author,
+            handle: `@${author}`
+          });
+          if (collectedCommenters.length >= targetCount) break;
+        }
+      }
+
       if (collectedCommenters.length === 0) {
         workflow.active = false;
-        await syncAgentHud(workflow, `No fresh un-engaged commenters found on top posts in chosen timeframe.`, 'DONE', 100);
+        await syncAgentHud(workflow, `No posts or active profiles found in selected timeframe (${options.freshness || '2h'}).`, 'DONE', 100);
         await finishAgentWorkflow(workflow);
         return;
       }
@@ -1296,7 +1336,7 @@ async function processAgentWorkflowStep() {
         backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
         verifiedXHandle: options.verifiedXHandle
       };
-      timeoutMs = 45000;
+      timeoutMs = 90000;
     }
 
     const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, targetUrl);

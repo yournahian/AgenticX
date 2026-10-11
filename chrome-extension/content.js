@@ -2393,7 +2393,9 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
 
       const data = extractTweetData(art);
       const cleanHandle = (data.authorHandle || '').replace('@', '').toLowerCase();
-      if (!cleanHandle || cleanHandle === loggedInHandle || seenHandles.has(cleanHandle) || engagedHistory[cleanHandle]) {
+      const lastTime = engagedHistory[cleanHandle];
+      // Only skip if cleanHandle is missing, own handle, duplicate, or engaged within last 24h
+      if (!cleanHandle || cleanHandle === loggedInHandle || seenHandles.has(cleanHandle) || (lastTime && (Date.now() - lastTime < 24 * 3600 * 1000))) {
         continue;
       }
 
@@ -3634,10 +3636,10 @@ async function discoverTopEngagedListTweets(params = {}) {
       consecutiveEmptyScrolls = 0;
     }
 
-    // If bottom tweets are consistently beyond user's timeframe, stop scanning
-    if (foundOlderInPass > 3) {
+    // If bottom tweets are consistently beyond user's timeframe (after at least 6 scrolls), stop scanning
+    if (foundOlderInPass > 5 && s >= 6) {
       consecutiveOlderCount++;
-      if (consecutiveOlderCount >= 3) {
+      if (consecutiveOlderCount >= 4) {
         console.log(`[ATOMX AUDIENCE] Reached timeframe boundary (${freshness}). Completed deep scan.`);
         break;
       }

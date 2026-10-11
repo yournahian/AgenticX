@@ -4087,10 +4087,8 @@ async function startAudienceBuilderWorkflow() {
   });
 
   const listId = extractTwitterListId(targetUrl);
-  let feedUrl = targetUrl;
-  if (listId) {
-    feedUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`;
-  }
+  const canonicalListUrl = listId ? `https://x.com/i/lists/${listId}` : targetUrl;
+  const searchFeedUrl = listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : targetUrl;
 
   const backendUrl = await getBackendUrl();
   chrome.runtime.sendMessage({
@@ -4099,8 +4097,9 @@ async function startAudienceBuilderWorkflow() {
     title: 'Audience Builder',
     items: [],
     options: {
-      feedUrl,
-      targetListUrl: targetUrl,
+      feedUrl: canonicalListUrl,
+      targetListUrl: canonicalListUrl,
+      searchFeedUrl,
       listId,
       targetCount,
       freshness,
@@ -4330,10 +4329,8 @@ async function startFollowersIncreaseWorkflow() {
   });
 
   const listId = extractTwitterListId(targetUrl);
-  let feedUrl = targetUrl;
-  if (listId) {
-    feedUrl = `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`;
-  }
+  const canonicalListUrl = listId ? `https://x.com/i/lists/${listId}` : targetUrl;
+  const searchFeedUrl = listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : targetUrl;
 
   const backendUrl = await getBackendUrl();
   chrome.runtime.sendMessage({
@@ -4342,8 +4339,9 @@ async function startFollowersIncreaseWorkflow() {
     title: 'Followers Increase',
     items: [],
     options: {
-      feedUrl,
-      targetListUrl: targetUrl,
+      feedUrl: canonicalListUrl,
+      targetListUrl: canonicalListUrl,
+      searchFeedUrl,
       listId,
       targetCount,
       freshness,
