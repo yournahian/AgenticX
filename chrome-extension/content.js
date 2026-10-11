@@ -106,12 +106,13 @@ function extractTweetData(article) {
 }
 
 let isWorkflowAborted = false;
+let isWorkflowItemSkipped = false;
 
 // Human-like typing delay simulator with instant pause & abort support
 async function sleep(ms) {
   const start = Date.now();
   while (Date.now() - start < ms) {
-    if (isWorkflowAborted) break;
+    if (isWorkflowAborted || isWorkflowItemSkipped) break;
     // If paused via HUD or extension, freeze here until resumed
     while (isHudWorkflowPaused && !isWorkflowAborted) {
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -1146,6 +1147,7 @@ function ensureFloatingHud() {
   // Skip current item listener — Instant response
   hud.querySelector('#hud-skip-action-btn')?.addEventListener('click', (e) => {
     e.stopPropagation();
+    isWorkflowItemSkipped = true;
     chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
     const statusEl = hud.querySelector('#hud-status-text');
@@ -1359,35 +1361,41 @@ function updateFloatingHud(data = {}) {
   // Next action display
   const nextActionEl = hud.querySelector('#hud-next-action-text');
   if (nextActionEl) {
-    if (data.nextAction) {
-      nextActionEl.textContent = data.nextAction;
-    } else if (data.countdownText) {
-      nextActionEl.textContent = data.countdownText;
-    } else if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
-      nextActionEl.textContent = 'Workflow Paused';
-    } else if (data.isStopped || data.stateBadge === 'STOPPED') {
+    if (data.isStopped || data.stateBadge === 'STOPPED') {
       nextActionEl.textContent = 'Stopped by user';
     } else if (data.stateBadge === 'DONE') {
       nextActionEl.textContent = 'Workflow Completed';
+    } else if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
+      nextActionEl.textContent = 'Workflow Paused';
+    } else if (data.nextAction && data.nextAction !== 'Completed') {
+      nextActionEl.textContent = data.nextAction;
+    } else if (data.countdownText && (data.countdownText.includes('Next') || data.countdownText.includes('Delay'))) {
+      nextActionEl.textContent = data.countdownText;
+    } else if (data.indicator) {
+      nextActionEl.textContent = `Target ${data.indicator}`;
     }
   }
 
   // Timer badge display
   const timerBadgeEl = hud.querySelector('#hud-timer-badge');
   if (timerBadgeEl) {
-    if (data.timerBadge) {
-      timerBadgeEl.textContent = data.timerBadge;
-    } else if (data.countdownText) {
-      const match = data.countdownText.match(/(\d+:\d+|\d+s)/);
-      timerBadgeEl.textContent = match ? `⏱️ ${match[1]}` : '⏱️ 0:00';
-    } else if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
+    if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
       timerBadgeEl.textContent = '⏸️ Paused';
     } else if (data.isStopped || data.stateBadge === 'STOPPED') {
       timerBadgeEl.textContent = '⏹️ Stopped';
     } else if (data.stateBadge === 'DONE') {
       timerBadgeEl.textContent = '✓ Done';
+    } else if (data.timerBadge) {
+      timerBadgeEl.textContent = data.timerBadge;
+    } else if (data.countdownText) {
+      const match = data.countdownText.match(/(\d+:\d+|\d+s|\d+)/);
+      timerBadgeEl.textContent = match ? (match[0].includes('s') || match[0].includes(':') ? `⏱️ ${match[0]}` : `⏱️ ${match[0]}s`) : '⚡ Active';
     } else {
-      timerBadgeEl.textContent = '⚡ Active';
+      // Do NOT overwrite timerBadge if it is currently counting down!
+      const currentText = (timerBadgeEl.textContent || '').trim();
+      if (!currentText.startsWith('⏱️') && !currentText.includes(':')) {
+        timerBadgeEl.textContent = '⚡ Active';
+      }
     }
   }
 
@@ -1606,11 +1614,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'SKIP_WORKFLOW_ITEM') {
-    isWorkflowAborted = true; // abort active sleep / action in this page
-    setTimeout(() => { isWorkflowAborted = false; }, 800);
+    isWorkflowItemSkipped = true;
     const statusEl = floatingHudEl?.querySelector('#hud-status-text');
     if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
-    sendResponse({ success: true });
+    const timerBadge = floatingHudEl?.querySelector('#hud-timer-badge');
+    if (timerBadge) timerBadge.textContent = '⏭️ Skip';
+    sendResponse({ success: true, skipped: true });
     return true;
   }
 
@@ -3943,8 +3952,30 @@ async function executeFollowersListCycle(params = {}) {
 
   // Helper: Execute engagement actions on a single tweet element
   async function performActionsOnTweet(art, tweetData, tweetId, authorHandle) {
+    if (isWorkflowItemSkipped) {
+      isWorkflowItemSkipped = false;
+      await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+      skippedCount++;
+      updateFloatingHud({
+        skipped: skippedCount,
+        statusText: `Skipped @${authorHandle || 'user'}'s post. Moving to next...`
+      });
+      return;
+    }
+
     art.scrollIntoView({ behavior: 'smooth', block: 'center' });
     await sleep(700);
+
+    if (isWorkflowItemSkipped) {
+      isWorkflowItemSkipped = false;
+      await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+      skippedCount++;
+      updateFloatingHud({
+        skipped: skippedCount,
+        statusText: `Skipped @${authorHandle || 'user'}'s post. Moving to next...`
+      });
+      return;
+    }
 
     const statusMsg = `Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}...`;
     updateFloatingHud({
@@ -3955,23 +3986,42 @@ async function executeFollowersListCycle(params = {}) {
       collected: targetCount,
       skipped: skippedCount,
       progressPercent: Math.round((engagedCount / targetCount) * 100),
-      statusText: statusMsg
+      statusText: statusMsg,
+      nextAction: `Post [${Math.min(engagedCount + 1, targetCount)}/${targetCount}]`
     });
 
     // 1. ❤️ Like
     if (likePosts && !isWorkflowAborted) {
+      if (isWorkflowItemSkipped) {
+        isWorkflowItemSkipped = false;
+        await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+        skippedCount++;
+        return;
+      }
       await simulateHumanLikeClick(art);
       await sleep(500);
     }
 
     // 2. 🔁 Repost
     if (repostPosts && !isWorkflowAborted) {
+      if (isWorkflowItemSkipped) {
+        isWorkflowItemSkipped = false;
+        await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+        skippedCount++;
+        return;
+      }
       await simulateHumanRepostClick(art);
       await sleep(500);
     }
 
     // 3. 💬 Comment
     if (replyPosts && !isWorkflowAborted) {
+      if (isWorkflowItemSkipped) {
+        isWorkflowItemSkipped = false;
+        await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+        skippedCount++;
+        return;
+      }
       const tweetText = (tweetData.text || '').trim();
       let replyContent = '';
       try {
@@ -3994,6 +4044,12 @@ async function executeFollowersListCycle(params = {}) {
 
       replyContent = sanitizeClientComment(replyContent, 10);
       if (replyContent && !isWorkflowAborted) {
+        if (isWorkflowItemSkipped) {
+          isWorkflowItemSkipped = false;
+          await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+          skippedCount++;
+          return;
+        }
         await postCommentOnTargetArticle(art, replyContent);
         await sleep(900);
       }
@@ -4001,6 +4057,11 @@ async function executeFollowersListCycle(params = {}) {
 
     // 4. ➕ Follow author
     if (autoFollow && authorHandle && !isWorkflowAborted) {
+      if (isWorkflowItemSkipped) {
+        isWorkflowItemSkipped = false;
+        await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+        return;
+      }
       const followBtn = art.querySelector('button[data-testid*="-follow"], div[data-testid*="-follow"]') ||
         Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => (b.innerText || '').trim() === 'Follow');
       if (followBtn) {
@@ -4028,7 +4089,8 @@ async function executeFollowersListCycle(params = {}) {
       collected: targetCount,
       skipped: skippedCount,
       progressPercent: Math.round((engagedCount / targetCount) * 100),
-      statusText: `✓ Engaged [${engagedCount}/${targetCount}] on @${authorHandle || 'user'}'s post`
+      statusText: `✓ Engaged [${engagedCount}/${targetCount}] on @${authorHandle || 'user'}'s post`,
+      nextAction: engagedCount >= targetCount ? 'Workflow Completed' : `Post [${engagedCount + 1}/${targetCount}]`
     });
 
     if (engagedCount >= targetCount || isWorkflowAborted) return;
@@ -4036,12 +4098,19 @@ async function executeFollowersListCycle(params = {}) {
     // Pacing countdown between posts
     const waitSec = Math.max(8, postWaitSec + Math.floor(Math.random() * 6 - 3));
     for (let sec = waitSec; sec > 0 && !isWorkflowAborted; sec--) {
-      const check = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+      const check = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud', 'atomx_skip_current']).catch(() => ({}));
       if (check?.atomx_agent_workflow?.active === false || check?.atomx_agent_workflow?.isStopped || check?.atomx_active_hud?.isStopped || check?.atomx_active_hud?.stateBadge === 'STOPPED') {
         isWorkflowAborted = true;
         break;
       }
+      if (isWorkflowItemSkipped || check?.atomx_skip_current) {
+        isWorkflowItemSkipped = false;
+        await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+        console.log('[ATOMX FOLLOWERS] Skip signal received during pacing delay. Advancing to next post.');
+        break;
+      }
       updateFloatingHud({
+        nextAction: `Post [${Math.min(engagedCount + 1, targetCount)}/${targetCount}]`,
         countdownText: `⏱️ Next post in ${sec}s...`,
         timerBadge: `⏱️ ${sec}s`
       });

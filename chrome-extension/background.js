@@ -740,7 +740,7 @@ async function syncTgHud(raid, statusText, stateBadge = 'ENGAGING', progressPerc
     progressPercent,
     statusText,
     countdownText,
-    nextAction: nextAction || (currentIndex < total ? `Tweet ${currentIndex + 1}/${total}` : 'Completed'),
+    nextAction: nextAction || (stateBadge === 'DONE' ? 'Completed' : (stateBadge === 'STOPPED' ? 'Stopped' : (total > 0 && currentIndex < total ? `Tweet ${currentIndex + 1}/${total}` : 'Active'))),
     timerBadge: timerBadge || (countdownText ? countdownText.replace('Next tweet in ', '⏱️ ') : '⚡ Active'),
     isStopped: stateBadge === 'STOPPED' || stateBadge === 'DONE',
     active: stateBadge !== 'STOPPED' && stateBadge !== 'DONE'
@@ -903,7 +903,7 @@ async function syncAgentHud(workflow, statusText, stateBadge = 'RUNNING', progre
     progressPercent,
     statusText,
     countdownText,
-    nextAction: nextAction || (currentIndex < total ? `Target ${currentIndex + 1}/${total}` : 'Completed'),
+    nextAction: nextAction || (stateBadge === 'DONE' ? 'Completed' : (stateBadge === 'STOPPED' ? 'Stopped' : (total > 0 && currentIndex < total ? `Target ${currentIndex + 1}/${total}` : 'Active'))),
     timerBadge: timerBadge || (countdownText ? countdownText.replace(/.*?(\d+:\d+|\d+s)/, '⏱️ $1') : '⚡ Active'),
     isStopped: stateBadge === 'STOPPED' || stateBadge === 'DONE',
     active: stateBadge !== 'STOPPED' && stateBadge !== 'DONE'
@@ -1007,100 +1007,162 @@ async function processAgentWorkflowStep() {
   // =========================================================================
   // AGENT 4: FOLLOWERS INCREASE (Autonomous direct timeline engagement on List's recent posts)
   // Opens list timeline / search query feed and directly engages on cards from top down.
-  // Never scans or opens individual post pages — stays 100% on list timeline!
+  // =========================================================================
+  // AGENT 4: FOLLOWERS INCREASE
+  // MODE A: "Newest Tweet First" -> Direct top-down engagement on list timeline (no scan)
+  // MODE B: "Most Active" -> Scans list within timeframe, ranks by replies/engagement, queues top posts
   // =========================================================================
   if (agentId === 'followers' && (!items || items.length === 0)) {
     const listId = options.listId;
     const isNewestFirst = (options.sortPriority === 'recent');
-    const searchUrl = (options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : null));
-    const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : null);
-    
-    // For 'recent', search query feed or canonical list feed is used
-    const primaryFeedUrl = (isNewestFirst && searchUrl) ? searchUrl : (canonicalListUrl || searchUrl || options.feedUrl || 'https://x.com');
     const targetCount = Number(options.targetCount) || 8;
     const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
 
-    const initialStatus = isNewestFirst
-      ? `Opening Twitter Live search feed for newest posts...`
-      : `Opening Twitter List timeline...`;
-    await syncAgentHud(workflow, initialStatus, 'ENGAGING', 10);
-    try {
-      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, primaryFeedUrl);
-      agentWorkflowWorkingTabId = tabId;
-      await waitForTabLoad(tabId, 15000);
-      await delay(3000);
+    // ─────────────────────────────────────────────────────────────────────
+    // BRANCH A: "NEWEST TWEET FIRST" (Sequential Top-Down Engagement on Timeline)
+    // ─────────────────────────────────────────────────────────────────────
+    if (isNewestFirst) {
+      const searchUrl = (options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : null));
+      const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : null);
+      const primaryFeedUrl = searchUrl || canonicalListUrl || options.feedUrl || 'https://x.com';
 
-      // Instant Account Lock Check before engaging
-      const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
-      if (!lockCheck.ok) return;
+      await syncAgentHud(workflow, `Opening Twitter feed for newest posts...`, 'ENGAGING', 10);
+      try {
+        const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, primaryFeedUrl);
+        agentWorkflowWorkingTabId = tabId;
+        await waitForTabLoad(tabId, 15000);
+        await delay(3000);
 
-      const stopCheck = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
-      if (stopCheck?.atomx_agent_workflow?.isStopped || !stopCheck?.atomx_agent_workflow?.active) {
-        console.log('[ATOMX BG] Followers Increase was stopped before timeline cycle started.');
+        const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+        if (!lockCheck.ok) return;
+
+        const stopCheck = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+        if (stopCheck?.atomx_agent_workflow?.isStopped || !stopCheck?.atomx_agent_workflow?.active) return;
+
+        await syncAgentHud(workflow, `Engaging on list timeline directly from top downwards...`, 'ENGAGING', 15);
+
+        const cycleRes = await sendMessageToTab(tabId, {
+          type: 'EXECUTE_FOLLOWERS_LIST_CYCLE',
+          targetCount,
+          freshness: options.freshness || '1h',
+          sortPriority: 'recent',
+          likePosts: options.likePosts !== false,
+          replyPosts: options.replyPosts !== false,
+          repostPosts: options.repostPosts === true,
+          autoFollow: options.autoFollow !== false,
+          style: options.style || 'Natural & Concise',
+          stylePrompt: options.stylePrompt || null,
+          backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
+          verifiedXHandle
+        }, 600000);
+
+        const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+        if (chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) return;
+
+        const engaged = cycleRes?.engagedCount || 0;
+        const skipped = cycleRes?.skippedCount || 0;
+
+        if (engaged > 0) {
+          const credData = await chrome.storage.local.get(['credits']).catch(() => ({}));
+          const newCredits = Math.max(0, (credData.credits || 0) - engaged);
+          await chrome.storage.local.set({ credits: newCredits }).catch(() => null);
+        }
+
+        const finishedWf = {
+          ...workflow,
+          active: false,
+          isStopped: true,
+          currentIndex: engaged,
+          total: targetCount,
+          successCount: engaged,
+          ignoredCount: skipped,
+          stateBadge: 'DONE',
+          statusText: `✓ Followers Increase complete! ${engaged} posts engaged directly on timeline (${skipped} skipped).`
+        };
+        await chrome.storage.local.set({ atomx_agent_workflow: finishedWf });
+        await syncAgentHud(finishedWf, finishedWf.statusText, 'DONE', 100);
+        await finishAgentWorkflow(finishedWf);
+        return;
+      } catch (fErr) {
+        console.warn('[ATOMX BG] Error in Followers Increase Newest cycle:', fErr);
+        if (agentWorkflowWorkingTabId) {
+          safeRemoveTab(agentWorkflowWorkingTabId);
+          agentWorkflowWorkingTabId = null;
+        }
+        await finishAgentWorkflow(workflow);
         return;
       }
+    }
 
-      await syncAgentHud(workflow, `Engaging on list timeline directly from top downwards...`, 'ENGAGING', 15);
+    // ─────────────────────────────────────────────────────────────────────
+    // BRANCH B: "MOST ACTIVE" (Scan within timeframe, rank by replies, queue top posts)
+    // ─────────────────────────────────────────────────────────────────────
+    else {
+      const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : (options.feedUrl || 'https://x.com'));
 
-      // Execute directly on the timeline cards without navigating to individual tweet URLs!
-      const cycleRes = await sendMessageToTab(tabId, {
-        type: 'EXECUTE_FOLLOWERS_LIST_CYCLE',
-        targetCount,
-        freshness: options.freshness || '1h',
-        sortPriority: options.sortPriority || 'recent',
-        likePosts: options.likePosts !== false,
-        replyPosts: options.replyPosts !== false,
-        repostPosts: options.repostPosts === true,
-        autoFollow: options.autoFollow !== false,
-        style: options.style || 'Natural & Concise',
-        stylePrompt: options.stylePrompt || null,
-        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
-        verifiedXHandle
-      }, 600000);
+      await syncAgentHud(workflow, `Scanning list timeline for top active posts (${options.freshness || '1h'})...`, 'SCANNING', 10);
+      try {
+        const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, canonicalListUrl);
+        agentWorkflowWorkingTabId = tabId;
+        await waitForTabLoad(tabId, 15000);
+        await delay(3000);
 
-      const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
-      if (chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
-        console.log('[ATOMX BG] Followers Increase cycle stopped by user.');
+        const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+        if (!lockCheck.ok) return;
+
+        const discRes = await sendMessageToTab(tabId, {
+          type: 'DISCOVER_TOP_ACTIVE_LIST_TWEETS',
+          targetCount,
+          freshness: options.freshness || '1h',
+          sortPriority: 'active',
+          verifiedXHandle
+        }, 300000);
+
+        const topTweets = Array.isArray(discRes?.topTweets) ? discRes.topTweets : [];
+
+        if (topTweets.length === 0) {
+          workflow.active = false;
+          workflow.successCount = 0;
+          workflow.total = targetCount;
+          await syncAgentHud(workflow, `No unengaged posts found in selected timeframe (${options.freshness || '1h'}).`, 'DONE', 100);
+          await finishAgentWorkflow(workflow);
+          return;
+        }
+
+        // Populate workflow queue with top active posts sorted by replies
+        const workflowItems = topTweets.slice(0, targetCount).map(t => ({
+          tweetUrl: t.tweetUrl,
+          tweetId: t.tweetId,
+          targetHandle: t.authorHandle,
+          authorHandle: t.authorHandle,
+          authorName: t.authorName,
+          text: t.text,
+          repliesCount: t.repliesCount
+        }));
+
+        const updatedWorkflow = {
+          ...workflow,
+          items: workflowItems,
+          total: workflowItems.length,
+          targetCount,
+          currentIndex: 0,
+          successCount: 0,
+          ignoredCount: discRes?.skippedCount || 0,
+          statusText: `Selected top ${workflowItems.length} most active posts. Engaging individually...`
+        };
+        await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
+        await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 20);
+        setTimeout(() => processAgentWorkflowStep(), 800);
+        return;
+      } catch (aErr) {
+        console.warn('[ATOMX BG] Error in Followers Most Active scan:', aErr);
+        if (agentWorkflowWorkingTabId) {
+          safeRemoveTab(agentWorkflowWorkingTabId);
+          agentWorkflowWorkingTabId = null;
+        }
+        await finishAgentWorkflow(workflow);
         return;
       }
-
-      const engaged = cycleRes?.engagedCount || 0;
-      const skipped = cycleRes?.skippedCount || 0;
-
-      // Deduct credits for engaged posts
-      if (engaged > 0) {
-        const credData = await chrome.storage.local.get(['credits']).catch(() => ({}));
-        const newCredits = Math.max(0, (credData.credits || 0) - engaged);
-        await chrome.storage.local.set({ credits: newCredits }).catch(() => null);
-      }
-
-      const finishedWf = {
-        ...workflow,
-        active: false,
-        isStopped: true,
-        currentIndex: engaged,
-        total: targetCount,
-        successCount: engaged,
-        ignoredCount: skipped,
-        stateBadge: 'DONE',
-        statusText: `✓ Followers Increase complete! ${engaged} posts engaged directly on timeline (${skipped} skipped).`
-      };
-      await chrome.storage.local.set({ atomx_agent_workflow: finishedWf });
-      await syncAgentHud(finishedWf, finishedWf.statusText, 'DONE', 100);
-      await finishAgentWorkflow(finishedWf);
-      return;
-    } catch (fErr) {
-      console.warn('[ATOMX BG] Error in Followers Increase cycle:', fErr);
-      const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
-      if (chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
-        return;
-      }
-      if (agentWorkflowWorkingTabId) {
-        safeRemoveTab(agentWorkflowWorkingTabId);
-        agentWorkflowWorkingTabId = null;
-      }
-      await finishAgentWorkflow(workflow);
-      return;
     }
   }
 

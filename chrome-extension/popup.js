@@ -935,12 +935,13 @@ async function handleToggleWorkflowPause() {
 
   chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
 
-  const tabs = await chrome.tabs.query({}).catch(() => []);
-  for (const tab of tabs) {
-    if (tab.id) {
-      chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
+  chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+    if (tabs && tabs.length > 0) {
+      tabs.forEach(t => {
+        if (t.id) chrome.tabs.sendMessage(t.id, { type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
+      });
     }
-  }
+  });
 
   showExtToast(newPaused ? 'Workflow Paused' : 'Workflow Resumed', newPaused ? '⏸️' : '▶️');
 }
@@ -948,12 +949,14 @@ async function handleToggleWorkflowPause() {
 async function handleSkipWorkflowItem() {
   await chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
   chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
-  const tabs = await chrome.tabs.query({}).catch(() => []);
-  for (const tab of tabs) {
-    if (tab.id) {
-      chrome.tabs.sendMessage(tab.id, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+
+  chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+    if (tabs && tabs.length > 0) {
+      tabs.forEach(t => {
+        if (t.id) chrome.tabs.sendMessage(t.id, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+      });
     }
-  }
+  });
   showExtToast('Skipping current item...', '⏭️');
 }
 
