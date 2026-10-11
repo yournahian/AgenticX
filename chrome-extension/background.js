@@ -1114,13 +1114,16 @@ async function processAgentWorkflowStep() {
   // then visits each commenter profile to engage on recent posts (random 1-2 or user specified).
   // =========================================================================
   if (agentId === 'audience' && (!items || items.length === 0)) {
-    const canonicalListUrl = options.targetListUrl || (options.listId ? `https://x.com/i/lists/${options.listId}` : null);
-    const rawFeedUrl = canonicalListUrl || options.feedUrl || 'https://x.com';
+    const listId = options.listId;
+    const searchUrl = options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : null);
+    const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : null);
+    const primaryFeedUrl = searchUrl || canonicalListUrl || options.feedUrl || 'https://x.com';
+    const fallbackFeedUrl = (primaryFeedUrl === searchUrl) ? canonicalListUrl : searchUrl;
     const targetCount = Number(options.targetCount) || 10;
 
     await syncAgentHud(workflow, `Finding most engaged recent tweets from Twitter List...`, 'SCANNING', 10);
     try {
-      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, rawFeedUrl);
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, primaryFeedUrl);
       agentWorkflowWorkingTabId = tabId;
       await waitForTabLoad(tabId, 15000);
       await delay(3000);
