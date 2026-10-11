@@ -674,9 +674,6 @@ body.dark .icon-btn:hover {
   line-height: 1.2 !important;
 }
 
-/* Special High-Tech Control Buttons: Reset, Pause, Skip, Stop */
-/* Reset Buttons */
-button[id^="reset"] {
 /* Modernized Agent Action Buttons (Reset, Pause, Skip, Stop) */
 button[id^="reset"],
 button[id^="pause"],
