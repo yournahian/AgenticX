@@ -309,6 +309,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // ── Network Relay Proxy (bypasses mobile popup sandbox & fetch hangs) ──
+  if (request.type === 'API_FETCH_RELAY' || request.type === 'AUTH_LOGIN_RELAY') {
+    const { endpoint, method = 'POST', body, headers = {}, timeout = 15000 } = request;
+    const targetBase = (request.backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
+    const url = (endpoint && endpoint.startsWith('http')) ? endpoint : `${targetBase}${endpoint ? (endpoint.startsWith('/') ? '' : '/') + endpoint : ''}`;
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), timeout);
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
+          signal: controller.signal
+        });
+        clearTimeout(tid);
+        const data = await res.json().catch(() => ({}));
+        sendResponse({ ok: res.ok, status: res.status, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: err?.message || 'Network request failed' });
+      }
+    })();
+    return true;
+  }
+
   if (request.type === 'GET_CREDITS') {
     chrome.storage.local.get(['credits'], (result) => sendResponse({ credits: result.credits || 0 }));
     return true;

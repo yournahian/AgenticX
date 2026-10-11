@@ -5,6 +5,80 @@
 
 const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
+async function getBackendUrl() {
+  let url = DEFAULT_BACKEND_URL;
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const res = await Promise.race([
+        chrome.storage.local.get(['backendUrl']),
+        new Promise(r => setTimeout(() => r({}), 600))
+      ]);
+      if (res?.backendUrl && typeof res.backendUrl === 'string' && !res.backendUrl.includes('localhost') && !res.backendUrl.includes('127.0.0.1') && res.backendUrl.startsWith('http')) {
+        url = res.backendUrl;
+      }
+    }
+  } catch(e) {}
+  return (url || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
+}
+
+/**
+ * Robust network fetch with timeout and automatic background service worker relay.
+ * Prevents mobile (Kiwi Browser / Android) popup network sandbox hangs and CORS drops.
+ */
+async function fetchApiWithFallback(endpoint, options = {}, timeoutMs = 12000) {
+  const backendUrl = await getBackendUrl();
+  const fullUrl = endpoint.startsWith('http') ? endpoint : `${backendUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+
+  // 1. Direct fetch with AbortController timeout
+  try {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(fullUrl, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(tid);
+    return res;
+  } catch (directErr) {
+    console.warn(`[ATOMX POPUP] Direct fetch to ${endpoint} failed or timed out (${directErr?.message}). Relaying through background service worker...`);
+  }
+
+  // 2. Automatic Fallback: Relay through background service worker
+  try {
+    const bgRes = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Background relay timed out after 15s')), 16000);
+      chrome.runtime.sendMessage({
+        type: 'API_FETCH_RELAY',
+        endpoint,
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        body: options.body,
+        backendUrl,
+        timeout: 15000
+      }, response => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError) {
+          return reject(new Error(chrome.runtime.lastError.message));
+        }
+        resolve(response);
+      });
+    });
+
+    if (bgRes && typeof bgRes === 'object') {
+      return {
+        ok: Boolean(bgRes.ok),
+        status: bgRes.status || (bgRes.ok ? 200 : 500),
+        json: async () => bgRes.data || {},
+        text: async () => typeof bgRes.data === 'string' ? bgRes.data : JSON.stringify(bgRes.data || {})
+      };
+    }
+    throw new Error('Empty response from background relay');
+  } catch (relayErr) {
+    console.error('[ATOMX POPUP] Background relay also failed:', relayErr);
+    throw new Error('Network connection failed. Please verify your connection to https://agenticx-two.vercel.app.');
+  }
+}
+
 function safeRemoveTab(tabId) {
   // Safety rule: never close active browser tabs or windows automatically
   return;
@@ -5825,8 +5899,7 @@ async function handleExtSubmitRequest() {
 
 
   try {
-    const backendUrl = await getBackendUrl();
-    const res = await fetch(`${backendUrl}/api/auth/request-access`, {
+    const res = await fetchApiWithFallback('/api/auth/request-access', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
@@ -5838,9 +5911,9 @@ async function handleExtSubmitRequest() {
         referredBy, 
         useCase: `Chrome Extension Access Request${referredBy ? ` | REF:${referredBy}` : ''}` 
       })
-    });
+    }, 12000);
 
-    const data = await safeParseApiResponse(res);
+    const data = await res.json().catch(() => ({}));
     if (!res.ok && res.status !== 201) {
       if (data.alreadyApproved || (data.error && data.error.includes('already registered'))) {
         alert(`✓ Account Already Approved:\n\n${handle} is already approved!\nPlease sign in directly with your password.`);
@@ -5977,13 +6050,12 @@ async function handleExtDoLookup() {
   if (alertEl) alertEl.style.display = 'none';
 
   try {
-    const backendUrl = await getBackendUrl();
     const query = new URLSearchParams();
     if (handle) query.append('handle', handle);
     if (email) query.append('email', email);
 
-    const res = await fetch(`${backendUrl}/api/auth/check-status?${query.toString()}`);
-    const data = await res.json();
+    const res = await fetchApiWithFallback(`/api/auth/check-status?${query.toString()}`, { method: 'GET' }, 10000);
+    const data = await res.json().catch(() => ({}));
 
     if (data.status === 'APPROVED' && data.needsPasswordSetup) {
       const approvedHandle = data.handle || handle;
@@ -6198,8 +6270,7 @@ async function handleExtSetPassword() {
   }
 
   try {
-    const backendUrl = await getBackendUrl();
-    const res = await fetch(`${backendUrl}/api/auth/set-password`, {
+    const res = await fetchApiWithFallback('/api/auth/set-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -6208,9 +6279,9 @@ async function handleExtSetPassword() {
         handle: targetHandle,
         password: p1
       })
-    });
+    }, 12000);
 
-    const data = await safeParseApiResponse(res);
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (data.alreadyHasPassword) {
         alert(data.error);
@@ -6499,7 +6570,6 @@ async function handleExtLogin() {
     return;
   }
 
-  const backendUrl = await getBackendUrl();
   const submitBtn = document.getElementById('extLoginSubmitBtn');
   if (submitBtn) {
     submitBtn.disabled = true;
@@ -6507,24 +6577,13 @@ async function handleExtLogin() {
   }
 
   try {
-    const res = await fetch(`${backendUrl}/api/auth/login`, {
+    const res = await fetchApiWithFallback('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier, password })
-    });
+    }, 12000);
 
-    let data;
-    try {
-      if (typeof safeParseApiResponse === 'function') {
-        data = await safeParseApiResponse(res);
-      } else if (typeof window !== 'undefined' && typeof window.safeParseApiResponse === 'function') {
-        data = await window.safeParseApiResponse(res);
-      } else {
-        data = await res.json().catch(() => ({}));
-      }
-    } catch (parseErr) {
-      data = await res.json().catch(() => ({}));
-    }
+    const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
       throw new Error(data.error || data.message || 'Invalid credentials. Please request access if not registered.');
@@ -7358,19 +7417,6 @@ function sleep(ms) {
       }
     }, 50);
   });
-}
-
-async function getBackendUrl() {
-  let url = DEFAULT_BACKEND_URL;
-  if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-    try {
-      const res = await chrome.storage.sync.get(['backendUrl']);
-      if (res.backendUrl && !res.backendUrl.includes('localhost') && !res.backendUrl.includes('127.0.0.1')) {
-        url = res.backendUrl;
-      }
-    } catch(e) {}
-  }
-  return (url || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
 }
 
 // Live 15-second status watchdog while extension popup is active: locks immediately if admin suspends user
