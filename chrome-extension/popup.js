@@ -322,7 +322,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
 // ROBUST X / TWITTER LINK EXTRACTOR & DEDUPLICATION ENGINE
 // Handles: standard URLs, intent/like, Telegram chats, timestamps, labels
 // =============================================================
-const EXT_STATUS_REGEX = /(?:https?:\/\/)?(?:www\.|mobile\.|m\.)?(?:x\.com|twitter\.com|vxtwitter\.com|fixupx\.com|fxtwitter\.com)\/(?:#!\/)?([a-zA-Z0-9_]{1,30})\/status(?:es)?\/(\d{5,25})/gi;
+const EXT_STATUS_REGEX = /(?:https?:\/\/)?(?:www\.|mobile\.|m\.)?(?:x\.com|twitter\.com|vxtwitter\.com|fixupx\.com|fxtwitter\.com)\/(?:#!\/)?([a-zA-Z0-9_]{1,30})(?:\/web)?\/status(?:es)?\/(\d{5,25})/gi;
 const EXT_INTENT_REGEX = /(?:https?:\/\/)?(?:www\.|mobile\.|m\.)?(?:x\.com|twitter\.com)\/intent\/(?:like|retweet|tweet)[^?\s]*\?(?:[^&\s]*&)*(?:tweet_id|in_reply_to)=(\d{5,25})/gi;
 
 function extractTweetLinks(rawText) {
