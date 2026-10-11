@@ -719,42 +719,56 @@ function updateAgentWorkflowProgressUI(wf) {
       done: 'audienceDoneCount', col: 'audienceCollectedCount', skip: 'audienceSkippedCount',
       bar: 'audienceProgressBar', status: 'audienceLiveStatusText', cd: 'audienceCountdownText',
       startBtn: 'runAudienceBuilderBtn', stopBtn: 'stopAudienceBuilderBtn',
-      pauseBtn: 'pauseAudienceBuilderBtn', skipBtn: 'skipAudienceBuilderBtn'
+      pauseBtn: 'pauseAudienceBuilderBtn', skipBtn: 'skipAudienceBuilderBtn',
+      resetBtn: 'resetAudienceQueueBtn'
     },
     sorsa: {
       card: 'sorsaProgressCard', badge: 'sorsaStateBadge', ind: 'sorsaQueueIndicator',
       done: 'sorsaDoneCount', col: 'sorsaCollectedCount', skip: 'sorsaSkippedCount',
       bar: 'sorsaProgressBar', status: 'sorsaLiveStatusText', cd: 'sorsaCountdownText',
       startBtn: 'runSorsaBoosterBtn', stopBtn: 'stopSorsaBoosterBtn',
-      pauseBtn: 'pauseSorsaBoosterBtn', skipBtn: 'skipSorsaBoosterBtn'
+      pauseBtn: 'pauseSorsaBoosterBtn', skipBtn: 'skipSorsaBoosterBtn',
+      resetBtn: 'resetSorsaQueueBtn'
     },
     followers: {
       card: 'followerProgressCard', badge: 'followerStateBadge', ind: 'followerQueueIndicator',
       done: 'followerDoneCount', col: 'followerCollectedCount', skip: 'followerSkippedCount',
       bar: 'followerProgressBar', status: 'followerLiveStatusText', cd: 'followerCountdownText',
       startBtn: 'runFollowerIncreaseBtn', stopBtn: 'stopFollowerIncreaseBtn',
-      pauseBtn: 'pauseFollowerIncreaseBtn', skipBtn: 'skipFollowerIncreaseBtn'
+      pauseBtn: 'pauseFollowerIncreaseBtn', skipBtn: 'skipFollowerIncreaseBtn',
+      resetBtn: 'resetFollowerQueueBtn'
     },
     replyback: {
       card: 'replyBackProgressCard', badge: 'replyBackStateBadge', ind: 'replyBackQueueIndicator',
       done: 'replyBackDoneCount', col: 'replyBackCollectedCount', skip: 'replyBackSkippedCount',
       bar: 'replyBackProgressBar', status: 'replyBackLiveStatusText', cd: 'replyBackCountdownText',
       startBtn: 'runReplyBackBtn', stopBtn: 'stopReplyBackBtn',
-      pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn'
+      pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn',
+      resetBtn: 'resetReplyBackQueueBtn'
     },
     unfollow: {
       card: 'unfollowProgressCard', badge: 'unfollowStateBadge', ind: null,
       done: 'unfollowCountSuccess', col: 'unfollowCountTotal', skip: 'unfollowCountFailed',
       bar: null, status: 'unfollowLiveStatusText', cd: 'unfollowCountdownText',
       startBtn: 'runAutoUnfollowBtn', stopBtn: 'stopAutoUnfollowBtn',
-      pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn'
+      pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn',
+      resetBtn: 'resetUnfollowQueueBtn'
     },
     reciprocator: {
       card: 'reciprocatorProgressCard', badge: 'reciprocatorStateBadge', ind: 'reciprocatorQueueIndicator',
       done: 'reciprocatorDoneCount', col: 'reciprocatorCollectedCount', skip: 'reciprocatorSkippedCount',
       bar: 'reciprocatorProgressBar', status: 'reciprocatorLiveStatusText', cd: 'reciprocatorCountdownText',
       startBtn: 'runReciprocatorBtn', stopBtn: 'stopReciprocatorBtn',
-      pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn'
+      pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn',
+      resetBtn: 'resetReciprocatorQueueBtn'
+    },
+    tg: {
+      card: 'telegramProgressCard', badge: 'tgStateBadge', ind: null,
+      done: 'tgDoneCount', col: 'tgTotalCount', skip: 'tgSkippedCount',
+      bar: 'tgProgressBar', status: 'tgLiveStatus', cd: null,
+      startBtn: 'runTgEngageBtn', stopBtn: 'stopTgEngageBtn',
+      pauseBtn: 'pauseTgEngageBtn', skipBtn: 'skipTgEngageBtn',
+      resetBtn: 'resetTelegramQueueBtn'
     }
   };
 
@@ -791,6 +805,7 @@ function updateAgentWorkflowProgressUI(wf) {
   const stopBtn = document.getElementById(map.stopBtn);
   const pauseBtn = map.pauseBtn ? document.getElementById(map.pauseBtn) : null;
   const skipBtn = map.skipBtn ? document.getElementById(map.skipBtn) : null;
+  const resetBtn = map.resetBtn ? document.getElementById(map.resetBtn) : null;
 
   if (card) card.style.display = 'block';
 
@@ -809,17 +824,18 @@ function updateAgentWorkflowProgressUI(wf) {
 
   if (wf.active) {
     if (startBtn) startBtn.style.display = 'none';
-    if (stopBtn) stopBtn.style.display = 'inline-block';
+    if (resetBtn) resetBtn.style.display = 'none';
+    if (stopBtn) stopBtn.style.display = 'inline-flex';
     if (pauseBtn) {
       pauseBtn.style.display = 'inline-flex';
       const pSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>`;
       const rSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>`;
       pauseBtn.innerHTML = wf.isPaused ? `${rSvg}Resume` : `${pSvg}Pause`;
-      pauseBtn.style.background = wf.isPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : '';
-      pauseBtn.style.borderColor = wf.isPaused ? 'rgba(52, 211, 153, 0.6)' : '';
-      pauseBtn.style.color = wf.isPaused ? '#34D399' : '';
+      pauseBtn.style.background = wf.isPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : 'linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%)';
+      pauseBtn.style.borderColor = wf.isPaused ? 'rgba(52, 211, 153, 0.6)' : 'rgba(251, 191, 36, 0.55)';
+      pauseBtn.style.color = wf.isPaused ? '#D1FAE5' : '#FEF3C7';
     }
-    if (skipBtn) skipBtn.style.display = 'inline-block';
+    if (skipBtn) skipBtn.style.display = 'inline-flex';
     if (badge) badge.textContent = wf.isPaused ? 'PAUSED' : (wf.stateBadge || 'RUNNING');
     if (status && wf.statusText) status.textContent = wf.statusText;
     if (cd) {
@@ -831,7 +847,8 @@ function updateAgentWorkflowProgressUI(wf) {
       }
     }
   } else if (wf.isStopped || wf.stateBadge === 'STOPPED') {
-    if (startBtn) startBtn.style.display = 'block';
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (stopBtn) stopBtn.style.display = 'none';
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
@@ -839,7 +856,8 @@ function updateAgentWorkflowProgressUI(wf) {
     if (status) status.textContent = wf.statusText || 'Workflow stopped by user.';
     if (cd) cd.style.display = 'none';
   } else if (done + skipped >= total && total > 0) {
-    if (startBtn) startBtn.style.display = 'block';
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (stopBtn) stopBtn.style.display = 'none';
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
@@ -852,23 +870,25 @@ function updateAgentWorkflowProgressUI(wf) {
 
 function updateAllStopButtonsUI() {
   const configs = [
-    { startBtn: 'runAudienceBuilderBtn', stopBtn: 'stopAudienceBuilderBtn', pauseBtn: 'pauseAudienceBuilderBtn', skipBtn: 'skipAudienceBuilderBtn', badge: 'audienceStateBadge', status: 'audienceLiveStatusText' },
-    { startBtn: 'runSorsaBoosterBtn', stopBtn: 'stopSorsaBoosterBtn', pauseBtn: 'pauseSorsaBoosterBtn', skipBtn: 'skipSorsaBoosterBtn', badge: 'sorsaStateBadge', status: 'sorsaLiveStatusText' },
-    { startBtn: 'runFollowerIncreaseBtn', stopBtn: 'stopFollowerIncreaseBtn', pauseBtn: 'pauseFollowerIncreaseBtn', skipBtn: 'skipFollowerIncreaseBtn', badge: 'followerStateBadge', status: 'followerLiveStatusText' },
-    { startBtn: 'runReplyBackBtn', stopBtn: 'stopReplyBackBtn', pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn', badge: 'replyBackStateBadge', status: 'replyBackLiveStatusText' },
-    { startBtn: 'runAutoUnfollowBtn', stopBtn: 'stopAutoUnfollowBtn', pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn', badge: 'unfollowStateBadge', status: 'unfollowLiveStatusText' },
-    { startBtn: 'runReciprocatorBtn', stopBtn: 'stopReciprocatorBtn', pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn', badge: 'reciprocatorStateBadge', status: 'reciprocatorLiveStatusText' },
-    { startBtn: 'runTgEngageBtn', stopBtn: 'stopTgEngageBtn', pauseBtn: 'pauseTgEngageBtn', skipBtn: 'skipTgEngageBtn', badge: 'tgStateBadge', status: 'tgLiveStatus' }
+    { startBtn: 'runAudienceBuilderBtn', resetBtn: 'resetAudienceQueueBtn', stopBtn: 'stopAudienceBuilderBtn', pauseBtn: 'pauseAudienceBuilderBtn', skipBtn: 'skipAudienceBuilderBtn', badge: 'audienceStateBadge', status: 'audienceLiveStatusText' },
+    { startBtn: 'runSorsaBoosterBtn', resetBtn: 'resetSorsaQueueBtn', stopBtn: 'stopSorsaBoosterBtn', pauseBtn: 'pauseSorsaBoosterBtn', skipBtn: 'skipSorsaBoosterBtn', badge: 'sorsaStateBadge', status: 'sorsaLiveStatusText' },
+    { startBtn: 'runFollowerIncreaseBtn', resetBtn: 'resetFollowerQueueBtn', stopBtn: 'stopFollowerIncreaseBtn', pauseBtn: 'pauseFollowerIncreaseBtn', skipBtn: 'skipFollowerIncreaseBtn', badge: 'followerStateBadge', status: 'followerLiveStatusText' },
+    { startBtn: 'runReplyBackBtn', resetBtn: 'resetReplyBackQueueBtn', stopBtn: 'stopReplyBackBtn', pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn', badge: 'replyBackStateBadge', status: 'replyBackLiveStatusText' },
+    { startBtn: 'runAutoUnfollowBtn', resetBtn: 'resetUnfollowQueueBtn', stopBtn: 'stopAutoUnfollowBtn', pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn', badge: 'unfollowStateBadge', status: 'unfollowLiveStatusText' },
+    { startBtn: 'runReciprocatorBtn', resetBtn: 'resetReciprocatorQueueBtn', stopBtn: 'stopReciprocatorBtn', pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn', badge: 'reciprocatorStateBadge', status: 'reciprocatorLiveStatusText' },
+    { startBtn: 'runTgEngageBtn', resetBtn: 'resetTelegramQueueBtn', stopBtn: 'stopTgEngageBtn', pauseBtn: 'pauseTgEngageBtn', skipBtn: 'skipTgEngageBtn', badge: 'tgStateBadge', status: 'tgLiveStatus' }
   ];
 
   configs.forEach(cfg => {
     const start = document.getElementById(cfg.startBtn);
+    const reset = cfg.resetBtn ? document.getElementById(cfg.resetBtn) : null;
     const stop = document.getElementById(cfg.stopBtn);
     const pause = cfg.pauseBtn ? document.getElementById(cfg.pauseBtn) : null;
     const skip = cfg.skipBtn ? document.getElementById(cfg.skipBtn) : null;
     const badge = cfg.badge ? document.getElementById(cfg.badge) : null;
     const status = cfg.status ? document.getElementById(cfg.status) : null;
-    if (start) start.style.display = 'block';
+    if (start) start.style.display = 'inline-flex';
+    if (reset) reset.style.display = 'inline-flex';
     if (stop) stop.style.display = 'none';
     if (pause) pause.style.display = 'none';
     if (skip) skip.style.display = 'none';
@@ -2411,7 +2431,13 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
       const lines = String(text).split(/[\r\n,]+/);
       const extracted = lines.map(l => l.replace(/["'@\s]/g, '').trim()).filter(h => /^[A-Za-z0-9_]{1,25}$/.test(h));
       const textarea = document.getElementById('sorsaHandlesInput');
-      if (textarea) textarea.value = extracted.map(h => `@${h}`).join(', ');
+      const hint = document.getElementById('sorsaHandlesHint');
+      if (textarea) {
+        textarea.style.display = 'block';
+        textarea.readOnly = false;
+        textarea.value = extracted.map(h => `@${h}`).join(', ');
+      }
+      if (hint) hint.style.display = 'inline';
       const badge = document.getElementById('sorsaParsedCountBadge');
       if (badge) badge.textContent = `${extracted.length} accounts loaded from CSV`;
       const curSelect = document.getElementById('sorsaCuratedListSelect');
@@ -2498,8 +2524,14 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     updateAgentConsole('⏹️ Stopped', 'Sorsa Booster stopped by user.');
     const startBtn = document.getElementById('runSorsaBoosterBtn');
     const stopBtn = document.getElementById('stopSorsaBoosterBtn');
-    if (startBtn) startBtn.style.display = 'block';
+    const pauseBtn = document.getElementById('pauseSorsaBoosterBtn');
+    const skipBtn = document.getElementById('skipSorsaBoosterBtn');
+    const resetBtn = document.getElementById('resetSorsaQueueBtn');
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     const statusText = document.getElementById('sorsaLiveStatusText');
     if (statusText) statusText.textContent = 'Workflow stopped by user.';
     const countdownEl = document.getElementById('sorsaCountdownText');
@@ -2522,8 +2554,14 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     updateAgentConsole('⏹️ Stopped', 'Followers Increase stopped by user.');
     const startBtn = document.getElementById('runFollowerIncreaseBtn');
     const stopBtn = document.getElementById('stopFollowerIncreaseBtn');
-    if (startBtn) startBtn.style.display = 'block';
+    const pauseBtn = document.getElementById('pauseFollowerIncreaseBtn');
+    const skipBtn = document.getElementById('skipFollowerIncreaseBtn');
+    const resetBtn = document.getElementById('resetFollowerQueueBtn');
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     const statusText = document.getElementById('followerLiveStatusText');
     if (statusText) statusText.textContent = 'Workflow stopped by user.';
     const countdownEl = document.getElementById('followerCountdownText');
@@ -2532,7 +2570,6 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     if (badge) badge.textContent = 'STOPPED';
     showExtToast('Followers Increase Stopped', '⏹');
   });
-
 
   // Agent 6: Reply Back (A6, Posts, Fully Auto)
   document.getElementById('replyBackUseCurrentTabBtn')?.addEventListener('click', async () => {
@@ -2574,8 +2611,14 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     updateAgentConsole('⏹️ Stopped', 'Reply Back loop stopped by user.');
     const startBtn = document.getElementById('runReplyBackBtn');
     const stopBtn = document.getElementById('stopReplyBackBtn');
-    if (startBtn) startBtn.style.display = 'block';
+    const pauseBtn = document.getElementById('pauseReplyBackBtn');
+    const skipBtn = document.getElementById('skipReplyBackBtn');
+    const resetBtn = document.getElementById('resetReplyBackQueueBtn');
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     const statusText = document.getElementById('replyBackLiveStatusText');
     if (statusText) statusText.textContent = 'Workflow stopped by user.';
     const badge = document.getElementById('replyBackStateBadge');
@@ -2591,7 +2634,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   });
 
   document.getElementById('stopAutoUnfollowBtn')?.addEventListener('click', () => {
-    state.isAborted = true;
+    broadcastAbortToAllTabsAndStorage('Auto Unfollow');
     if (autoUnfollowWorkingTabId) {
       chrome.tabs.sendMessage(autoUnfollowWorkingTabId, { type: 'ABORT_WORKFLOW' }).catch(() => null);
       safeRemoveTab(autoUnfollowWorkingTabId);
@@ -2600,8 +2643,14 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     updateAgentConsole('⏹️ Stopped', 'Auto Unfollow stopped by user.');
     const startBtn = document.getElementById('runAutoUnfollowBtn');
     const stopBtn = document.getElementById('stopAutoUnfollowBtn');
-    if (startBtn) startBtn.style.display = 'block';
+    const pauseBtn = document.getElementById('pauseAutoUnfollowBtn');
+    const skipBtn = document.getElementById('skipAutoUnfollowBtn');
+    const resetBtn = document.getElementById('resetUnfollowQueueBtn');
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     const statusText = document.getElementById('unfollowLiveStatusText');
     if (statusText) statusText.textContent = 'Workflow stopped by user.';
     const badge = document.getElementById('unfollowStateBadge');
@@ -4030,12 +4079,15 @@ async function initAudienceBuilderSystem() {
 
 function loadSorsaCuratedList(listKey) {
   const textarea = document.getElementById('sorsaHandlesInput');
+  const hint = document.getElementById('sorsaHandlesHint');
   const badge = document.getElementById('sorsaParsedCountBadge');
   if (!textarea) return;
 
   if (!listKey || listKey === 'custom') {
     delete textarea.dataset.hiddenHandles;
     delete state.sorsaCuratedTargets;
+    textarea.style.display = 'block';
+    if (hint) hint.style.display = 'inline';
     textarea.readOnly = false;
     textarea.value = '';
     textarea.style.color = '';
@@ -4049,16 +4101,17 @@ function loadSorsaCuratedList(listKey) {
   if (item && Array.isArray(item.targets) && item.targets.length > 0) {
     textarea.dataset.hiddenHandles = JSON.stringify(item.targets);
     state.sorsaCuratedTargets = item.targets;
-    textarea.value = `🔒 ${item.name} (${item.targets.length} Verified Ecosystem Accounts Loaded)\n\n[Protected List: Proprietary account handles are secured and hidden from view.]`;
-    textarea.readOnly = true;
-    textarea.style.color = '#94A3B8';
-    textarea.style.fontStyle = 'italic';
+    textarea.value = '';
+    textarea.style.display = 'none'; // Completely hidden for curated lists
+    if (hint) hint.style.display = 'none';
     const count = item.targets.length;
     if (badge) badge.textContent = `${count} accounts ready (${item.name})`;
     showExtToast(`Loaded ${count} accounts (${item.name})`, '⭐');
   } else {
     delete textarea.dataset.hiddenHandles;
     delete state.sorsaCuratedTargets;
+    textarea.style.display = 'none';
+    if (hint) hint.style.display = 'none';
     textarea.readOnly = false;
     textarea.value = '';
     textarea.style.color = '';

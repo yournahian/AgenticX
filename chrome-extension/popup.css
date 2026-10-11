@@ -676,15 +676,17 @@ body.dark .icon-btn:hover {
 
 /* Ensure inline display:none is ALWAYS respected across extension */
 [style*="display: none"],
-[style*="display:none"] {
+[style*="display:none"],
+button[style*="display: none"],
+button[style*="display:none"] {
   display: none !important;
 }
 
 /* Agent Action Control Rows */
 .agent-action-row {
   display: flex !important;
-  gap: 5px !important;
-  margin-top: 6px !important;
+  gap: 6px !important;
+  margin-top: 8px !important;
   width: 100% !important;
   box-sizing: border-box !important;
   align-items: stretch !important;
@@ -692,21 +694,23 @@ body.dark .icon-btn:hover {
 
 /* Primary Action Launch Buttons (.mini-btn) */
 .primary-btn.mini-btn {
-  height: 31px !important;
-  min-height: 31px !important;
-  max-height: 31px !important;
-  padding: 0 8px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 12px !important;
   font-size: 11px !important;
   font-weight: 700 !important;
   border-radius: 8px !important;
   white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
   box-sizing: border-box !important;
-  display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 5px !important;
+  gap: 6px !important;
+  flex: 2 !important;
+}
+
+.primary-btn.mini-btn:not([style*="display: none"]):not([style*="display:none"]) {
+  display: inline-flex !important;
 }
 
 /* Clean Text Button (Telegram Engage) */
@@ -718,18 +722,21 @@ body.dark .icon-btn:hover {
   font-size: 11px !important;
   font-weight: 700 !important;
   letter-spacing: 0.2px !important;
-  height: 31px !important;
-  min-height: 31px !important;
-  max-height: 31px !important;
-  padding: 0 6px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 8px !important;
   box-sizing: border-box !important;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
-  display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 4px !important;
   white-space: nowrap !important;
   cursor: pointer !important;
+}
+
+#cleanTgInputBtn:not([style*="display: none"]):not([style*="display:none"]) {
+  display: inline-flex !important;
 }
 
 #cleanTgInputBtn:hover {
@@ -747,24 +754,28 @@ button[id^="stop"] {
   font-weight: 700 !important;
   font-size: 11px !important;
   letter-spacing: 0.2px !important;
-  height: 31px !important;
-  min-height: 31px !important;
-  max-height: 31px !important;
-  padding: 0 4px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  padding: 0 10px !important;
   flex: 1 1 0 !important;
   min-width: 0 !important;
   box-sizing: border-box !important;
-  display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 4px !important;
+  gap: 5px !important;
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
   user-select: none !important;
   outline: none !important;
   white-space: nowrap !important;
   cursor: pointer !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
+}
+
+button[id^="reset"]:not([style*="display: none"]):not([style*="display:none"]),
+button[id^="pause"]:not([style*="display: none"]):not([style*="display:none"]),
+button[id^="skip"]:not([style*="display: none"]):not([style*="display:none"]),
+button[id^="stop"]:not([style*="display: none"]):not([style*="display:none"]) {
+  display: inline-flex !important;
 }
 
 button[id^="reset"] svg,
@@ -772,8 +783,8 @@ button[id^="pause"] svg,
 button[id^="skip"] svg,
 button[id^="stop"] svg {
   flex-shrink: 0 !important;
-  width: 12px !important;
-  height: 12px !important;
+  width: 13px !important;
+  height: 13px !important;
   display: inline-block !important;
   vertical-align: middle !important;
 }
@@ -853,20 +864,6 @@ body.dark .secondary-btn:hover {
   border-color: rgba(96, 165, 250, 0.4);
   color: #60A5FA;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-}
-
-[data-theme="dark"] button[id^="reset"],
-body.dark button[id^="reset"] {
-  background: linear-gradient(180deg, #1E293B 0%, #0F172A 100%) !important;
-  border-color: #334155 !important;
-  color: #94A3B8 !important;
-}
-
-[data-theme="dark"] button[id^="reset"]:hover,
-body.dark button[id^="reset"]:hover {
-  background: #1E293B !important;
-  border-color: #38BDF8 !important;
-  color: #38BDF8 !important;
 }
 
 /* History List */
