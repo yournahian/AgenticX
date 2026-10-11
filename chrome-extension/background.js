@@ -12,6 +12,114 @@
 
 const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MODE B: CHROME DEVTOOLS PROTOCOL (CDP) DEBUGGER API INTEGRATION
+// Handles system-level authentic mouse dispatching via Input.dispatchMouseEvent
+// ─────────────────────────────────────────────────────────────────────────────
+
+const attachedDebuggerTabs = new Set();
+
+if (typeof chrome !== 'undefined' && chrome.debugger && chrome.debugger.onDetach) {
+  chrome.debugger.onDetach.addListener((source, reason) => {
+    if (source?.tabId) {
+      attachedDebuggerTabs.delete(source.tabId);
+      console.log(`[ATOMX CDP] Debugger detached from tab ${source.tabId} (${reason}).`);
+    }
+  });
+}
+
+async function attachDebuggerSafely(tabId) {
+  if (typeof chrome === 'undefined' || !chrome.debugger) {
+    console.warn('[ATOMX CDP] chrome.debugger API is not available on this browser/environment.');
+    return false;
+  }
+  if (attachedDebuggerTabs.has(tabId)) {
+    return true;
+  }
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+    attachedDebuggerTabs.add(tabId);
+    console.log(`[ATOMX CDP] Debugger successfully attached to tab ${tabId}`);
+    return true;
+  } catch (err) {
+    const msg = err?.message || '';
+    if (msg.includes('already attached') || msg.includes('Another debugger')) {
+      attachedDebuggerTabs.add(tabId);
+      return true;
+    }
+    console.warn(`[ATOMX CDP] Failed to attach debugger to tab ${tabId}:`, msg);
+    return false;
+  }
+}
+
+async function detachDebuggerSafely(tabId) {
+  if (typeof chrome === 'undefined' || !chrome.debugger || !tabId) return;
+  try {
+    if (attachedDebuggerTabs.has(tabId)) {
+      attachedDebuggerTabs.delete(tabId);
+      await chrome.debugger.detach({ tabId });
+      console.log(`[ATOMX CDP] Debugger detached from tab ${tabId}`);
+    }
+  } catch (e) {}
+}
+
+function sendCdpCommand(tabId, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
+      if (chrome.runtime.lastError) {
+        return reject(new Error(chrome.runtime.lastError.message));
+      }
+      resolve(result);
+    });
+  });
+}
+
+const sleepAsync = ms => new Promise(r => setTimeout(r, ms));
+
+async function dispatchCdpMouseClick(tabId, x, y) {
+  const attached = await attachDebuggerSafely(tabId);
+  if (!attached) {
+    return { ok: false, fallback: true, error: 'Cannot attach debugger to tab' };
+  }
+
+  const targetX = Math.round(x);
+  const targetY = Math.round(y);
+
+  try {
+    // 1. Dispatch mouseMoved (hover over target coordinates)
+    await sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: targetX,
+      y: targetY
+    });
+    await sleepAsync(45 + Math.random() * 45);
+
+    // 2. Dispatch mousePressed (left click down)
+    await sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      button: 'left',
+      clickCount: 1,
+      x: targetX,
+      y: targetY
+    });
+    await sleepAsync(65 + Math.random() * 65);
+
+    // 3. Dispatch mouseReleased (left click release)
+    await sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      button: 'left',
+      clickCount: 1,
+      x: targetX,
+      y: targetY
+    });
+
+    return { ok: true, x: targetX, y: targetY };
+  } catch (err) {
+    console.warn('[ATOMX CDP] dispatchMouseEvent error:', err);
+    return { ok: false, fallback: true, error: err?.message };
+  }
+}
+
 function safeRemoveTab(tabId) {
   // Safety rule: never close active browser tabs or windows automatically
   return;
@@ -176,6 +284,28 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'PING') {
     sendResponse({ status: 'PONG', version: '1.0.0' });
+    return true;
+  }
+
+  // ── Mode B: Chrome DevTools Protocol Mouse Dispatcher ──────────────
+  if (request.type === 'CDP_DISPATCH_MOUSE_CLICK') {
+    const tabId = request.tabId || sender?.tab?.id;
+    if (!tabId) {
+      sendResponse({ ok: false, fallback: true, error: 'No tab ID available for CDP click' });
+      return true;
+    }
+    dispatchCdpMouseClick(tabId, request.x, request.y).then(res => {
+      sendResponse(res);
+    }).catch(err => {
+      sendResponse({ ok: false, fallback: true, error: err?.message });
+    });
+    return true;
+  }
+
+  if (request.type === 'CDP_DETACH_DEBUGGER') {
+    const tabId = request.tabId || sender?.tab?.id;
+    if (tabId) detachDebuggerSafely(tabId);
+    sendResponse({ ok: true });
     return true;
   }
 

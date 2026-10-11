@@ -518,6 +518,402 @@ async function smoothScrollPostForReading(mainArticle) {
   await ensurePostAndActionsInView(mainArticle);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HYBRID HUMANIZED ACTION ENGINE (MODE A: VIRTUAL CURSOR | MODE B: CDP DEBUGGER)
+// ─────────────────────────────────────────────────────────────────────────────
+
+let virtualCursorEl = null;
+let currentCursorPos = { x: -100, y: -100 };
+let isCursorAnimating = false;
+let lastScrollTime = 0;
+
+function injectVirtualCursorStylesFallback() {
+  if (document.getElementById('atomx-virtual-cursor-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'atomx-virtual-cursor-styles';
+  style.textContent = `
+    .atomx-virtual-cursor {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      pointer-events: none !important;
+      z-index: 2147483647 !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      user-select: none !important;
+      will-change: transform !important;
+      transition: transform 0.04s linear;
+    }
+    .atomx-cursor-icon-wrap {
+      position: relative !important;
+      display: inline-block !important;
+      transform-origin: 4px 4px !important;
+      transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+    }
+    .atomx-cursor-icon-wrap.atomx-cursor-pressed {
+      transform: scale(0.82) !important;
+    }
+    .atomx-cursor-svg {
+      filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 8px rgba(56, 189, 248, 0.65)) !important;
+      display: block !important;
+    }
+    .atomx-cursor-badge {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      font-size: 9.5px !important;
+      font-weight: 700 !important;
+      background: rgba(15, 23, 42, 0.9) !important;
+      color: #38BDF8 !important;
+      border: 1px solid rgba(56, 189, 248, 0.45) !important;
+      border-radius: 9999px !important;
+      padding: 1.5px 7px !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+      letter-spacing: 0.3px !important;
+      white-space: nowrap !important;
+      pointer-events: none !important;
+      animation: atomxPulseBadge 2.5s infinite ease-in-out !important;
+    }
+    @keyframes atomxPulseBadge {
+      0%, 100% { border-color: rgba(56, 189, 248, 0.45); }
+      50% { border-color: rgba(56, 189, 248, 0.85); box-shadow: 0 0 10px rgba(56, 189, 248, 0.3); }
+    }
+    .atomx-cursor-ripple {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 22px !important;
+      height: 22px !important;
+      border-radius: 50% !important;
+      border: 2px solid #38BDF8 !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+      transform: translate(-30%, -30%) scale(0.2) !important;
+    }
+    .atomx-cursor-ripple.atomx-ripple-active {
+      animation: atomxRippleAnim 0.45s ease-out forwards !important;
+    }
+    @keyframes atomxRippleAnim {
+      0% {
+        transform: translate(-30%, -30%) scale(0.2);
+        opacity: 1;
+        border-color: #38BDF8;
+      }
+      100% {
+        transform: translate(-30%, -30%) scale(2.2);
+        opacity: 0;
+        border-color: #10B981;
+      }
+    }
+  `;
+  document.head?.appendChild(style);
+}
+
+function onPageScrollCursorDrift() {
+  if (!virtualCursorEl || isCursorAnimating) return;
+  const now = Date.now();
+  if (now - lastScrollTime < 90) return;
+  lastScrollTime = now;
+  // Natural minor micro-drift (1-2px) to simulate human hand resting on mouse during scrolling
+  const driftX = (Math.random() - 0.5) * 3;
+  const driftY = (Math.random() - 0.5) * 3;
+  currentCursorPos.x = Math.max(20, Math.min(window.innerWidth - 30, currentCursorPos.x + driftX));
+  currentCursorPos.y = Math.max(20, Math.min(window.innerHeight - 30, currentCursorPos.y + driftY));
+  virtualCursorEl.style.transform = `translate3d(${Math.round(currentCursorPos.x)}px, ${Math.round(currentCursorPos.y)}px, 0)`;
+}
+
+function ensureVirtualCursorActive() {
+  injectVirtualCursorStylesFallback();
+  const existing = document.getElementById('atomx-virtual-cursor');
+  if (existing) {
+    virtualCursorEl = existing;
+    virtualCursorEl.style.display = 'flex';
+    virtualCursorEl.style.opacity = '1';
+    return virtualCursorEl;
+  }
+
+  const cursor = document.createElement('div');
+  cursor.id = 'atomx-virtual-cursor';
+  cursor.className = 'atomx-virtual-cursor';
+  cursor.innerHTML = `
+    <div class="atomx-cursor-icon-wrap" style="position:relative; display:inline-block;">
+      <svg class="atomx-cursor-svg" width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 0 1 .35-.15h6.87c.45 0 .67-.54.35-.85L5.85 2.85a.5.5 0 0 0-.35.36z" fill="#0F172A" stroke="#38BDF8" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+      <div class="atomx-cursor-ripple"></div>
+    </div>
+    <div class="atomx-cursor-badge">AtomX</div>
+  `;
+
+  const initialX = Math.round(window.innerWidth * 0.6);
+  const initialY = Math.round(window.innerHeight * 0.4);
+  currentCursorPos = { x: initialX, y: initialY };
+  cursor.style.transform = `translate3d(${initialX}px, ${initialY}px, 0)`;
+
+  document.body.appendChild(cursor);
+  virtualCursorEl = cursor;
+
+  window.removeEventListener('scroll', onPageScrollCursorDrift);
+  window.addEventListener('scroll', onPageScrollCursorDrift, { passive: true });
+
+  return cursor;
+}
+
+function removeVirtualCursor() {
+  if (virtualCursorEl) {
+    virtualCursorEl.style.transition = 'opacity 0.25s ease';
+    virtualCursorEl.style.opacity = '0';
+    setTimeout(() => {
+      virtualCursorEl?.remove();
+      virtualCursorEl = null;
+    }, 260);
+  }
+  window.removeEventListener('scroll', onPageScrollCursorDrift);
+}
+
+async function animateVirtualCursorTo(targetX, targetY, durationMs = 220) {
+  const cursor = ensureVirtualCursorActive();
+  if (!cursor) return;
+
+  isCursorAnimating = true;
+  const startX = currentCursorPos.x;
+  const startY = currentCursorPos.y;
+
+  const dx = targetX - startX;
+  const dy = targetY - startY;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist < 8) {
+    currentCursorPos = { x: targetX, y: targetY };
+    cursor.style.transform = `translate3d(${Math.round(targetX)}px, ${Math.round(targetY)}px, 0)`;
+    isCursorAnimating = false;
+    return;
+  }
+
+  const animTime = Math.min(360, Math.max(140, Math.round(durationMs * (dist / 350))));
+  const steps = Math.min(20, Math.max(8, Math.round(animTime / 18)));
+  const stepDelay = animTime / steps;
+
+  // Organic curved Bezier control point with perpendicular offset
+  const perpX = -dy / dist;
+  const perpY = dx / dist;
+  const curveMagnitude = (Math.random() - 0.5) * Math.min(50, dist * 0.22);
+  const ctrlX = startX + dx * 0.5 + perpX * curveMagnitude;
+  const ctrlY = startY + dy * 0.5 + perpY * curveMagnitude;
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const easeT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+    const u = 1 - easeT;
+    const curX = u * u * startX + 2 * u * easeT * ctrlX + easeT * easeT * targetX;
+    const curY = u * u * startY + 2 * u * easeT * ctrlY + easeT * easeT * targetY;
+
+    cursor.style.transform = `translate3d(${Math.round(curX)}px, ${Math.round(curY)}px, 0)`;
+    await sleep(stepDelay);
+  }
+
+  cursor.style.transform = `translate3d(${Math.round(targetX)}px, ${Math.round(targetY)}px, 0)`;
+  currentCursorPos = { x: targetX, y: targetY };
+  isCursorAnimating = false;
+
+  await sleep(40 + Math.random() * 40);
+}
+
+function triggerVirtualCursorClickEffect() {
+  if (!virtualCursorEl) return;
+  const iconWrap = virtualCursorEl.querySelector('.atomx-cursor-icon-wrap');
+  const ripple = virtualCursorEl.querySelector('.atomx-cursor-ripple');
+
+  if (iconWrap) {
+    iconWrap.classList.remove('atomx-cursor-pressed');
+    void iconWrap.offsetWidth;
+    iconWrap.classList.add('atomx-cursor-pressed');
+  }
+
+  if (ripple) {
+    ripple.classList.remove('atomx-ripple-active');
+    void ripple.offsetWidth;
+    ripple.classList.add('atomx-ripple-active');
+  }
+
+  setTimeout(() => {
+    iconWrap?.classList.remove('atomx-cursor-pressed');
+    ripple?.classList.remove('atomx-ripple-active');
+  }, 450);
+}
+
+function triggerElementClickPulse(element, color = '#38BDF8') {
+  if (!element) return;
+  const origTransition = element.style.transition;
+  const origOutline = element.style.outline;
+  const origBoxShadow = element.style.boxShadow;
+
+  element.style.transition = 'outline 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease';
+  element.style.outline = `2px solid ${color}`;
+  element.style.boxShadow = `0 0 14px ${color}99`;
+
+  setTimeout(() => {
+    element.style.outline = origOutline || 'none';
+    element.style.boxShadow = origBoxShadow || 'none';
+    element.style.transition = origTransition || 'none';
+  }, 350);
+}
+
+/**
+ * Dispatches the complete human event sequence:
+ * 'pointermove', 'mousemove', 'mouseover', 'pointerdown', 'mousedown', 'focus', 'click', 'pointerup', and 'mouseup'.
+ */
+function dispatchEnhancedHumanEvents(element, clientX, clientY) {
+  if (!element) return;
+  const rect = element.getBoundingClientRect();
+  const x = Math.round(clientX !== undefined ? clientX : rect.left + rect.width / 2);
+  const y = Math.round(clientY !== undefined ? clientY : rect.top + rect.height / 2);
+
+  const screenX = window.screenX + x;
+  const screenY = window.screenY + y;
+
+  const pointerProps = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    screenX,
+    screenY,
+    pageX: window.pageXOffset + x,
+    pageY: window.pageYOffset + y,
+    isPrimary: true,
+    pointerId: 1,
+    pointerType: 'mouse',
+    pressure: 0.5,
+    width: 1,
+    height: 1
+  };
+
+  const mouseProps = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    screenX,
+    screenY,
+    pageX: window.pageXOffset + x,
+    pageY: window.pageYOffset + y,
+    button: 0,
+    buttons: 1
+  };
+
+  // 1. pointermove
+  element.dispatchEvent(new PointerEvent('pointermove', { ...pointerProps, buttons: 0, pressure: 0 }));
+  // 2. mousemove
+  element.dispatchEvent(new MouseEvent('mousemove', { ...mouseProps, buttons: 0 }));
+  // 3. mouseover
+  element.dispatchEvent(new MouseEvent('mouseover', { ...mouseProps, buttons: 0 }));
+
+  // 4. pointerdown
+  element.dispatchEvent(new PointerEvent('pointerdown', pointerProps));
+  // 5. mousedown
+  element.dispatchEvent(new MouseEvent('mousedown', mouseProps));
+
+  // 6. focus
+  try {
+    if (typeof element.focus === 'function') {
+      element.focus({ preventScroll: true });
+    }
+  } catch (e) {}
+
+  // 7. click
+  element.dispatchEvent(new MouseEvent('click', { ...mouseProps, buttons: 0 }));
+  try {
+    element.click();
+  } catch (e) {}
+
+  // 8. pointerup
+  element.dispatchEvent(new PointerEvent('pointerup', { ...pointerProps, buttons: 0, pressure: 0 }));
+  // 9. mouseup
+  element.dispatchEvent(new MouseEvent('mouseup', { ...mouseProps, buttons: 0 }));
+}
+
+async function getActiveExecutionStrategy() {
+  try {
+    const res = await chrome.storage.local.get(['atomx_execution_strategy']);
+    return res?.atomx_execution_strategy === 'debugger' ? 'debugger' : 'dom';
+  } catch (e) {
+    return 'dom';
+  }
+}
+
+/**
+ * Unified Humanized Action Engine (Hybrid Mode: Visual DOM Simulation vs CDP Debugger API)
+ * Routes every click through:
+ *  - Mode A: Enhanced Visual DOM Simulation (Virtual Cursor + Multi-Event Sequence)
+ *  - Mode B: Chrome Debugger API (CDP Native Input.dispatchMouseEvent) with graceful DOM fallback
+ */
+async function performHumanClick(targetElement, options = {}) {
+  if (!targetElement) return false;
+
+  // Viewport scroll alignment if enabled
+  if (options.scroll !== false) {
+    gentleScrollIntoView(targetElement);
+    await sleep(options.prePause || 150);
+  }
+
+  const rect = targetElement.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    targetElement.click();
+    return true;
+  }
+
+  // Calculate randomized coordinate inside element bounding box (inward padding 15-25%)
+  const padX = Math.min(rect.width * 0.25, 10);
+  const padY = Math.min(rect.height * 0.25, 10);
+  const targetX = rect.left + padX + Math.random() * Math.max(1, rect.width - padX * 2);
+  const targetY = rect.top + padY + Math.random() * Math.max(1, rect.height - padY * 2);
+
+  const strategy = await getActiveExecutionStrategy();
+
+  // Mode B: Chrome Debugger API Integration (Advanced Desktop Mode)
+  if (strategy === 'debugger') {
+    try {
+      console.log(`[ATOMX ACTION] Dispatching CDP click via Debugger API at (${Math.round(targetX)}, ${Math.round(targetY)})`);
+      const response = await chrome.runtime.sendMessage({
+        type: 'CDP_DISPATCH_MOUSE_CLICK',
+        x: targetX,
+        y: targetY
+      });
+
+      if (response && response.ok) {
+        triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
+        await sleep(options.postPause || 250);
+        return true;
+      }
+      console.warn('[ATOMX ACTION] CDP click response not ok, falling back to Visual DOM mode:', response?.error);
+    } catch (err) {
+      console.warn('[ATOMX ACTION] CDP message failed, falling back to Visual DOM mode:', err);
+    }
+    // Graceful fallback to Mode A if debugger is unavailable (e.g. on mobile/Kiwi)
+  }
+
+  // Mode A: Enhanced Visual DOM Simulation (Default & Safe Mode)
+  ensureVirtualCursorActive();
+
+  // Animate cursor smoothly from current position to target element
+  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 220);
+
+  // Trigger click ripple effect on cursor
+  triggerVirtualCursorClickEffect();
+
+  // Visual element pulse
+  triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
+
+  // Dispatch full 9-event human sequence
+  dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
+
+  await sleep(options.postPause || 250);
+  return true;
+}
+
 /**
  * Visually highlights the Follow button with an emerald glow and dispatches human pointer events.
  * Guarantees the user and screen recording visibly witness the follow action.
@@ -537,17 +933,12 @@ async function simulateHumanFollowClick(followBtn) {
     followBtn.style.outline = '2px solid #10B981';
     followBtn.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.7)';
     followBtn.style.transform = 'scale(1.05)';
+    await sleep(250);
+
+    // Perform hybrid human click (Mode A: Virtual cursor + 9-event sequence, or Mode B: CDP Debugger)
+    await performHumanClick(followBtn, { pulseColor: '#10B981', scroll: false, postPause: 300 });
+
     await sleep(350);
-
-    // Dispatch full pointer and mouse event sequence
-    followBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-    followBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    followBtn.focus({ preventScroll: true });
-    followBtn.click();
-    followBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
-    followBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-
-    await sleep(650);
     followBtn.style.transform = origScale || 'none';
     followBtn.style.outline = origOutline || 'none';
     followBtn.style.boxShadow = origShadow || 'none';
@@ -603,7 +994,6 @@ async function simulateHumanLikeClick(targetArticle) {
   if (!likeBtn) return false;
 
   // 2. Smart Viewport Alignment (Screenshot 2 standard):
-  // Keeps the post visible, the Like button in the lower-middle, AND the inline comment box comfortably visible below it!
   await ensurePostAndActionsInView(targetArticle, likeBtn);
   if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
@@ -617,13 +1007,9 @@ async function simulateHumanLikeClick(targetArticle) {
     likeBtn.style.transform = 'scale(1.25)';
     likeBtn.style.filter = 'drop-shadow(0 0 10px rgba(244, 63, 94, 0.85))';
 
-    likeBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-    likeBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    likeBtn.click();
-    likeBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
-    likeBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    await performHumanClick(likeBtn, { pulseColor: '#F43F5E', scroll: false, postPause: 250 });
 
-    await sleep(350);
+    await sleep(250);
     likeBtn.style.transform = 'scale(1)';
     likeBtn.style.filter = 'none';
 
@@ -631,7 +1017,7 @@ async function simulateHumanLikeClick(targetArticle) {
     await sleep(350);
     const isNowLiked = isPostAlreadyLiked(targetArticle);
     if (!isNowLiked && !isWorkflowAborted && !isWorkflowItemSkipped) {
-      likeBtn.click();
+      await performHumanClick(likeBtn, { pulseColor: '#F43F5E', scroll: false, postPause: 200 });
       await sleep(300);
     }
     return true;
@@ -660,25 +1046,11 @@ async function simulateHumanReplyClick(replyBtn) {
     replyBtn.style.outline = '2px solid #10B981';
     replyBtn.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.7)';
     replyBtn.style.transform = 'scale(1.1)';
+    await sleep(200);
+
+    await performHumanClick(replyBtn, { pulseColor: '#10B981', scroll: false, postPause: 250 });
+
     await sleep(250);
-
-    const rect = replyBtn.getBoundingClientRect();
-    const evtInit = {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2
-    };
-
-    replyBtn.focus({ preventScroll: true });
-    replyBtn.dispatchEvent(new PointerEvent('pointerdown', evtInit));
-    replyBtn.dispatchEvent(new MouseEvent('mousedown', evtInit));
-    replyBtn.click();
-    replyBtn.dispatchEvent(new PointerEvent('pointerup', evtInit));
-    replyBtn.dispatchEvent(new MouseEvent('mouseup', evtInit));
-
-    await sleep(350);
     replyBtn.style.transform = origScale || 'none';
     replyBtn.style.outline = origOutline || 'none';
     replyBtn.style.boxShadow = origShadow || 'none';
@@ -704,33 +1076,11 @@ async function simulateHumanSubmitClick(btn) {
     btn.style.outline = '2px solid #3B82F6';
     btn.style.boxShadow = '0 0 14px rgba(59, 130, 246, 0.7)';
     btn.style.transform = 'scale(1.05)';
+    await sleep(150);
+
+    await performHumanClick(btn, { pulseColor: '#3B82F6', scroll: false, postPause: 250 });
+
     await sleep(200);
-
-    const rect = btn.getBoundingClientRect();
-    const evtInit = {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2
-    };
-
-    btn.focus({ preventScroll: true });
-    btn.dispatchEvent(new PointerEvent('pointerdown', evtInit));
-    btn.dispatchEvent(new MouseEvent('mousedown', evtInit));
-    btn.click();
-    btn.dispatchEvent(new PointerEvent('pointerup', evtInit));
-    btn.dispatchEvent(new MouseEvent('mouseup', evtInit));
-
-    const inner = btn.querySelector('span, div');
-    if (inner) {
-      inner.dispatchEvent(new PointerEvent('pointerdown', evtInit));
-      inner.dispatchEvent(new MouseEvent('mousedown', evtInit));
-      inner.dispatchEvent(new PointerEvent('pointerup', evtInit));
-      inner.dispatchEvent(new MouseEvent('mouseup', evtInit));
-    }
-
-    await sleep(300);
     btn.style.transform = 'none';
     btn.style.outline = 'none';
     btn.style.boxShadow = 'none';
@@ -770,13 +1120,9 @@ async function simulateHumanRepostClick(targetArticle) {
     rtBtn.style.transform = 'scale(1.2)';
     rtBtn.style.filter = 'drop-shadow(0 0 10px rgba(16, 185, 129, 0.85))';
 
-    rtBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-    rtBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    rtBtn.click();
-    rtBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
-    rtBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    await performHumanClick(rtBtn, { pulseColor: '#10B981', scroll: false, postPause: 300 });
 
-    await sleep(400);
+    await sleep(250);
     rtBtn.style.transform = 'scale(1)';
     rtBtn.style.filter = 'none';
 
@@ -787,8 +1133,8 @@ async function simulateHumanRepostClick(targetArticle) {
                        });
 
     if (confirmBtn) {
-      confirmBtn.click();
-      await sleep(500);
+      await performHumanClick(confirmBtn, { pulseColor: '#10B981', scroll: false, postPause: 350 });
+      await sleep(350);
       return true;
     }
     return false;
@@ -1539,8 +1885,10 @@ function ensureFloatingHud() {
 function updateFloatingHud(data = {}) {
   if (data.isStopped || data.stateBadge === 'STOPPED') {
     isWorkflowAborted = true;
+    removeVirtualCursor();
   } else if (data.active || data.isNewWorkflow) {
     isWorkflowAborted = false;
+    ensureVirtualCursorActive();
   }
 
   // If explicitly requested a new workflow, clear dismiss flag
@@ -1855,8 +2203,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'INIT_VIRTUAL_CURSOR' || message.type === 'START_VIRTUAL_CURSOR') {
+    ensureVirtualCursorActive();
+    sendResponse({ ok: true, active: true });
+    return true;
+  }
+
+  if (message.type === 'REMOVE_VIRTUAL_CURSOR') {
+    removeVirtualCursor();
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (message.type === 'ABORT_WORKFLOW') {
     isWorkflowAborted = true;
+    removeVirtualCursor();
     console.log('[ATOMX] Abort signal received. Stopping all automation.');
     updateFloatingHud({
       stateBadge: 'STOPPED',
@@ -1911,6 +2272,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ABORT_WORKFLOW' || message.type === 'BG_ABORT_AGENT_WORKFLOW' || message.type === 'STOP_WORKFLOW') {
     isWorkflowAborted = true;
+    removeVirtualCursor();
     closeAnyOpenTwitterDialog();
     updateFloatingHud({
       stateBadge: 'STOPPED',

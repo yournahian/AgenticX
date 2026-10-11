@@ -119,7 +119,18 @@
               <span>Autonomous Agents (100% Auto)</span>
               <span class="badge-mini popular">11 SUITE</span>
             </div>
-            <div style="font-size:11px; color:var(--text-secondary);">Click any agent below to launch its dedicated automation workspace.</div>
+          </div>
+
+          <!-- Compact Execution Strategy Quick Selector -->
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 10px; margin-bottom:10px; background:rgba(255,255,255,0.03); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+            <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary);">
+              <span>🖱️</span>
+              <span style="font-weight:600; color:var(--text-primary);">Execution Strategy:</span>
+            </div>
+            <select id="extQuickStrategySelect" style="font-size:10.5px; padding:3px 8px; border-radius:4px; background:var(--bg-card); color:var(--blue-primary); border:1px solid var(--border-subtle); outline:none; font-weight:600; cursor:pointer;">
+              <option value="dom" selected>Standard DOM Mode (with Virtual Cursor)</option>
+              <option value="debugger">Advanced Debugger Mode</option>
+            </select>
           </div>
 
           <div class="bento-grid">
@@ -1473,6 +1484,27 @@
         <div class="card" style="padding:14px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md);">
           <div style="font-weight:700; font-size:14px; margin-bottom:4px; color:var(--text-primary);">Anti-Ban Safety Controls</div>
           <p style="font-size:12px; color:var(--text-secondary); margin-bottom:14px;">Humanized pacing across all agents protects your Twitter account from rate-limits and shadowbans.</p>
+
+          <!-- Hybrid Execution Strategy & Mouse Engine -->
+          <div class="setting-item" style="margin-bottom:16px; padding:12px; background:linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(16,185,129,0.04) 100%); border:1px solid rgba(59,130,246,0.25); border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <div style="font-weight:700; font-size:12.5px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                <span>🎯</span>
+                <span>Action Execution Strategy</span>
+              </div>
+              <span id="extExecStrategyBadge" style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:4px; background:rgba(59,130,246,0.15); color:var(--blue-primary);">Virtual Cursor</span>
+            </div>
+            <p style="font-size:11px; color:var(--text-secondary); margin-bottom:8px; line-height:1.4;">
+              Choose how AtomX dispatches human-like mouse interactions on Twitter/X:
+            </p>
+            <select id="extExecutionStrategySelect" style="width:100%; padding:8px 10px; font-size:11.5px; border-radius:6px; background:var(--bg-canvas); color:var(--text-primary); border:1px solid var(--border-subtle); outline:none; cursor:pointer; font-weight:600;">
+              <option value="dom" selected>Standard DOM Mode (with Virtual Cursor)</option>
+              <option value="debugger">Advanced Debugger Mode</option>
+            </select>
+            <div id="extExecStrategyDesc" style="font-size:10.5px; color:var(--text-muted); margin-top:6px; line-height:1.35;">
+              Mode A: Injects visible animated mouse cursor with organic bezier curves and 9-stage human event sequence ('pointermove' through 'mouseup'). Safe, mobile-compatible & default.
+            </div>
+          </div>
 
           <!-- Automatic Batching Protocol Info Box -->
           <div style="padding:10px; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:6px; font-size:11px; color:var(--text-secondary); line-height:1.4; margin-bottom:14px;">

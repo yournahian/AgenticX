@@ -44,7 +44,8 @@
     "contextMenus",
     "scripting",
     "sidePanel",
-    "alarms"
+    "alarms",
+    "debugger"
   ],
   "host_permissions": [
     "*://twitter.com/*",

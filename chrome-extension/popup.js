@@ -1771,6 +1771,64 @@ function initListeners() {
     }
   });
 
+  // Hybrid Action Execution Strategy Controller (Mode A: DOM Virtual Cursor vs Mode B: CDP Debugger)
+  const execSelect = document.getElementById('extExecutionStrategySelect');
+  const quickSelect = document.getElementById('extQuickStrategySelect');
+  const execBadge = document.getElementById('extExecStrategyBadge');
+  const execDesc = document.getElementById('extExecStrategyDesc');
+
+  function updateExecStrategyUI(mode) {
+    const isDebugger = mode === 'debugger';
+    if (execSelect) execSelect.value = isDebugger ? 'debugger' : 'dom';
+    if (quickSelect) quickSelect.value = isDebugger ? 'debugger' : 'dom';
+
+    if (execBadge) {
+      execBadge.textContent = isDebugger ? 'CDP Debugger' : 'Virtual Cursor';
+      execBadge.style.color = isDebugger ? '#8B5CF6' : 'var(--blue-primary)';
+      execBadge.style.background = isDebugger ? 'rgba(139, 92, 246, 0.15)' : 'rgba(59, 130, 246, 0.15)';
+    }
+
+    if (execDesc) {
+      if (isDebugger) {
+        execDesc.textContent = 'Mode B: Utilizes Chrome DevTools Protocol (CDP) Input.dispatchMouseEvent for authentic OS-level input simulation. Desktop only, with graceful Virtual Cursor fallback.';
+      } else {
+        execDesc.textContent = "Mode A: Injects visible animated mouse cursor with organic bezier curves and 9-stage human event sequence ('pointermove' through 'mouseup'). Safe, mobile-compatible & default.";
+      }
+    }
+  }
+
+  function handleStrategyChange(newMode) {
+    chrome.storage.local.set({ atomx_execution_strategy: newMode }).catch(() => null);
+    updateExecStrategyUI(newMode);
+  }
+
+  execSelect?.addEventListener('change', (e) => handleStrategyChange(e.target.value));
+  quickSelect?.addEventListener('change', (e) => handleStrategyChange(e.target.value));
+
+  // Restore saved execution strategy (default to 'dom')
+  chrome.storage.local.get(['atomx_execution_strategy'], res => {
+    const mode = res?.atomx_execution_strategy || 'dom';
+    updateExecStrategyUI(mode);
+  });
+
+  function notifyActiveTabInitVirtualCursor() {
+    chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        tabs.forEach(t => {
+          if (t.id) chrome.tabs.sendMessage(t.id, { type: 'INIT_VIRTUAL_CURSOR' }).catch(() => null);
+        });
+      }
+    });
+  }
+
+  // Auto-inject Virtual Cursor as soon as any Launch / Run button is clicked in popup
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (btn && (btn.id?.startsWith('run') || btn.id?.startsWith('start') || btn.id?.includes('Launch'))) {
+      notifyActiveTabInitVirtualCursor();
+    }
+  });
+
   // Crypto Tx Verification
   document.getElementById('extVerifyTxBtn')?.addEventListener('click', handleVerifyCryptoTx);
 
