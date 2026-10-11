@@ -367,6 +367,71 @@ async function scrollElementIntoViewAndEnsureVisible(element, blockPosition = 'c
  * Natural human-like reading scroll for tweet status pages.
  * Smoothly scrolls down through the tweet text to bring the action toolbar
  * (like/repost) and reply/comment composer comfortably into the lower-middle viewport.
+/**
+ * Smart Viewport Alignment (Screenshot 2 Standard):
+ * Positions the page so that:
+ * 1. The tweet content/media is visible in the upper-to-middle screen.
+ * 2. The action bar (Like, Retweet, Reply) is visible in the lower-middle screen.
+ * 3. The inline comment box ("Post your reply") is comfortably visible right below the action bar.
+ * Guarantees the like button and comment box are never pushed to the bottom edge or hidden (Screenshot 1).
+ */
+async function ensurePostAndActionsInView(mainArticle, targetButton = null) {
+  if (!mainArticle || isWorkflowAborted || isWorkflowItemSkipped) return;
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const isStatusPage = window.location.pathname.includes('/status/');
+
+  try {
+    const inlineReply = document.querySelector('div[data-testid="inline_reply"]') ||
+                        document.querySelector('div[data-testid="tweetTextarea_0"]')?.closest('div[role="group"]') ||
+                        document.querySelector('div[data-testid="tweetTextarea_0"]') ||
+                        mainArticle.querySelector('div[role="group"]');
+
+    const btn = targetButton ||
+                mainArticle.querySelector('button[data-testid="like"], button[data-testid="unlike"]') ||
+                mainArticle.querySelector('div[role="group"]');
+
+    if (isStatusPage && inlineReply && btn) {
+      const btnRect = btn.getBoundingClientRect();
+      const replyRect = inlineReply.getBoundingClientRect();
+
+      // Check if already in ideal layout (like Screenshot 2):
+      // Like button is clearly visible in viewport, and reply container is visible above bottom edge
+      const isAlreadyIdeal = (btnRect.top >= 70 && btnRect.bottom <= vh - 70) &&
+                             (replyRect.top >= 100 && replyRect.bottom <= vh - 15);
+
+      if (isAlreadyIdeal) {
+        await sleep(250);
+        return;
+      }
+
+      // Calculate target scroll position so the inline reply container sits comfortably at ~75% - 82% of viewport height.
+      // This positions the Like button right above it at ~55% - 65% of viewport height (exact Screenshot 2 layout).
+      const targetY = window.scrollY + replyRect.bottom - (vh * 0.82);
+      const scrollPos = Math.max(0, Math.round(targetY));
+
+      if (Math.abs(scrollPos - window.scrollY) > 25) {
+        window.scrollTo({ top: scrollPos, behavior: 'smooth' });
+        await sleep(650); // Wait for smooth scroll animation to settle
+      }
+      return;
+    }
+
+    // Fallback for feeds/timeline posts: ensure action button is centered
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      if (rect.top < 100 || rect.bottom > vh - 80) {
+        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await sleep(550);
+      }
+    }
+  } catch (err) {
+    console.warn('[ATOMX] ensurePostAndActionsInView error:', err);
+  }
+}
+
+/**
+ * Natural human-like reading scroll for tweet status pages.
+ * Smoothly scrolls down to ensure the action toolbar and comment box sit together (Screenshot 2).
  */
 async function smoothScrollPostForReading(mainArticle) {
   if (!mainArticle) {
@@ -374,40 +439,7 @@ async function smoothScrollPostForReading(mainArticle) {
     await sleep(800);
     return;
   }
-
-  try {
-    // Find action toolbar (Like, Repost, Reply bar) or inline reply box
-    const actionBar = mainArticle.querySelector('div[role="group"]');
-    const replyTarget = document.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]') ||
-                        mainArticle.querySelector('button[data-testid="reply"]') ||
-                        actionBar;
-
-    const vh = window.innerHeight || document.documentElement.clientHeight;
-
-    if (replyTarget) {
-      const rect = replyTarget.getBoundingClientRect();
-      // If reply area is already comfortably in the lower half of screen, just slight pause
-      if (rect.top >= 150 && rect.bottom <= vh - 50) {
-        await sleep(600);
-        return;
-      }
-
-      // Calculate smooth target scroll position so action bar & reply box sit at ~60-70% down viewport
-      const targetY = window.scrollY + rect.top - (vh * 0.65);
-      if (targetY > window.scrollY + 30) {
-        window.scrollTo({ top: Math.max(0, Math.round(targetY)), behavior: 'smooth' });
-        await sleep(900); // Natural human reading pause
-        return;
-      }
-    }
-
-    // Fallback: smooth human scroll down to reveal reply area
-    window.scrollBy({ top: 420, behavior: 'smooth' });
-    await sleep(800);
-  } catch (e) {
-    window.scrollBy({ top: 350, behavior: 'smooth' });
-    await sleep(800);
-  }
+  await ensurePostAndActionsInView(mainArticle);
 }
 
 /**
@@ -434,7 +466,7 @@ async function simulateHumanFollowClick(followBtn) {
     // Dispatch full pointer and mouse event sequence
     followBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
     followBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    followBtn.focus();
+    followBtn.focus({ preventScroll: true });
     followBtn.click();
     followBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
     followBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
@@ -480,11 +512,7 @@ async function simulateHumanLikeClick(targetArticle) {
     return true; // Already liked
   }
 
-  // 1. Global Rule: Scroll article into view first so user sees the post
-  await scrollElementIntoViewAndEnsureVisible(targetArticle, 'center');
-  if (isWorkflowAborted || isWorkflowItemSkipped) return false;
-
-  // 2. Find like button with all possible Twitter/X selectors
+  // 1. Find like button with all possible Twitter/X selectors
   let likeBtn = targetArticle.querySelector('button[data-testid="like"], div[data-testid="like"], [data-testid="like"]') ||
                 Array.from(targetArticle.querySelectorAll('button, div[role="button"]')).find(b => {
                   const label = (b.getAttribute('aria-label') || '').toLowerCase();
@@ -498,8 +526,9 @@ async function simulateHumanLikeClick(targetArticle) {
 
   if (!likeBtn) return false;
 
-  // 3. Ensure the like button itself is visibly positioned on screen
-  await scrollElementIntoViewAndEnsureVisible(likeBtn, 'nearest');
+  // 2. Smart Viewport Alignment (Screenshot 2 standard):
+  // Keeps the post visible, the Like button in the lower-middle, AND the inline comment box comfortably visible below it!
+  await ensurePostAndActionsInView(targetArticle, likeBtn);
   if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
   // Natural human pause so the like button and post are visibly clear on screen before clicking
@@ -566,7 +595,7 @@ async function simulateHumanReplyClick(replyBtn) {
       clientY: rect.top + rect.height / 2
     };
 
-    replyBtn.focus();
+    replyBtn.focus({ preventScroll: true });
     replyBtn.dispatchEvent(new PointerEvent('pointerdown', evtInit));
     replyBtn.dispatchEvent(new MouseEvent('mousedown', evtInit));
     replyBtn.click();
@@ -610,7 +639,7 @@ async function simulateHumanSubmitClick(btn) {
       clientY: rect.top + rect.height / 2
     };
 
-    btn.focus();
+    btn.focus({ preventScroll: true });
     btn.dispatchEvent(new PointerEvent('pointerdown', evtInit));
     btn.dispatchEvent(new MouseEvent('mousedown', evtInit));
     btn.click();
@@ -716,12 +745,16 @@ async function typeTextHumanLike(editor, text) {
   if (!editor || !text) return false;
 
   // 1. Focus editor and place blinking cursor in comment box gently without jumping
-  gentleScrollIntoView(editor);
-  await sleep(150);
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const editorRect = editor.getBoundingClientRect();
+  if (editorRect.top < 80 || editorRect.bottom > vh - 20) {
+    editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    await sleep(400);
+  }
 
   editor.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
   editor.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-  editor.focus();
+  editor.focus({ preventScroll: true });
   editor.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
   editor.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
   editor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -813,7 +846,7 @@ async function typeTextHumanLike(editor, text) {
   if (!typedOk || !(editor.innerText || editor.textContent || '').trim()) {
     console.log('[ATOMX] Fallback to ClipboardEvent paste for DraftJS editor...');
     try {
-      editor.focus();
+      editor.focus({ preventScroll: true });
       const dt = new DataTransfer();
       dt.setData('text/plain', text);
       const pasteEvt = new ClipboardEvent('paste', {
@@ -834,7 +867,7 @@ async function typeTextHumanLike(editor, text) {
   // 6. Final fallback: direct assignment
   if (!typedOk || !(editor.innerText || editor.textContent || '').trim()) {
     try {
-      editor.focus();
+      editor.focus({ preventScroll: true });
       editor.textContent = text;
       editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
       editor.dispatchEvent(new Event('change', { bubbles: true }));
@@ -932,14 +965,38 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   // 1. On tweet status pages, check if inline reply box is already sitting under the tweet
   if (isStatusPage && isMainTarget) {
-    const inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
+    const inlineContainer = document.querySelector('div[data-testid="inline_reply"]');
+    let inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
+
+    // If placeholder "Post your reply" is present but tweetTextarea_0 isn't yet focused/mounted
+    if (!inlineBox && inlineContainer) {
+      const placeholder = inlineContainer.querySelector('div[role="button"], div[contenteditable="true"], div[data-testid="tweetTextarea_0"], span');
+      if (placeholder) {
+        const vh = window.innerHeight || document.documentElement.clientHeight;
+        const rect = placeholder.getBoundingClientRect();
+        if (rect.top < 80 || rect.bottom > vh - 20) {
+          placeholder.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          await sleep(450);
+        }
+        placeholder.click();
+        await sleep(350);
+        inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
+      }
+    }
+
     if (inlineBox) {
-      console.log('[ATOMX COMMENT ENGINE] Direct inline reply box detected, focusing...');
-      inlineBox.focus();
+      console.log('[ATOMX COMMENT ENGINE] Direct inline reply box detected, smoothly activating without jump...');
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const rect = inlineBox.getBoundingClientRect();
+      if (rect.top < 80 || rect.bottom > vh - 20) {
+        inlineBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await sleep(450);
+      }
+      inlineBox.focus({ preventScroll: true });
       inlineBox.click();
       textarea = inlineBox;
       isDialog = false;
-      await sleep(300);
+      await sleep(250);
     }
   }
 
@@ -1007,7 +1064,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   // If button is still disabled or missing, force DraftJS state update via native paste
   if (!submitBtn || submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled) {
     try {
-      textarea.focus();
+      textarea.focus({ preventScroll: true });
       const dt = new DataTransfer();
       dt.setData('text/plain', commentText);
       const pasteEvt = new ClipboardEvent('paste', {
