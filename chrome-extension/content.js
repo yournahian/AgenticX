@@ -1410,6 +1410,28 @@ function updateFloatingHud(data = {}) {
     if (skipBtn) skipBtn.style.display = 'flex';
     if (dismissBtn) dismissBtn.style.display = 'none';
   }
+
+  // Real-time synchronization to storage so popup progress tracker stays 1:1 in sync
+  if (!window._atomxHudSyncTimer && typeof chrome !== 'undefined' && chrome.storage?.local) {
+    window._atomxHudSyncTimer = setTimeout(() => {
+      window._atomxHudSyncTimer = null;
+      chrome.storage.local.get(['atomx_active_hud', 'atomx_agent_workflow'], (res) => {
+        const activeHud = { ...(res?.atomx_active_hud || {}), ...data };
+        const updates = { atomx_active_hud: activeHud };
+        if (res?.atomx_agent_workflow && res.atomx_agent_workflow.active) {
+          updates.atomx_agent_workflow = {
+            ...res.atomx_agent_workflow,
+            statusText: data.statusText || res.atomx_agent_workflow.statusText,
+            stateBadge: data.stateBadge || res.atomx_agent_workflow.stateBadge,
+            ignoredCount: data.skipped !== undefined ? data.skipped : res.atomx_agent_workflow.ignoredCount,
+            successCount: data.done !== undefined ? data.done : res.atomx_agent_workflow.successCount,
+            countdownText: data.countdownText !== undefined ? data.countdownText : res.atomx_agent_workflow.countdownText
+          };
+        }
+        chrome.storage.local.set(updates).catch(() => null);
+      });
+    }, 150);
+  }
 }
 
 function hideFloatingHud() {
@@ -1604,34 +1626,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       isStopped: true,
       active: false
     });
-    sendResponse({ success: true });
-    return true;
-  }
-
-  if (message.type === 'TOGGLE_WORKFLOW_PAUSE') {
-    isHudWorkflowPaused = Boolean(message.isPaused);
-    const pauseBtn = floatingHudEl?.querySelector('#hud-pause-btn');
-    if (pauseBtn) {
-      pauseBtn.textContent = isHudWorkflowPaused ? '▶️ Resume' : '⏸️ Pause';
-      pauseBtn.style.color = isHudWorkflowPaused ? '#34D399' : '#FBBF24';
-      pauseBtn.style.background = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
-    }
-    const badge = floatingHudEl?.querySelector('#hud-badge');
-    if (badge && !isWorkflowAborted) {
-      badge.textContent = isHudWorkflowPaused ? 'PAUSED' : 'RUNNING';
-      badge.style.color = isHudWorkflowPaused ? '#FBBF24' : '#10B981';
-    }
-    sendResponse({ success: true });
-    return true;
-  }
-
-  if (message.type === 'SKIP_WORKFLOW_ITEM') {
-    if (floatingHudEl) {
-      const statusEl = floatingHudEl.querySelector('#hud-status-text');
-      if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
-      const timerBadge = floatingHudEl.querySelector('#hud-timer-badge');
-      if (timerBadge) timerBadge.textContent = '⏭️ Skip';
-    }
     sendResponse({ success: true });
     return true;
   }
@@ -3713,13 +3707,14 @@ async function discoverTopActiveListTweets(params = {}) {
   const engagedAuthors = (stored?.atomx_follower_engaged_history && typeof stored.atomx_follower_engaged_history === 'object')
     ? stored.atomx_follower_engaged_history : {};
 
+  const isNewest = sortPriority === 'recent';
   const candidateMap = new Map();
   let consecutiveOlderCount = 0;
   let consecutiveEmptyScrolls = 0;
   let skippedCount = 0;
-  const maxScanScrolls = 50;
+  const maxScanScrolls = isNewest ? 10 : 50;
 
-  console.log(`[ATOMX FOLLOWERS] Scanning timeframe (${freshness}) for top posts. Mode: ${sortPriority === 'active' ? 'Most Active' : 'Newest First'}`);
+  console.log(`[ATOMX FOLLOWERS] Scanning posts (${freshness}). Mode: ${isNewest ? 'Newest First' : 'Most Active'}, Target: ${targetCount}`);
 
   for (let s = 0; s < maxScanScrolls; s++) {
     if (isWorkflowAborted) break;
@@ -3811,7 +3806,25 @@ async function discoverTopActiveListTweets(params = {}) {
           timestamp,
           ageMs
         });
+
+        // Fast exit inside pass if newest first and target reached
+        if (isNewest && candidateMap.size >= targetCount) {
+          break;
+        }
       }
+    }
+
+    // Fast exit if newest first and target reached
+    if (isNewest && candidateMap.size >= targetCount) {
+      console.log(`[ATOMX FOLLOWERS] Reached target count of ${targetCount} newest posts directly from top of timeline. Stopping scan immediately.`);
+      updateFloatingHud({
+        title: 'Followers Increase',
+        agentId: 'followers',
+        stateBadge: 'SCANNING',
+        statusText: `Found ${candidateMap.size}/${targetCount} newest posts. Starting engagement...`,
+        skipped: skippedCount
+      });
+      break;
     }
 
     if (candidateMap.size === initialCandidateCount) {
@@ -3830,13 +3843,24 @@ async function discoverTopActiveListTweets(params = {}) {
       consecutiveOlderCount = 0;
     }
 
-    const maxReplies = Array.from(candidateMap.values()).reduce((m, c) => Math.max(m, c.repliesCount || 0), 0);
-    updateFloatingHud({
-      title: 'Followers Increase',
-      stateBadge: 'SCANNING',
-      statusText: `Scanning list (${freshness})... Found ${candidateMap.size} posts (Highest: ${maxReplies} comments)`,
-      skipped: skippedCount
-    });
+    if (isNewest) {
+      updateFloatingHud({
+        title: 'Followers Increase',
+        agentId: 'followers',
+        stateBadge: 'SCANNING',
+        statusText: `Finding newest posts... Found ${candidateMap.size}/${targetCount}`,
+        skipped: skippedCount
+      });
+    } else {
+      const maxReplies = Array.from(candidateMap.values()).reduce((m, c) => Math.max(m, c.repliesCount || 0), 0);
+      updateFloatingHud({
+        title: 'Followers Increase',
+        agentId: 'followers',
+        stateBadge: 'SCANNING',
+        statusText: `Scanning list (${freshness})... Found ${candidateMap.size} posts (Highest: ${maxReplies} comments)`,
+        skipped: skippedCount
+      });
+    }
 
     if (consecutiveEmptyScrolls >= 8) break;
     await smoothScrollAndHydrate(700, 1000);
@@ -3847,7 +3871,7 @@ async function discoverTopActiveListTweets(params = {}) {
   if (sortPriority === 'active') {
     sorted = allCandidates.sort((a, b) => b.repliesCount - a.repliesCount);
   } else {
-    sorted = allCandidates.sort((a, b) => b.timestamp - a.timestamp);
+    sorted = allCandidates.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   }
 
   console.log(`[ATOMX FOLLOWERS] Discovered ${sorted.length} unengaged candidate posts in timeframe (${freshness}).`);

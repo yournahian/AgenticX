@@ -1009,14 +1009,23 @@ async function processAgentWorkflowStep() {
   // Scans list feed within timeframe, filters posts, queues top items, and engages directly.
   // =========================================================================
   if (agentId === 'followers' && (!items || items.length === 0)) {
-    const canonicalListUrl = options.targetListUrl || (options.listId ? `https://x.com/i/lists/${options.listId}` : null);
-    const rawFeedUrl = canonicalListUrl || options.feedUrl || 'https://x.com';
+    const listId = options.listId;
+    const isNewestFirst = (options.sortPriority === 'recent');
+    const searchUrl = (options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : null));
+    const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : null);
+    
+    // For 'recent', live search query natively presents newest tweets first at top!
+    const primaryFeedUrl = (isNewestFirst && searchUrl) ? searchUrl : (canonicalListUrl || searchUrl || options.feedUrl || 'https://x.com');
+    const fallbackFeedUrl = (primaryFeedUrl === searchUrl) ? canonicalListUrl : searchUrl;
     const targetCount = Number(options.targetCount) || 8;
     const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
 
-    await syncAgentHud(workflow, `Opening Twitter List timeline to discover top posts...`, 'SCANNING', 10);
+    const initialStatus = isNewestFirst
+      ? `Opening Twitter Live search for newest posts...`
+      : `Opening Twitter List timeline to discover top posts...`;
+    await syncAgentHud(workflow, initialStatus, 'SCANNING', 10);
     try {
-      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, rawFeedUrl);
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, primaryFeedUrl);
       agentWorkflowWorkingTabId = tabId;
       await waitForTabLoad(tabId, 15000);
       await delay(3000);
@@ -1035,10 +1044,10 @@ async function processAgentWorkflowStep() {
 
       let topTweets = Array.isArray(discRes?.topTweets) ? discRes.topTweets : [];
 
-      // Fallback: If canonical list yielded 0 tweets and searchFeedUrl exists, try search URL
-      if (topTweets.length === 0 && options.searchFeedUrl && options.searchFeedUrl !== rawFeedUrl) {
-        console.log('[ATOMX BG] Followers list returned 0 tweets, trying search URL fallback...');
-        await getOrCreateReusedTab(tabId, options.searchFeedUrl);
+      // Fallback: If primary feed yielded 0 tweets and fallbackFeedUrl exists, try fallback URL
+      if (topTweets.length === 0 && fallbackFeedUrl && fallbackFeedUrl !== primaryFeedUrl) {
+        console.log('[ATOMX BG] Followers primary feed returned 0 tweets, trying fallback URL...');
+        await getOrCreateReusedTab(tabId, fallbackFeedUrl);
         await waitForTabLoad(tabId, 15000);
         await delay(3000);
         discRes = await sendMessageToTab(tabId, {
