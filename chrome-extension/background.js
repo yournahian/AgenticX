@@ -759,6 +759,18 @@ let agentWorkflowWorkingTabId = null;
 let isAgentStepRunning = false;
 let currentWorkflowSessionId = 0;
 
+function isValidTwitterHandle(handle) {
+  if (!handle || typeof handle !== 'string') return false;
+  const clean = handle.replace(/^@+/, '').trim().toLowerCase();
+  const INVALID = [
+    'unknown', 'undefined', 'null', 'user', 'none', 'not logged in',
+    'home', 'explore', 'notifications', 'messages', 'i', 'compose',
+    'settings', 'search', 'hashtag', 'lists', 'communities',
+    'verified-orgs-signup', 'login', 'signup', 'jobs', 'premium'
+  ];
+  return clean.length >= 2 && !INVALID.includes(clean) && /^[\w_]{1,30}$/.test(clean);
+}
+
 /**
  * Instant Account Lock Enforcement:
  * Checks active Twitter account on working tab against AtomX verified account.
@@ -772,7 +784,7 @@ async function verifyTabAccountLock(tabId, expectedHandle, workflow) {
     const res = await sendMessageToTab(tabId, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }, 8000);
     const current = (res?.rawHandle || '').toLowerCase().trim();
 
-    if (current && current !== expected) {
+    if (isValidTwitterHandle(current) && current !== expected) {
       console.warn(`[ATOMX BG] ACCOUNT LOCK MISMATCH DETECTED! Active: @${current}, Expected: @${expected}`);
       await chrome.storage.local.set({
         atomx_account_lock_warning: {
@@ -801,7 +813,7 @@ async function verifyTabAccountLock(tabId, expectedHandle, workflow) {
       return { ok: false, current, expected, reason: 'ID_MISMATCH' };
     }
 
-    if (!current && res?.isDefinitelyLoggedOut) {
+    if (!isValidTwitterHandle(current) && res?.isDefinitelyLoggedOut) {
       await sendMessageToTab(tabId, {
         type: 'SHOW_ACCOUNT_MISMATCH_MODAL',
         expected,
@@ -817,6 +829,9 @@ async function verifyTabAccountLock(tabId, expectedHandle, workflow) {
       }
       return { ok: false, expected, reason: 'X_NOT_LOGGED_IN' };
     }
+
+    // Tab is either confirmed on verified handle or session is active (mobile drawer closed)
+    chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
   } catch (err) {
     console.warn('[ATOMX BG] verifyTabAccountLock check notice:', err);
   }

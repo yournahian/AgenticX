@@ -153,10 +153,23 @@ function getMainPostArticle() {
  * Detect the logged-in user's Twitter handle from navigation/profile links.
  * Supports both Desktop and Mobile browsers (Kiwi, Lemur, Mises, Yandex).
  */
+function isValidTwitterHandle(handle) {
+  if (!handle || typeof handle !== 'string') return false;
+  const clean = handle.replace(/^@+/, '').trim().toLowerCase();
+  const INVALID = [
+    'unknown', 'undefined', 'null', 'user', 'none', 'not logged in',
+    'home', 'explore', 'notifications', 'messages', 'i', 'compose',
+    'settings', 'search', 'hashtag', 'lists', 'communities',
+    'verified-orgs-signup', 'login', 'signup', 'jobs', 'premium'
+  ];
+  return clean.length >= 2 && !INVALID.includes(clean) && /^[\w_]{1,30}$/.test(clean);
+}
+
 function getLoggedInUserHandle() {
   const RESERVED_X_PATHS = [
     'home', 'explore', 'notifications', 'messages', 'i', 'compose',
-    'settings', 'search', 'hashtag', 'lists', 'communities', 'verified-orgs-signup', 'login', 'signup'
+    'settings', 'search', 'hashtag', 'lists', 'communities', 'verified-orgs-signup', 'login', 'signup',
+    'unknown', 'undefined', 'null', 'user', 'none', 'jobs', 'premium'
   ];
 
   try {
@@ -165,7 +178,7 @@ function getLoggedInUserHandle() {
     if (profileLink) {
       const href = profileLink.getAttribute('href') || '';
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
-      if (clean && !RESERVED_X_PATHS.includes(clean)) {
+      if (isValidTwitterHandle(clean)) {
         return clean;
       }
     }
@@ -175,7 +188,7 @@ function getLoggedInUserHandle() {
     if (switcher) {
       const text = switcher.innerText || switcher.textContent || '';
       const match = text.match(/@([\w_]{1,30})/);
-      if (match) return match[1].toLowerCase();
+      if (match && isValidTwitterHandle(match[1])) return match[1].toLowerCase();
     }
 
     // 3. Mobile Navigation Drawer Profile Link: a[data-testid="SideNav_Profile_Link"]
@@ -183,7 +196,7 @@ function getLoggedInUserHandle() {
     if (sideNavProfile) {
       const href = sideNavProfile.getAttribute('href') || '';
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
-      if (clean && !RESERVED_X_PATHS.includes(clean)) {
+      if (isValidTwitterHandle(clean)) {
         return clean;
       }
     }
@@ -193,7 +206,7 @@ function getLoggedInUserHandle() {
     if (mobileDrawerSwitcher) {
       const text = mobileDrawerSwitcher.innerText || mobileDrawerSwitcher.textContent || '';
       const match = text.match(/@([\w_]{1,30})/);
-      if (match) return match[1].toLowerCase();
+      if (match && isValidTwitterHandle(match[1])) return match[1].toLowerCase();
     }
 
     // 5. Mobile Top Bar User Menu Avatar (button[data-testid="TopNavBar_UserMenu_Button"]):
@@ -201,11 +214,11 @@ function getLoggedInUserHandle() {
     if (topUserMenu) {
       const aria = topUserMenu.getAttribute('aria-label') || '';
       const match = aria.match(/@([\w_]{1,30})/);
-      if (match) return match[1].toLowerCase();
+      if (match && isValidTwitterHandle(match[1])) return match[1].toLowerCase();
       const img = topUserMenu.querySelector('img');
       const alt = (img?.getAttribute('alt') || '').trim();
       const altMatch = alt.match(/@([\w_]{1,30})/);
-      if (altMatch) return altMatch[1].toLowerCase();
+      if (altMatch && isValidTwitterHandle(altMatch[1])) return altMatch[1].toLowerCase();
     }
 
     // 6. Tweet Status Page: User's own avatar in the inline reply box (universal on PC and Mobile)
@@ -213,7 +226,7 @@ function getLoggedInUserHandle() {
     if (inlineReplyUser) {
       const href = inlineReplyUser.getAttribute('href') || '';
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
-      if (clean && !RESERVED_X_PATHS.includes(clean)) {
+      if (isValidTwitterHandle(clean)) {
         return clean;
       }
     }
@@ -223,7 +236,7 @@ function getLoggedInUserHandle() {
     if (navProfileLink) {
       const href = navProfileLink.getAttribute('href') || '';
       const clean = href.replace(/^\//, '').split('/')[0].split('?')[0].replace('@', '').trim().toLowerCase();
-      if (clean && clean.length > 1 && !RESERVED_X_PATHS.includes(clean)) return clean;
+      if (isValidTwitterHandle(clean)) return clean;
     }
 
     // 8. Twitter React avatar container testid: data-testid="UserAvatar-Container-<handle>"
@@ -237,7 +250,7 @@ function getLoggedInUserHandle() {
     if (topAvatarContainer) {
       const tid = topAvatarContainer.getAttribute('data-testid') || '';
       const match = tid.match(/UserAvatar-Container-([\w_]{1,30})/i);
-      if (match && !RESERVED_X_PATHS.includes(match[1].toLowerCase())) {
+      if (match && isValidTwitterHandle(match[1])) {
         return match[1].toLowerCase();
       }
     }
@@ -268,6 +281,7 @@ async function waitForLoggedInUserHandle(timeoutMs = 2500) {
 }
 
 function showAccountMismatchModal(expectedHandle, actualHandle) {
+  if (!isValidTwitterHandle(actualHandle) && actualHandle !== 'Not Logged In') return;
   const existing = document.getElementById('atomx-account-mismatch-banner');
   if (existing) existing.remove();
 
@@ -290,8 +304,11 @@ function showAccountMismatchModal(expectedHandle, actualHandle) {
 async function verifyAccountLockOrAbort(expectedHandle) {
   if (!expectedHandle) return { ok: true };
   const expected = expectedHandle.replace(/^@/, '').toLowerCase().trim();
-  const current = ((await waitForLoggedInUserHandle(2500)) || '').toLowerCase().trim();
-  if (current && current !== expected) {
+  const rawCurrent = await waitForLoggedInUserHandle(2500);
+  const current = (rawCurrent || '').toLowerCase().trim();
+
+  // ONLY lock if current is a REAL, VALID Twitter handle that genuinely differs from expected!
+  if (isValidTwitterHandle(current) && current !== expected) {
     showAccountMismatchModal(expected, current);
     return {
       ok: false,
@@ -299,7 +316,7 @@ async function verifyAccountLockOrAbort(expectedHandle) {
       unauthorizedAccount: true
     };
   }
-  if (!current && isDefinitelyLoggedOut()) {
+  if (!isValidTwitterHandle(current) && isDefinitelyLoggedOut()) {
     showAccountMismatchModal(expected, 'Not Logged In');
     return {
       ok: false,
@@ -307,7 +324,9 @@ async function verifyAccountLockOrAbort(expectedHandle) {
       unauthorizedAccount: true
     };
   }
-  return { ok: true, current: current || expected };
+  // Clear any stale warning since session is valid
+  chrome.storage?.local?.remove('atomx_account_lock_warning').catch(() => null);
+  return { ok: true, current: expected };
 }
 
 /**
@@ -1816,7 +1835,8 @@ async function insertIntoTwitterInput(text) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' || message.type === 'GET_CURRENT_X_ACCOUNT') {
     (async () => {
-      const handle = await waitForLoggedInUserHandle(1500);
+      let handle = await waitForLoggedInUserHandle(1500);
+      if (!isValidTwitterHandle(handle)) handle = null;
       const isLoggedOut = !handle && isDefinitelyLoggedOut();
       sendResponse({
         success: true,

@@ -169,6 +169,18 @@ let autoUnfollowWorkingTabId = null;
 let reciprocatorWorkingTabId = null;
 let tgWorkingTabId = null; // Telegram Group Engage working tab
 
+function isValidTwitterHandle(handle) {
+  if (!handle || typeof handle !== 'string') return false;
+  const clean = handle.replace(/^@+/, '').trim().toLowerCase();
+  const INVALID = [
+    'unknown', 'undefined', 'null', 'user', 'none', 'not logged in',
+    'home', 'explore', 'notifications', 'messages', 'i', 'compose',
+    'settings', 'search', 'hashtag', 'lists', 'communities',
+    'verified-orgs-signup', 'login', 'signup', 'jobs', 'premium'
+  ];
+  return clean.length >= 2 && !INVALID.includes(clean) && /^[\w_]{1,30}$/.test(clean);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // ROBUST TAB HELPERS (DESKTOP & MOBILE BROWSER COMPATIBLE)
 // Works seamlessly on Chrome Desktop, Kiwi, Lemur, Mises, and Yandex.
@@ -1092,13 +1104,21 @@ function initBackgroundWorkflowSync() {
     }
     if (res?.atomx_account_lock_warning) {
       const w = res.atomx_account_lock_warning;
+      const verifiedHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').toLowerCase().trim();
+      const currentHandle = (w?.current || '').replace(/^@/, '').toLowerCase().trim();
       const banner = document.getElementById('accountMismatchBanner');
       const exp = document.getElementById('mismatchExpectedHandle');
       const act = document.getElementById('mismatchActualHandle');
-      if (banner && exp && act) {
-        exp.textContent = `@${(w.expected || '').replace(/^@/, '')}`;
-        act.textContent = `@${(w.current || '').replace(/^@/, '')}`;
-        banner.style.display = 'block';
+      if (isValidTwitterHandle(currentHandle) && currentHandle !== 'unknown' && currentHandle !== verifiedHandle) {
+        if (banner && exp && act) {
+          exp.textContent = `@${(w.expected || verifiedHandle).replace(/^@/, '')}`;
+          act.textContent = `@${currentHandle}`;
+          banner.style.display = 'block';
+        }
+      } else {
+        // Purge stale or invalid warning
+        if (banner) banner.style.display = 'none';
+        chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
       }
     }
   });
@@ -1118,11 +1138,13 @@ function initBackgroundWorkflowSync() {
       const banner = document.getElementById('accountMismatchBanner');
       const exp = document.getElementById('mismatchExpectedHandle');
       const act = document.getElementById('mismatchActualHandle');
-      if (w && banner && exp && act) {
-        exp.textContent = `@${(w.expected || '').replace(/^@/, '')}`;
-        act.textContent = `@${(w.current || '').replace(/^@/, '')}`;
+      const verifiedHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').toLowerCase().trim();
+      const currentHandle = (w?.current || '').replace(/^@/, '').toLowerCase().trim();
+      if (w && isValidTwitterHandle(currentHandle) && currentHandle !== 'unknown' && currentHandle !== verifiedHandle && banner && exp && act) {
+        exp.textContent = `@${(w.expected || verifiedHandle).replace(/^@/, '')}`;
+        act.textContent = `@${currentHandle}`;
         banner.style.display = 'block';
-      } else if (!w && banner) {
+      } else if (banner) {
         banner.style.display = 'none';
       }
     }
@@ -5619,10 +5641,10 @@ async function checkAccountVerificationLock() {
       const response = await chrome.tabs.sendMessage(checkTab.id, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }).catch(() => null);
       if (response && typeof response === 'object') {
         const currentHandle = (response.rawHandle || '').toLowerCase().trim();
-        if (currentHandle) {
+        if (isValidTwitterHandle(currentHandle)) {
           state.activeTwitterHandle = currentHandle;
           if (currentHandle !== verifiedHandle) {
-            // Definite Mismatch: Active tab is logged into a different account
+            // Definite Mismatch: Active tab is logged into a different valid account
             if (mismatchBanner) {
               mismatchBanner.style.display = 'block';
               if (mismatchExpected) mismatchExpected.textContent = displayHandle;
@@ -5653,14 +5675,20 @@ async function checkAccountVerificationLock() {
         } else {
           // Active authenticated session on Twitter (e.g. Mobile browser where drawer is collapsed)
           state.activeTwitterHandle = verifiedHandle;
+          if (mismatchBanner) mismatchBanner.style.display = 'none';
+          chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
         }
       } else {
         // Content script not yet attached or mobile tab response pending — trust verified handle
         state.activeTwitterHandle = verifiedHandle;
+        if (mismatchBanner) mismatchBanner.style.display = 'none';
+        chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
       }
     } else {
       // No active Twitter tab detected — trust verified handle
       state.activeTwitterHandle = verifiedHandle;
+      if (mismatchBanner) mismatchBanner.style.display = 'none';
+      chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
     }
   } catch (e) {
     state.activeTwitterHandle = verifiedHandle;
@@ -5674,6 +5702,7 @@ async function checkAccountVerificationLock() {
     barBadge.style.background = 'rgba(16, 185, 129, 0.15)';
   }
   if (barDot) barDot.style.background = '#10B981';
+  chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
   return { isAllowed: true };
 }
 
