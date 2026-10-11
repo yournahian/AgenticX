@@ -1068,8 +1068,8 @@ async function processAgentWorkflowStep() {
         return;
       }
 
-      // Populate workflow queue with top posts!
-      const workflowItems = topTweets.slice(0, targetCount).map(t => ({
+      // Populate workflow queue with discovered posts (including reserve items for skipped posts)
+      const workflowItems = topTweets.map(t => ({
         tweetUrl: t.tweetUrl,
         tweetId: t.tweetId,
         targetHandle: t.authorHandle,
@@ -1082,14 +1082,15 @@ async function processAgentWorkflowStep() {
       const updatedWorkflow = {
         ...workflow,
         items: workflowItems,
-        total: workflowItems.length,
+        total: targetCount,
+        targetCount,
         currentIndex: 0,
         successCount: 0,
-        ignoredCount: 0,
-        statusText: `Discovered ${workflowItems.length} top posts (${options.sortPriority === 'active' ? 'Most Active' : 'Newest First'}). Starting direct engagement...`
+        ignoredCount: discRes?.skippedCount || 0,
+        statusText: `Starting engagement on top ${targetCount} posts...`
       };
       await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
-      await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 15);
+      await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 5);
       setTimeout(() => processAgentWorkflowStep(), 800);
       return;
     } catch (fErr) {
@@ -1434,9 +1435,13 @@ async function processAgentWorkflowStep() {
       ? `${indexStr} Skipped ${displayTarget} (${result?.reason || 'already engaged'})`
       : `${indexStr} ✓ Engaged ${displayTarget}`;
 
-    await syncAgentHud(updatedWorkflow, statusLabel, 'ENGAGING', Math.round(((currentIndex + 1) / total) * 100));
+    const targetGoal = Number(options.targetCount || workflow.targetCount || total);
+    const targetReached = (targetGoal > 0) ? (newSuccess >= targetGoal) : (updatedWorkflow.currentIndex >= total);
+    const progressPct = targetGoal > 0 ? Math.min(100, Math.round((newSuccess / targetGoal) * 100)) : Math.round(((currentIndex + 1) / total) * 100);
 
-    if (updatedWorkflow.currentIndex < total) {
+    await syncAgentHud(updatedWorkflow, statusLabel, 'ENGAGING', progressPct);
+
+    if (!targetReached && updatedWorkflow.currentIndex < updatedWorkflow.items.length) {
       // Read centralized Anti-Ban Safety controls
       const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
       const safety = safetyRes?.atomx_safety_settings || {};

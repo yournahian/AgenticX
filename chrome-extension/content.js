@@ -3712,9 +3712,12 @@ async function discoverTopActiveListTweets(params = {}) {
   let consecutiveOlderCount = 0;
   let consecutiveEmptyScrolls = 0;
   let skippedCount = 0;
-  const maxScanScrolls = isNewest ? 10 : 50;
+  const maxScanScrolls = isNewest ? 4 : 50;
 
-  console.log(`[ATOMX FOLLOWERS] Scanning posts (${freshness}). Mode: ${isNewest ? 'Newest First' : 'Most Active'}, Target: ${targetCount}`);
+  console.log(`[ATOMX FOLLOWERS] Collecting posts. Mode: ${isNewest ? 'Newest First' : 'Most Active'}, Target: ${targetCount}`);
+
+  // Ensure tweet articles are rendered on the page
+  await waitForElement('article[data-testid="tweet"]', 10000);
 
   for (let s = 0; s < maxScanScrolls; s++) {
     if (isWorkflowAborted) break;
@@ -3744,12 +3747,12 @@ async function discoverTopActiveListTweets(params = {}) {
       // Skip own tweets
       if (authorHandle === loggedInHandle) continue;
 
-      // Check freshness
+      // Check freshness: ONLY enforce for 'active' mode. For 'newest', feed is already sorted newest first!
       const timeEl = art.querySelector('time');
       const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
       const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
       const ageMs = Date.now() - timestamp;
-      if (ageMs > freshnessMs) {
+      if (!isNewest && ageMs > freshnessMs) {
         foundOlderInPass++;
         continue;
       }
@@ -3807,21 +3810,21 @@ async function discoverTopActiveListTweets(params = {}) {
           ageMs
         });
 
-        // Fast exit inside pass if newest first and target reached
-        if (isNewest && candidateMap.size >= targetCount) {
+        // Fast exit inside pass if newest first and target count + reserve buffer reached
+        if (isNewest && candidateMap.size >= targetCount + 3) {
           break;
         }
       }
     }
 
-    // Fast exit if newest first and target reached
+    // Fast exit if newest first and target posts reached
     if (isNewest && candidateMap.size >= targetCount) {
-      console.log(`[ATOMX FOLLOWERS] Reached target count of ${targetCount} newest posts directly from top of timeline. Stopping scan immediately.`);
+      console.log(`[ATOMX FOLLOWERS] Found ${candidateMap.size} newest posts directly from top of timeline. Scan complete.`);
       updateFloatingHud({
         title: 'Followers Increase',
         agentId: 'followers',
-        stateBadge: 'SCANNING',
-        statusText: `Found ${candidateMap.size}/${targetCount} newest posts. Starting engagement...`,
+        stateBadge: 'ENGAGING',
+        statusText: `Selected top ${Math.min(candidateMap.size, targetCount)} newest posts. Starting engagement...`,
         skipped: skippedCount
       });
       break;
@@ -3833,7 +3836,7 @@ async function discoverTopActiveListTweets(params = {}) {
       consecutiveEmptyScrolls = 0;
     }
 
-    if (foundOlderInPass > 3) {
+    if (!isNewest && foundOlderInPass > 3) {
       consecutiveOlderCount++;
       if (consecutiveOlderCount >= 3) {
         console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}). Deep scan complete.`);
@@ -3847,8 +3850,8 @@ async function discoverTopActiveListTweets(params = {}) {
       updateFloatingHud({
         title: 'Followers Increase',
         agentId: 'followers',
-        stateBadge: 'SCANNING',
-        statusText: `Finding newest posts... Found ${candidateMap.size}/${targetCount}`,
+        stateBadge: 'ENGAGING',
+        statusText: `Getting newest posts... Found ${candidateMap.size}/${targetCount}`,
         skipped: skippedCount
       });
     } else {
@@ -3862,8 +3865,8 @@ async function discoverTopActiveListTweets(params = {}) {
       });
     }
 
-    if (consecutiveEmptyScrolls >= 8) break;
-    await smoothScrollAndHydrate(700, 1000);
+    if (consecutiveEmptyScrolls >= 5) break;
+    await smoothScrollAndHydrate(600, 800);
   }
 
   const allCandidates = Array.from(candidateMap.values());
@@ -3874,11 +3877,12 @@ async function discoverTopActiveListTweets(params = {}) {
     sorted = allCandidates.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   }
 
-  console.log(`[ATOMX FOLLOWERS] Discovered ${sorted.length} unengaged candidate posts in timeframe (${freshness}).`);
+  console.log(`[ATOMX FOLLOWERS] Discovered ${sorted.length} unengaged candidate posts (${skippedCount} skipped from top).`);
 
   return {
     success: true,
     topTweets: sorted,
+    skippedCount,
     aborted: isWorkflowAborted
   };
 }
