@@ -2729,10 +2729,14 @@ function parseDefaulterHandles(raw) {
     'posts', 'tweet', 'tweets', 'link', 'links', 'telegram', 't', 'me',
     'joinchat', 'photo', 'video', 'analytics', 'following', 'followers', 'verified',
     'bot', 'ape_bot', 'apebot', 'reply', 'replies', 'in', 'to', 'engage', 'with',
-    'vip', 'star', 'raid', 'raids', 'member', 'members', 'admin', 'mod'
+    'vip', 'star', 'raid', 'raids', 'member', 'members', 'admin', 'mod',
+    'done', 'please', 'check', 'good', 'morning', 'night', 'support', 'great',
+    'today', 'here', 'project', 'together', 'everyone', 'rules', 'pinned', 'message',
+    'like', 'comment', 'retweet', 'repost', 'follow', 'thanks', 'thank', 'welcome',
+    'have', 'from', 'this', 'that', 'they', 'what', 'when', 'where', 'your', 'my'
   ]);
 
-  // Stage 1: High-Priority — Extract username from x.com or twitter.com post/profile URLs
+  // Stage 1: High-Priority — Extract usernames from x.com or twitter.com post/profile URLs
   const urlRegex = /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/([A-Za-z0-9_]{1,25})(?:\/status\/\d+|\/photo|\/video|\/?\b)/gi;
   let match;
   while ((match = urlRegex.exec(raw)) !== null) {
@@ -2742,10 +2746,10 @@ function parseDefaulterHandles(raw) {
     }
   }
 
-  // Remove URLs before scanning remaining raw text to avoid matching status IDs or URL paths
+  // Remove URLs before scanning remaining raw text
   const textWithoutUrls = raw.replace(/(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/[^\s\n\r]*/gi, ' ');
 
-  // Stage 2: Extract explicit @handles (e.g. @reduansheikh11, @Bharnij, @fepz_, @ManuelMartial018)
+  // Stage 2: Extract explicit @handles (e.g. @reduansheikh11, @Bharnij, @fepz_)
   const atRegex = /@([A-Za-z0-9_]{1,25})\b/g;
   while ((match = atRegex.exec(textWithoutUrls)) !== null) {
     const handle = match[1].toLowerCase().trim();
@@ -2754,28 +2758,33 @@ function parseDefaulterHandles(raw) {
     }
   }
 
-  // Stage 3: Process raw lines (handles telegram raid logs, bot announcements, numbered lists)
-  const lines = textWithoutUrls.split(/[\r\n]+/);
-  for (let line of lines) {
-    line = line.trim();
-    if (!line) continue;
-    // Skip telegram timestamp lines like [20-Sep-26 1:52 AM]
-    if (/^\[\d{1,2}-[A-Za-z]{3}-\d{2,4}/.test(line)) continue;
-    // Skip telegram quote reply lines starting with >
-    if (line.startsWith('>')) continue;
+  // Stage 3: If NO explicit @handles or URLs found, process structured lists (one handle per line or comma-separated)
+  // Only accept tokens if the line is NOT a conversational sentence
+  if (clean.size === 0) {
+    const lines = textWithoutUrls.split(/[\r\n]+/);
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+      // Skip telegram timestamps or quote reply lines
+      if (/^\[\d{1,2}-[A-Za-z]{3}-\d{2,4}/.test(line) || line.startsWith('>')) continue;
 
-    // Clean bot labels, badges, emojis
-    const cleanLine = line
-      .replace(/#\d+\b/g, '')
-      .replace(/^\d+[\.\)\-:\s]+/g, '')
-      .replace(/[★☆💹🔥✨🔴]/g, '')
-      .trim();
+      // Clean bot labels, numbering, badges
+      const cleanLine = line
+        .replace(/#\d+\b/g, '')
+        .replace(/^\d+[\.\)\-:\s]+/g, '')
+        .replace(/[★☆💹🔥✨🔴•\-]/g, '')
+        .trim();
 
-    const tokens = cleanLine.split(/[\s,;|]+/);
-    for (const token of tokens) {
-      const h = token.replace(/^@/, '').toLowerCase().trim();
-      if (/^[a-z0-9_]{3,25}$/.test(h) && !RESERVED_WORDS.has(h) && !/^\d+$/.test(h)) {
-        clean.add(h);
+      const words = cleanLine.split(/\s+/).filter(Boolean);
+      // Conversational safeguard: If a line has 4+ English words, it's a message, not a handle list!
+      if (words.length > 3) continue;
+
+      const tokens = cleanLine.split(/[\s,;|]+/);
+      for (const token of tokens) {
+        const h = token.replace(/^@/, '').toLowerCase().trim();
+        if (/^[a-z0-9_]{3,25}$/.test(h) && !RESERVED_WORDS.has(h) && !/^\d+$/.test(h)) {
+          clean.add(h);
+        }
       }
     }
   }
@@ -2854,11 +2863,8 @@ async function startDefaulterAuditWorkflow() {
     if (state.isAborted) return;
 
     const auditRes = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(tab.id, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 100 }, (res) => resolve(res || { success: false, commenters: [] }));
+      chrome.tabs.sendMessage(tabId, { type: 'AUDIT_POST_DEFAULTERS', maxScrolls: 100 }, (res) => resolve(res || { success: false, commenters: [] }));
     });
-
-    safeRemoveTab(tab?.id);
-    defaulterActiveTabId = null;
 
     if (state.isAborted) {
       if (heading) heading.textContent = 'Audit Stopped by User';

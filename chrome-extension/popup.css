@@ -677,59 +677,93 @@ body.dark .icon-btn:hover {
 /* Special High-Tech Control Buttons: Reset, Pause, Skip, Stop */
 /* Reset Buttons */
 button[id^="reset"] {
-  background: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%) !important;
-  border: 1px solid #CBD5E1 !important;
-  color: #475569 !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+/* Modernized Agent Action Buttons (Reset, Pause, Skip, Stop) */
+button[id^="reset"],
+button[id^="pause"],
+button[id^="skip"],
+button[id^="stop"] {
+  border-radius: 8px !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.35px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  padding: 7px 10px !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  user-select: none !important;
+  outline: none !important;
+  white-space: nowrap !important;
+}
+
+button[id^="reset"] svg,
+button[id^="pause"] svg,
+button[id^="skip"] svg,
+button[id^="stop"] svg {
+  flex-shrink: 0 !important;
+  width: 13px !important;
+  height: 13px !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+  transition: transform 0.15s ease !important;
+}
+
+/* Reset Buttons */
+button[id^="reset"] {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%) !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
+  color: #CBD5E1 !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
 }
 
 button[id^="reset"]:hover {
-  background: #FFFFFF !important;
-  border-color: #38BDF8 !important;
-  color: #0284C7 !important;
-  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.18) !important;
+  background: linear-gradient(135deg, rgba(51, 65, 85, 0.95) 0%, rgba(30, 41, 59, 1) 100%) !important;
+  border-color: rgba(56, 189, 248, 0.6) !important;
+  color: #38BDF8 !important;
+  box-shadow: 0 5px 16px rgba(14, 165, 233, 0.28) !important;
   transform: translateY(-1.5px);
 }
 
 /* Pause Buttons */
 button[id^="pause"] {
   background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%) !important;
-  border: 1px solid rgba(251, 191, 36, 0.45) !important;
+  border: 1px solid rgba(251, 191, 36, 0.6) !important;
   color: #FFFFFF !important;
-  box-shadow: 0 3px 12px rgba(217, 119, 6, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
 }
 
 button[id^="pause"]:hover {
   background: linear-gradient(135deg, #FBBF24 0%, #F59E0B 100%) !important;
-  box-shadow: 0 5px 16px rgba(217, 119, 6, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
   transform: translateY(-1.5px);
 }
 
 /* Skip Buttons */
 button[id^="skip"] {
   background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%) !important;
-  border: 1px solid rgba(96, 165, 250, 0.45) !important;
+  border: 1px solid rgba(96, 165, 250, 0.6) !important;
   color: #FFFFFF !important;
-  box-shadow: 0 3px 12px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
 }
 
 button[id^="skip"]:hover {
   background: linear-gradient(135deg, #60A5FA 0%, #3B82F6 100%) !important;
-  box-shadow: 0 5px 16px rgba(37, 99, 235, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
   transform: translateY(-1.5px);
 }
 
 /* Stop Buttons */
 button[id^="stop"] {
   background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%) !important;
-  border: 1px solid rgba(248, 113, 113, 0.45) !important;
+  border: 1px solid rgba(248, 113, 113, 0.65) !important;
   color: #FFFFFF !important;
-  box-shadow: 0 3px 12px rgba(220, 38, 38, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
 }
 
 button[id^="stop"]:hover {
   background: linear-gradient(135deg, #F87171 0%, #EF4444 100%) !important;
-  box-shadow: 0 5px 16px rgba(220, 38, 38, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 6px 18px rgba(220, 38, 38, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
   transform: translateY(-1.5px);
 }
 

@@ -792,6 +792,60 @@ async function typeTextHumanLike(editor, text) {
 }
 
 /**
+ * Universal detector: Checks if target profile is protected/locked or comment section is turned off/restricted.
+ */
+function isTargetRestrictedOrCommentsLocked(targetArticle = null) {
+  try {
+    const pageText = (document.body ? document.body.innerText : '') || '';
+
+    // 1. Check if profile account is locked/protected
+    const isProtected = pageText.includes('These posts are protected') ||
+                        pageText.includes('Only confirmed followers have access') ||
+                        !!document.querySelector('svg[data-testid="icon-lock"], [aria-label*="Protected account" i], [aria-label*="Private account" i]');
+    if (isProtected) {
+      return { restricted: true, reason: 'Profile account is locked/protected' };
+    }
+
+    // 2. Check inline composer restriction box
+    const inlineBox = document.querySelector('div[data-testid="inline_reply"]');
+    const inlineText = (inlineBox?.innerText || '').toLowerCase();
+    if (
+      inlineText.includes('who can reply') ||
+      inlineText.includes('replies to this post are disabled') ||
+      inlineText.includes('replies are restricted') ||
+      inlineText.includes('accounts the author mentioned') ||
+      inlineText.includes('people the author follows')
+    ) {
+      return { restricted: true, reason: 'Comments/replies are restricted on this post' };
+    }
+
+    // 3. Check reply button on target article
+    if (targetArticle) {
+      const replyBtn = targetArticle.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+      if (!replyBtn) {
+        return { restricted: true, reason: 'No reply button available (comments turned off)' };
+      }
+      const isBtnDisabled = replyBtn.getAttribute('aria-disabled') === 'true' || replyBtn.disabled || replyBtn.getAttribute('disabled') !== null;
+      const btnLabel = (replyBtn.getAttribute('aria-label') || '').toLowerCase();
+      if (isBtnDisabled || btnLabel.includes('disabled') || btnLabel.includes('restricted')) {
+        return { restricted: true, reason: 'Reply button is disabled/restricted' };
+      }
+    }
+
+    // 4. Check global page notice
+    if (
+      pageText.includes('Replies to this post are disabled') ||
+      pageText.includes('Who can reply? People @') ||
+      pageText.includes('Who can reply? Accounts @')
+    ) {
+      return { restricted: true, reason: 'Replies disabled by author' };
+    }
+  } catch (e) {}
+
+  return { restricted: false };
+}
+
+/**
  * Universal, rock-solid Twitter / X Comment & Reply Engine
  * Reliably opens modal dialogs for comments and timeline posts,
  * scopes typing & submit strictly to the dialog, and prevents self-commenting bugs.
@@ -800,6 +854,14 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   if (!commentText || isWorkflowAborted || isWorkflowItemSkipped) {
     if (isWorkflowItemSkipped) closeAnyOpenTwitterDialog();
     return { success: false, error: 'Empty text, skipped or aborted' };
+  }
+
+  // Instant check: If comments are locked/restricted, skip immediately without waiting
+  const restriction = isTargetRestrictedOrCommentsLocked(targetArticle);
+  if (restriction.restricted) {
+    console.warn(`[ATOMX COMMENT ENGINE] Comments locked/restricted: ${restriction.reason}. Skipping.`);
+    closeAnyOpenTwitterDialog();
+    return { success: false, skipped: true, commentsRestricted: true, error: restriction.reason };
   }
 
   console.log('[ATOMX COMMENT ENGINE] Posting comment:', commentText);
@@ -1104,20 +1166,20 @@ function ensureFloatingHud() {
       </div>
 
       <!-- Action Controls: Pause/Resume, Skip, Stop -->
-      <div style="display: flex; gap: 6px; margin-top: 4px;">
-        <button id="hud-pause-btn" style="flex: 1; padding: 7px 0; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 8px; color: #FBBF24; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;" title="Pause or Resume current workflow">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      <div style="display: flex; gap: 7px; margin-top: 6px;">
+        <button id="hud-pause-btn" style="flex: 1; padding: 7.5px 0; background: linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%); border: 1px solid rgba(251, 191, 36, 0.55); border-radius: 8px; color: #FEF3C7; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 3px 10px rgba(245, 158, 11, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Pause or Resume current workflow">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>
           <span id="hud-pause-text">Pause</span>
         </button>
-        <button id="hud-skip-action-btn" style="flex: 1; padding: 7px 0; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); border-radius: 8px; color: #60A5FA; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;" title="Skip current tweet/profile link immediately">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        <button id="hud-skip-action-btn" style="flex: 1; padding: 7.5px 0; background: linear-gradient(135deg, rgba(59, 130, 246, 0.25) 0%, rgba(37, 99, 235, 0.38) 100%); border: 1px solid rgba(96, 165, 250, 0.55); border-radius: 8px; color: #EFF6FF; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 3px 10px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.2); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Skip current tweet/profile link immediately">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 19L14 12L5 5v14z"/><rect x="16" y="5" width="3" height="14" rx="1.5"/></svg>
           <span>Skip</span>
         </button>
-        <button id="hud-stop-btn" style="flex: 1; padding: 7px 0; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 8px; color: #F87171; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.15s ease;" title="Completely abort and stop workflow">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        <button id="hud-stop-btn" style="flex: 1; padding: 7.5px 0; background: linear-gradient(135deg, rgba(239, 68, 68, 0.25) 0%, rgba(220, 38, 38, 0.4) 100%); border: 1px solid rgba(248, 113, 113, 0.6); border-radius: 8px; color: #FEF2F2; font-size: 11px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 3px 10px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2); transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);" title="Completely abort and stop workflow">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5.5" y="5.5" width="13" height="13" rx="3.5"/></svg>
           <span>Stop</span>
         </button>
-        <button id="hud-dismiss-btn" style="flex: 1; padding: 7px 0; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 8px; color: #CBD5E1; font-size: 11px; font-weight: 700; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 4px;" title="Dismiss HUD">
+        <button id="hud-dismiss-btn" style="flex: 1; padding: 7.5px 0; background: rgba(100, 116, 139, 0.2); border: 1px solid rgba(100, 116, 139, 0.4); border-radius: 8px; color: #CBD5E1; font-size: 11px; font-weight: 700; cursor: pointer; display: none; align-items: center; justify-content: center; gap: 4px;" title="Dismiss HUD">
           Dismiss
         </button>
       </div>
@@ -1131,11 +1193,11 @@ function ensureFloatingHud() {
     const pauseBtn = hud.querySelector('#hud-pause-btn');
     if (pauseBtn) {
       pauseBtn.innerHTML = isHudWorkflowPaused
-        ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span id="hud-pause-text">Resume</span>`
-        : `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg><span id="hud-pause-text">Pause</span>`;
-      pauseBtn.style.color = isHudWorkflowPaused ? '#34D399' : '#FBBF24';
-      pauseBtn.style.background = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
-      pauseBtn.style.borderColor = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
+        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg><span id="hud-pause-text">Resume</span>`
+        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg><span id="hud-pause-text">Pause</span>`;
+      pauseBtn.style.color = isHudWorkflowPaused ? '#D1FAE5' : '#FEF3C7';
+      pauseBtn.style.background = isHudWorkflowPaused ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.4) 100%)' : 'linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(217, 119, 6, 0.35) 100%)';
+      pauseBtn.style.borderColor = isHudWorkflowPaused ? 'rgba(52, 211, 153, 0.6)' : 'rgba(251, 191, 36, 0.55)';
     }
     const badge = hud.querySelector('#hud-badge');
     if (badge) {
@@ -1978,6 +2040,20 @@ async function executeAutonomousTweetWorkflow(params) {
   const shouldLike = actions.like && !isAlreadyLiked;
   const shouldComment = actions.comment && !isAlreadyCommented;
 
+  if (shouldComment) {
+    const restriction = isTargetRestrictedOrCommentsLocked(mainArticle);
+    if (restriction.restricted) {
+      console.log(`[ATOMX] Tweet comments restricted: ${restriction.reason}. Auto-skipping.`);
+      return {
+        success: true,
+        skipped: true,
+        ignored: true,
+        reason: restriction.reason,
+        performed: [`Auto-Skipped (${restriction.reason})`]
+      };
+    }
+  }
+
   if (isAlreadyLiked && actions.like) {
     performed.push('Already Liked (Skipped like)');
   }
@@ -2663,6 +2739,13 @@ async function engageAndFollowProfile(options = {}) {
     return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
   }
 
+  // Auto-skip if profile is protected or locked
+  const profileRestriction = isTargetRestrictedOrCommentsLocked();
+  if (profileRestriction.restricted) {
+    console.log(`[ATOMX] @${targetHandle} is protected/locked: ${profileRestriction.reason}. Auto-skipping.`);
+    return { success: true, skipped: true, ignored: true, reason: profileRestriction.reason };
+  }
+
   try {
     // Step 1: Follow & Smart Unfollow Status Check
     const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
@@ -2778,6 +2861,11 @@ async function engageAndFollowProfile(options = {}) {
 
     // Step 6: Generate AI Reply and comment on the primary recent post
     if (replyPosts && targetRecentPost && !isWorkflowAborted && !isWorkflowItemSkipped) {
+      const postRestriction = isTargetRestrictedOrCommentsLocked(targetRecentPost);
+      if (postRestriction.restricted) {
+        console.log(`[ATOMX] Comments restricted on @${targetHandle}'s post: ${postRestriction.reason}. Auto-skipping profile.`);
+        return { success: true, skipped: true, ignored: true, reason: postRestriction.reason };
+      }
       try {
         const tweetData = extractTweetData(targetRecentPost);
         const tweetText = tweetData.text || '';
@@ -3204,11 +3292,21 @@ async function auditPostCommenters(params = {}) {
 
       const userEl = art.querySelector('div[data-testid="User-Name"]');
       if (userEl) {
+        // 1. Direct handle match from User-Name text: @username
+        const handleMatch = (userEl.innerText || userEl.textContent || '').match(/@([a-zA-Z0-9_]{1,25})/);
+        if (handleMatch) {
+          const clean = handleMatch[1].toLowerCase().trim();
+          if (clean && clean !== mainHandle && !['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'search', 'hashtag', 'settings'].includes(clean)) {
+            commenters.add(clean);
+          }
+        }
+
+        // 2. Also check profile link
         const links = userEl.querySelectorAll('a[href^="/"]');
         for (const link of links) {
           const href = (link.getAttribute('href') || '').replace(/^\//, '').split('?')[0].split('/')[0].toLowerCase().trim();
-          if (href && !['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(href)) {
-            if (href !== mainHandle) {
+          if (href && !['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'search', 'hashtag', 'settings'].includes(href)) {
+            if (href !== mainHandle && /^[a-z0-9_]{1,25}$/.test(href)) {
               commenters.add(href);
             }
             break;
