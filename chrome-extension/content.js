@@ -257,7 +257,13 @@ async function verifyAccountLockOrAbort(expectedHandle) {
  * Check if the logged-in user has already replied/commented on this tweet
  */
 function hasUserAlreadyCommented(myHandle) {
-  if (!myHandle) return false;
+  if (!myHandle || typeof myHandle !== 'string') return false;
+  const cleanHandle = myHandle.replace(/^@+/, '').trim().toLowerCase();
+  // Never false-positive match reserved words, routes, or single-character strings
+  if (cleanHandle.length < 3 || ['i', 'user', 'home', 'explore', 'notifications', 'messages', 'compose', 'settings', 'premium', 'jobs', 'lists', 'unknown'].includes(cleanHandle)) {
+    return false;
+  }
+
   const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
   if (articles.length <= 1) return false;
 
@@ -265,8 +271,11 @@ function hasUserAlreadyCommented(myHandle) {
   const comments = articles.slice(1);
   return comments.some(c => {
     const userEl = c.querySelector('div[data-testid="User-Name"]');
-    const txt = userEl ? userEl.innerText.toLowerCase() : '';
-    return txt.includes(`@${myHandle}`);
+    if (!userEl) return false;
+    const txt = userEl.innerText.toLowerCase();
+    // Word boundary regex so @username matches only exact handle, not substrings
+    const regex = new RegExp(`@${cleanHandle}(?:\\b|[^a-zA-Z0-9_]|$)`, 'i');
+    return regex.test(txt);
   });
 }
 
@@ -324,7 +333,7 @@ function gentleScrollIntoView(element) {
  * wait for scroll animation to settle so the button is visibly shown on screen, and THEN engage.
  */
 async function scrollElementIntoViewAndEnsureVisible(element, blockPosition = 'center') {
-  if (!element) return false;
+  if (!element || typeof element.getBoundingClientRect !== 'function') return false;
   try {
     const vh = window.innerHeight || document.documentElement.clientHeight;
     let rect = element.getBoundingClientRect();
@@ -1624,8 +1633,8 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     }
 
     if (changes.atomx_skip_current !== undefined) {
-      if (changes.atomx_skip_current.newValue === true) {
-        isWorkflowItemSkipped = true;
+      isWorkflowItemSkipped = Boolean(changes.atomx_skip_current.newValue);
+      if (isWorkflowItemSkipped) {
         closeAnyOpenTwitterDialog();
       }
     }
@@ -2038,6 +2047,7 @@ function sanitizeClientComment(text, maxWords = 10) {
 async function executeAutonomousTweetWorkflow(params) {
   isWorkflowAborted = false;
   isWorkflowItemSkipped = false;
+  await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
 
   // 1-to-1 Verified Account Enforcement
   if (params.verifiedXHandle) {
@@ -2053,12 +2063,20 @@ async function executeAutonomousTweetWorkflow(params) {
 
   console.log('[ATOMX AUTONOMOUS WORKFLOW] Starting execution with actions:', actions);
 
-  // 1. Identify MAIN POST article (never a comment!)
-  const mainArticle = getMainPostArticle() || document;
+  // 1. Identify MAIN POST article (wait for tweet DOM hydration up to 3.5s)
+  let mainArticle = getMainPostArticle();
+  if (!mainArticle) {
+    for (let r = 0; r < 7; r++) {
+      await sleep(500);
+      mainArticle = getMainPostArticle();
+      if (mainArticle) break;
+    }
+  }
+  if (!mainArticle) mainArticle = document;
 
   // 2. Detect already liked & already commented status
-  const isAlreadyLiked = !!mainArticle.querySelector('button[data-testid="unlike"]');
-  const loggedInHandle = getLoggedInUserHandle();
+  const isAlreadyLiked = isPostAlreadyLiked(mainArticle);
+  const loggedInHandle = getLoggedInUserHandle() || (params.verifiedXHandle || '').replace(/^@+/, '');
   const isAlreadyCommented = hasUserAlreadyCommented(loggedInHandle);
 
   console.log(`[ATOMX STATUS CHECK] isAlreadyLiked: ${isAlreadyLiked}, isAlreadyCommented: ${isAlreadyCommented} (user: @${loggedInHandle || 'unknown'})`);

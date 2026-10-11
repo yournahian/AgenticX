@@ -333,11 +333,12 @@ function extractTweetLinks(rawText) {
   EXT_STATUS_REGEX.lastIndex = 0;
   let match;
   while ((match = EXT_STATUS_REGEX.exec(rawText)) !== null) {
-    const handle = match[1] || 'user';
+    let handle = (match[1] || 'user').replace(/^@+/, '');
+    if (handle === 'i' || handle === 'intent') handle = 'user';
     const tweetId = match[2];
     results.push({
       tweetId,
-      handle: handle.startsWith('@') ? handle : `@${handle}`,
+      handle,
       canonicalUrl: `https://x.com/${handle}/status/${tweetId}`,
       rawMatch: match[0]
     });
@@ -349,7 +350,7 @@ function extractTweetLinks(rawText) {
     const tweetId = match[1];
     results.push({
       tweetId,
-      handle: '@unknown',
+      handle: 'user',
       canonicalUrl: `https://x.com/i/status/${tweetId}`,
       rawMatch: match[0]
     });
@@ -668,9 +669,13 @@ function updateTelegramProgressUI(raidState) {
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   if (tgBar) tgBar.style.width = `${raidState.active ? Math.max(5, pct) : (done + skipped >= total ? 100 : pct)}%`;
 
+  const cleanBtn = document.getElementById('cleanTgInputBtn');
+  const resetBtn = document.getElementById('resetTelegramQueueBtn');
+
   if (raidState.active) {
-    if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
-    if (stopBtn) stopBtn.style.display = 'inline-block';
+    if (runBtn) runBtn.style.display = 'none';
+    if (cleanBtn) cleanBtn.style.display = 'none';
+    if (resetBtn) resetBtn.style.display = 'none';
     if (pauseBtn) {
       pauseBtn.style.display = 'inline-flex';
       const pSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>`;
@@ -680,7 +685,8 @@ function updateTelegramProgressUI(raidState) {
       pauseBtn.style.borderColor = raidState.isPaused ? 'rgba(52, 211, 153, 0.6)' : '';
       pauseBtn.style.color = raidState.isPaused ? '#34D399' : '';
     }
-    if (skipBtn) skipBtn.style.display = 'inline-block';
+    if (skipBtn) skipBtn.style.display = 'inline-flex';
+    if (stopBtn) stopBtn.style.display = 'inline-flex';
     if (tgStateBadge) tgStateBadge.textContent = raidState.isPaused ? 'PAUSED' : (raidState.stateBadge || 'ENGAGING');
     if (tgStatus && raidState.statusText) tgStatus.textContent = raidState.statusText;
     if (tgCountdown) {
@@ -692,7 +698,9 @@ function updateTelegramProgressUI(raidState) {
       }
     }
   } else if (raidState.isStopped) {
-    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
+    if (runBtn) { runBtn.style.display = 'inline-flex'; runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
+    if (cleanBtn) cleanBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
@@ -700,7 +708,9 @@ function updateTelegramProgressUI(raidState) {
     if (tgStatus) tgStatus.textContent = raidState.statusText || 'Workflow stopped by user.';
     if (tgCountdown) tgCountdown.style.display = 'none';
   } else if (done + skipped >= total && total > 0) {
-    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
+    if (runBtn) { runBtn.style.display = 'inline-flex'; runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
+    if (cleanBtn) cleanBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';
@@ -876,12 +886,13 @@ function updateAllStopButtonsUI() {
     { startBtn: 'runReplyBackBtn', resetBtn: 'resetReplyBackQueueBtn', stopBtn: 'stopReplyBackBtn', pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn', badge: 'replyBackStateBadge', status: 'replyBackLiveStatusText' },
     { startBtn: 'runAutoUnfollowBtn', resetBtn: 'resetUnfollowQueueBtn', stopBtn: 'stopAutoUnfollowBtn', pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn', badge: 'unfollowStateBadge', status: 'unfollowLiveStatusText' },
     { startBtn: 'runReciprocatorBtn', resetBtn: 'resetReciprocatorQueueBtn', stopBtn: 'stopReciprocatorBtn', pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn', badge: 'reciprocatorStateBadge', status: 'reciprocatorLiveStatusText' },
-    { startBtn: 'runTgEngageBtn', resetBtn: 'resetTelegramQueueBtn', stopBtn: 'stopTgEngageBtn', pauseBtn: 'pauseTgEngageBtn', skipBtn: 'skipTgEngageBtn', badge: 'tgStateBadge', status: 'tgLiveStatus' }
+    { startBtn: 'runTgEngageBtn', resetBtn: 'resetTelegramQueueBtn', cleanBtn: 'cleanTgInputBtn', stopBtn: 'stopTgEngageBtn', pauseBtn: 'pauseTgEngageBtn', skipBtn: 'skipTgEngageBtn', badge: 'tgStateBadge', status: 'tgLiveStatus' }
   ];
 
   configs.forEach(cfg => {
     const start = document.getElementById(cfg.startBtn);
     const reset = cfg.resetBtn ? document.getElementById(cfg.resetBtn) : null;
+    const clean = cfg.cleanBtn ? document.getElementById(cfg.cleanBtn) : null;
     const stop = document.getElementById(cfg.stopBtn);
     const pause = cfg.pauseBtn ? document.getElementById(cfg.pauseBtn) : null;
     const skip = cfg.skipBtn ? document.getElementById(cfg.skipBtn) : null;
@@ -889,6 +900,7 @@ function updateAllStopButtonsUI() {
     const status = cfg.status ? document.getElementById(cfg.status) : null;
     if (start) start.style.display = 'inline-flex';
     if (reset) reset.style.display = 'inline-flex';
+    if (clean) clean.style.display = 'inline-flex';
     if (stop) stop.style.display = 'none';
     if (pause) pause.style.display = 'none';
     if (skip) skip.style.display = 'none';
@@ -1963,10 +1975,15 @@ function initAgentListeners() {
     const tgStatus = document.getElementById('tgLiveStatusText');
     const tgCountdown = document.getElementById('tgCountdownText');
 
-    if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ Raid Running...'; }
+    const cleanBtn = document.getElementById('cleanTgInputBtn');
+    const resetBtn = document.getElementById('resetTelegramQueueBtn');
+
+    if (runBtn) runBtn.style.display = 'none';
+    if (cleanBtn) cleanBtn.style.display = 'none';
+    if (resetBtn) resetBtn.style.display = 'none';
     if (pauseBtn) { pauseBtn.style.display = 'inline-flex'; pauseBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>Pause`; }
-    if (skipBtn) skipBtn.style.display = 'inline-block';
-    if (stopBtn) stopBtn.style.display = 'inline-block';
+    if (skipBtn) skipBtn.style.display = 'inline-flex';
+    if (stopBtn) stopBtn.style.display = 'inline-flex';
     if (progressCard) progressCard.style.display = 'block';
     if (tgStateBadge) tgStateBadge.textContent = 'ENGAGING';
     if (tgQueueInd) tgQueueInd.textContent = `Tweet 0/${filtered.freshCount}`;
@@ -1981,6 +1998,7 @@ function initAgentListeners() {
     state.isWorkflowRunning = true;
     state.isPaused = false;
     state.skipCurrent = false;
+    await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
 
     // Delegate to background service worker — continues even after popup closes
     chrome.runtime.sendMessage({
@@ -2027,13 +2045,17 @@ function initAgentListeners() {
       isStopped: true
     });
     const runBtn = document.getElementById('runTgEngageBtn');
+    const cleanBtn = document.getElementById('cleanTgInputBtn');
+    const resetBtn = document.getElementById('resetTelegramQueueBtn');
     const pauseBtn = document.getElementById('pauseTgEngageBtn');
     const skipBtn = document.getElementById('skipTgEngageBtn');
     const stopBtn = document.getElementById('stopTgEngageBtn');
     const tgStateBadge = document.getElementById('tgStateBadge');
     const tgStatus = document.getElementById('tgLiveStatusText');
     const tgCountdown = document.getElementById('tgCountdownText');
-    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
+    if (runBtn) { runBtn.style.display = 'inline-flex'; runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
+    if (cleanBtn) cleanBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'none';

@@ -369,7 +369,7 @@ async function handleStartTgRaid(request, sendResponse) {
   };
 
   await chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
-  await chrome.storage.local.set({ atomx_tg_raid: raidState });
+  await chrome.storage.local.set({ atomx_tg_raid: raidState, atomx_skip_current: false });
   await syncTgHud(raidState, `Starting Telegram Raid engagement (${total} tweets)...`, 'ENGAGING', 5);
 
   // Keepalive heartbeat so service worker stays alive
@@ -413,19 +413,28 @@ async function processTgRaidStep() {
   const tweet = tweets[currentIndex];
   const nextTweet = tweets[currentIndex + 1];
   const indexStr = `[${currentIndex + 1}/${total}]`;
+
+  const cleanHandle = (tweet?.handle && tweet.handle !== 'i' && tweet.handle !== '@i')
+    ? tweet.handle.replace(/^@+/, '')
+    : '';
+  const displayCurrent = cleanHandle ? `@${cleanHandle}` : `Tweet ${currentIndex + 1}/${total}`;
+
+  const nextCleanHandle = (nextTweet?.handle && nextTweet.handle !== 'i' && nextTweet.handle !== '@i')
+    ? nextTweet.handle.replace(/^@+/, '')
+    : '';
   const nextInfo = nextTweet
-    ? `Tweet ${currentIndex + 2}/${total} (@${nextTweet.handle || 'user'})`
+    ? (nextCleanHandle ? `@${nextCleanHandle}` : `Tweet ${currentIndex + 2}/${total}`)
     : 'Completion';
 
   console.log(`[ATOMX BG] TG Raid step ${indexStr}: ${tweet.canonicalUrl}`);
 
   await syncTgHud(
     raid,
-    `${indexStr} Visiting @${tweet.handle || 'user'}...`,
+    `${indexStr} Visiting ${displayCurrent}...`,
     'ENGAGING',
     Math.round((currentIndex / total) * 100),
     '',
-    `Visiting @${tweet.handle || 'user'}`,
+    `Visiting ${displayCurrent}`,
     '⚡ Active'
   );
 
@@ -529,8 +538,8 @@ async function processTgRaidStep() {
 
     // HUD update with result
     const statusLabel = isIgnored
-      ? `${indexStr} Skipped @${tweet.handle || 'user'} (already done)`
-      : `${indexStr} ✓ Engaged @${tweet.handle || 'user'}`;
+      ? `${indexStr} Skipped ${displayCurrent} (already done)`
+      : `${indexStr} ✓ Engaged ${displayCurrent}`;
 
     await syncTgHud(
       updatedRaid,
