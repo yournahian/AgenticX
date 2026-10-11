@@ -674,7 +674,7 @@ function updateTelegramProgressUI(raidState) {
 }
 
 function updateAgentWorkflowProgressUI(wf) {
-  if (!wf || !wf.agentId) return;
+  if (!wf) return;
   const cardMap = {
     audience: {
       card: 'audienceProgressCard', badge: 'audienceStateBadge', ind: 'audienceQueueIndicator',
@@ -720,7 +720,15 @@ function updateAgentWorkflowProgressUI(wf) {
     }
   };
 
-  const map = cardMap[wf.agentId];
+  let agentId = wf.agentId;
+  if (!agentId) {
+    const activePanel = document.querySelector('.agent-panel-content:not([style*="display: none"])');
+    if (activePanel && activePanel.id) {
+      agentId = activePanel.id.replace('panel-agent-', '');
+    }
+  }
+
+  const map = cardMap[agentId || 'audience'];
   if (!map) return;
 
   const card = document.getElementById(map.card);
@@ -744,7 +752,7 @@ function updateAgentWorkflowProgressUI(wf) {
   const done = wf.successCount || 0;
   const skipped = wf.ignoredCount || 0;
 
-  if (ind) ind.textContent = `${wf.agentId === 'replyback' ? 'Reply' : (wf.agentId === 'sorsa' ? 'Account' : 'Profile')} ${Math.min(current + 1, total)}/${total}`;
+  if (ind) ind.textContent = `${(agentId === 'replyback') ? 'Reply' : ((agentId === 'sorsa') ? 'Account' : 'Profile')} ${Math.min(current + 1, total)}/${total}`;
   if (doneEl) doneEl.textContent = String(done);
   if (colEl) colEl.textContent = String(total);
   if (skipEl) skipEl.textContent = String(skipped);
@@ -772,7 +780,7 @@ function updateAgentWorkflowProgressUI(wf) {
         cd.style.display = 'none';
       }
     }
-  } else if (wf.isStopped) {
+  } else if (wf.isStopped || wf.stateBadge === 'STOPPED') {
     if (startBtn) startBtn.style.display = 'block';
     if (stopBtn) stopBtn.style.display = 'none';
     if (pauseBtn) pauseBtn.style.display = 'none';
@@ -792,27 +800,107 @@ function updateAgentWorkflowProgressUI(wf) {
   }
 }
 
+function updateAllPauseButtonsUI(isPaused) {
+  const pauseBtns = document.querySelectorAll(
+    '#pauseAudienceBuilderBtn, #pauseSorsaBoosterBtn, #pauseFollowerIncreaseBtn, #pauseReplyBackBtn, #pauseAutoUnfollowBtn, #pauseReciprocatorBtn'
+  );
+  pauseBtns.forEach(btn => {
+    btn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
+    btn.style.background = isPaused ? '#059669' : '#D97706';
+    btn.style.borderColor = isPaused ? '#059669' : '#D97706';
+  });
+
+  const badges = document.querySelectorAll(
+    '#audienceStateBadge, #sorsaStateBadge, #followerStateBadge, #replyBackStateBadge, #reciprocatorStateBadge'
+  );
+  badges.forEach(b => {
+    if (isPaused) {
+      if (b.textContent !== 'STOPPED' && b.textContent !== 'DONE' && b.textContent !== 'IDLE') {
+        b.dataset.prevText = b.textContent;
+        b.textContent = 'PAUSED';
+      }
+    } else {
+      if (b.textContent === 'PAUSED' && b.dataset.prevText) {
+        b.textContent = b.dataset.prevText;
+      }
+    }
+  });
+}
+
+async function handleToggleWorkflowPause() {
+  const stored = await chrome.storage.local.get(['atomx_workflow_paused', 'atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+  const newPaused = !stored?.atomx_workflow_paused;
+  state.isPaused = newPaused;
+
+  updateAllPauseButtonsUI(newPaused);
+
+  if (stored?.atomx_agent_workflow) {
+    stored.atomx_agent_workflow.isPaused = newPaused;
+    if (newPaused) {
+      stored.atomx_agent_workflow.prevStateBadge = stored.atomx_agent_workflow.stateBadge;
+      stored.atomx_agent_workflow.stateBadge = 'PAUSED';
+    } else if (stored.atomx_agent_workflow.prevStateBadge) {
+      stored.atomx_agent_workflow.stateBadge = stored.atomx_agent_workflow.prevStateBadge;
+    }
+  }
+
+  if (stored?.atomx_active_hud) {
+    stored.atomx_active_hud.isPaused = newPaused;
+    stored.atomx_active_hud.stateBadge = newPaused ? 'PAUSED' : 'RUNNING';
+    stored.atomx_active_hud.timerBadge = newPaused ? '⏸️ Paused' : '⚡ Active';
+  }
+
+  await chrome.storage.local.set({
+    atomx_workflow_paused: newPaused,
+    atomx_agent_workflow: stored?.atomx_agent_workflow || null,
+    atomx_active_hud: stored?.atomx_active_hud || null
+  }).catch(() => null);
+
+  chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
+
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const tab of tabs) {
+    if (tab.id) {
+      chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
+    }
+  }
+}
+
+async function handleSkipWorkflowItem() {
+  await chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
+  chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const tab of tabs) {
+    if (tab.id) {
+      chrome.tabs.sendMessage(tab.id, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+    }
+  }
+  showExtToast('Skipping current item...', '⏭️');
+}
+
 function initBackgroundWorkflowSync() {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
 
   // Hydrate current state on popup open
-  chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow', 'atomx_workflow_paused'], (res) => {
+  chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow', 'atomx_active_hud', 'atomx_workflow_paused'], (res) => {
     if (typeof res?.atomx_workflow_paused === 'boolean') {
       state.isPaused = res.atomx_workflow_paused;
       updateAllPauseButtonsUI(state.isPaused);
     }
-    if (res?.atomx_tg_raid && (res.atomx_tg_raid.active || res.atomx_tg_raid.currentIndex > 0)) {
+    if (res?.atomx_tg_raid && (res.atomx_tg_raid.active || res.atomx_tg_raid.isStopped || res.atomx_tg_raid.currentIndex > 0)) {
       updateTelegramProgressUI(res.atomx_tg_raid);
     }
-    if (res?.atomx_agent_workflow && (res.atomx_agent_workflow.active || res.atomx_agent_workflow.currentIndex > 0)) {
+    if (res?.atomx_agent_workflow) {
       updateAgentWorkflowProgressUI(res.atomx_agent_workflow);
+    } else if (res?.atomx_active_hud) {
+      updateAgentWorkflowProgressUI(res.atomx_active_hud);
     }
   });
 
   // Listen to background updates in real-time
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.atomx_workflow_paused) {
+    if (changes.atomx_workflow_paused !== undefined) {
       state.isPaused = !!changes.atomx_workflow_paused.newValue;
       updateAllPauseButtonsUI(state.isPaused);
     }
@@ -821,6 +909,8 @@ function initBackgroundWorkflowSync() {
     }
     if (changes.atomx_agent_workflow && changes.atomx_agent_workflow.newValue) {
       updateAgentWorkflowProgressUI(changes.atomx_agent_workflow.newValue);
+    } else if (changes.atomx_active_hud && changes.atomx_active_hud.newValue) {
+      updateAgentWorkflowProgressUI(changes.atomx_active_hud.newValue);
     }
   });
 }
@@ -1844,51 +1934,123 @@ function initAgentListeners() {
     startAudienceBuilderWorkflow();
   });
 
-function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
+async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   state.isAborted = true;
   state.isWorkflowRunning = false;
+  state.isPaused = false;
+
+  const stored = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+  const prevWf = stored?.atomx_agent_workflow || {};
+  const prevHud = stored?.atomx_active_hud || {};
+
+  let agentId = prevWf.agentId;
+  if (!agentId) {
+    const t = agentTitle.toLowerCase();
+    if (t.includes('audience')) agentId = 'audience';
+    else if (t.includes('follower')) agentId = 'followers';
+    else if (t.includes('sorsa')) agentId = 'sorsa';
+    else if (t.includes('reply')) agentId = 'replyback';
+    else if (t.includes('reciprocator')) agentId = 'reciprocator';
+    else agentId = 'audience';
+  }
+
+  const total = prevWf.total || prevHud.collected || 0;
+  const done = prevWf.successCount ?? prevHud.done ?? 0;
+  const skipped = prevWf.ignoredCount ?? prevHud.skipped ?? 0;
+
+  const stoppedWf = {
+    ...prevWf,
+    agentId,
+    title: agentTitle,
+    active: false,
+    isStopped: true,
+    stateBadge: 'STOPPED',
+    statusText: `${agentTitle} stopped by user.`,
+    countdownText: '',
+    timerBadge: '🛑 Stopped',
+    total,
+    successCount: done,
+    ignoredCount: skipped
+  };
+
+  const stoppedHud = {
+    ...prevHud,
+    title: agentTitle,
+    stateBadge: 'STOPPED',
+    statusText: `${agentTitle} stopped by user.`,
+    countdownText: '',
+    timerBadge: '🛑 Stopped',
+    nextAction: 'Stopped',
+    isStopped: true,
+    active: false,
+    done,
+    collected: total,
+    skipped,
+    indicator: `${done}/${total}`
+  };
+
+  await chrome.storage.local.set({
+    atomx_agent_workflow: stoppedWf,
+    atomx_active_hud: stoppedHud,
+    atomx_workflow_paused: false,
+    atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true }
+  }).catch(() => null);
+
   chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
   chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
-  chrome.storage.local.set({
-    atomx_agent_workflow: { active: false, isStopped: true, stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.' },
-    atomx_active_hud: { stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.', isStopped: true, active: false }
-  }).catch(() => null);
+
   if (typeof chrome !== 'undefined' && chrome.tabs) {
     chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }, (tabs) => {
       if (tabs && tabs.length > 0) {
         tabs.forEach(t => {
-          if (t.id) chrome.tabs.sendMessage(t.id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+          if (t.id) {
+            chrome.tabs.sendMessage(t.id, { type: 'ABORT_WORKFLOW' }).catch(() => null);
+            chrome.tabs.sendMessage(t.id, { type: 'UPDATE_FLOATING_HUD', data: stoppedHud, hud: stoppedHud }).catch(() => null);
+          }
         });
       }
     });
   }
-  syncFloatingHud(null, {
-    title: agentTitle,
-    stateBadge: 'STOPPED',
-    statusText: 'Workflow stopped by user.',
-    isStopped: true,
-    active: false
-  });
+
+  updateAgentWorkflowProgressUI(stoppedWf);
 }
 
-  document.getElementById('stopAudienceBuilderBtn')?.addEventListener('click', () => {
-    broadcastAbortToAllTabsAndStorage('Audience Builder');
-    if (audienceWorkingTabId) {
-      safeRemoveTab(audienceWorkingTabId);
-      audienceWorkingTabId = null;
-    }
-    updateAgentConsole('⏹️ Stopped', 'Audience Builder stopped by user.');
-    const startBtn = document.getElementById('runAudienceBuilderBtn');
-    const stopBtn = document.getElementById('stopAudienceBuilderBtn');
-    if (startBtn) startBtn.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'none';
-    const statusText = document.getElementById('audienceLiveStatusText');
-    if (statusText) statusText.textContent = 'Workflow stopped by user.';
-    const countdownEl = document.getElementById('audienceCountdownText');
-    if (countdownEl) countdownEl.style.display = 'none';
-    const badge = document.getElementById('audienceStateBadge');
-    if (badge) badge.textContent = 'STOPPED';
-    showExtToast('Audience Builder Stopped', '⏹');
+  // Unified Agent Controls: Stop, Pause, Skip for all agents
+  const stopButtonConfigs = [
+    { id: 'stopAudienceBuilderBtn', agentId: 'audience', title: 'Audience Builder' },
+    { id: 'stopSorsaBoosterBtn', agentId: 'sorsa', title: 'Sorsa Score Booster' },
+    { id: 'stopFollowerIncreaseBtn', agentId: 'followers', title: 'Followers Increase' },
+    { id: 'stopReplyBackBtn', agentId: 'replyback', title: 'Reply Back Loop' },
+    { id: 'stopAutoUnfollowBtn', agentId: 'unfollow', title: 'Auto Unfollow' },
+    { id: 'stopReciprocatorBtn', agentId: 'reciprocator', title: 'Commenter Reciprocator' }
+  ];
+
+  stopButtonConfigs.forEach(({ id, agentId, title }) => {
+    document.getElementById(id)?.addEventListener('click', () => {
+      broadcastAbortToAllTabsAndStorage(title, agentId);
+      if (agentId === 'audience' && audienceWorkingTabId) {
+        safeRemoveTab(audienceWorkingTabId);
+        audienceWorkingTabId = null;
+      }
+      updateAgentConsole('⏹️ Stopped', `${title} stopped by user.`);
+      showExtToast(`${title} Stopped`, '⏹');
+    });
+  });
+
+  // Wire all Pause Buttons
+  [
+    'pauseAudienceBuilderBtn', 'pauseSorsaBoosterBtn', 'pauseFollowerIncreaseBtn',
+    'pauseReplyBackBtn', 'pauseAutoUnfollowBtn', 'pauseReciprocatorBtn'
+  ].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', handleToggleWorkflowPause);
+  });
+
+  // Wire all Skip Buttons
+  [
+    'skipAudienceBuilderBtn', 'skipSorsaBoosterBtn', 'skipFollowerIncreaseBtn',
+    'skipReplyBackBtn', 'skipAutoUnfollowBtn', 'skipReciprocatorBtn'
+  ].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', handleSkipWorkflowItem);
   });
 
   // Telegram Engage Reset Button
@@ -3849,7 +4011,7 @@ async function startAudienceBuilderWorkflow() {
     const rawCustom = (document.getElementById('customListUrlInput')?.value || '').trim();
     targetUrl = extractTwitterListUrl(rawCustom);
     if (!targetUrl) {
-      alert('⚠️ Audience Builder ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223).\n\nCSV files and usernames are not supported for this agent.');
+      alert('⚠️ Audience Builder ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/...).\n\nCSV files and usernames are not supported for this agent.');
       return;
     }
   } else {
@@ -3862,7 +4024,7 @@ async function startAudienceBuilderWorkflow() {
     }
     targetUrl = extractTwitterListUrl(curated?.listUrl || curated?.url);
     if (!targetUrl) {
-      alert('⚠️ Selected list does not have a valid Twitter List URL.\n\nAudience Builder ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223). CSV files and usernames are not supported.');
+      alert('⚠️ Selected list does not have a valid Twitter List URL.\n\nAudience Builder ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/...). CSV files and usernames are not supported.');
       return;
     }
   }
@@ -4090,7 +4252,7 @@ async function startFollowersIncreaseWorkflow() {
     const rawCustom = (document.getElementById('customFollowerUrlInput')?.value || '').trim();
     targetUrl = extractTwitterListUrl(rawCustom);
     if (!targetUrl) {
-      alert('⚠️ Followers Increase ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223).\n\nCSV files and usernames are not supported for this agent.');
+      alert('⚠️ Followers Increase ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/...).\n\nCSV files and usernames are not supported for this agent.');
       return;
     }
   } else {
@@ -4103,7 +4265,7 @@ async function startFollowersIncreaseWorkflow() {
     }
     targetUrl = extractTwitterListUrl(curated?.listUrl || curated?.url);
     if (!targetUrl) {
-      alert('⚠️ Selected list does not have a valid Twitter List URL.\n\nFollowers Increase ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223). CSV files and usernames are not supported.');
+      alert('⚠️ Selected list does not have a valid Twitter List URL.\n\nFollowers Increase ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/...). CSV files and usernames are not supported.');
       return;
     }
   }

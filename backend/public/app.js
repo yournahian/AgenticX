@@ -5598,9 +5598,9 @@ async function renderAdminCuratedLists(container) {
                               <span>🔗 TWITTER / X LIST URL:</span>
                               <span style="font-size:10px; background:rgba(56, 189, 248, 0.15); color:var(--blue-primary); padding:1px 6px; border-radius:4px; font-weight:700;">REQUIRED (URL ONLY)</span>
                             </label>
-                            <input type="text" id="listurl-${k}" class="form-input" value="${l.listUrl || ''}" placeholder="https://x.com/i/lists/2103557569319219223" style="font-size:12px; padding:6px 10px;" oninput="updateListUrl('${k}', this.value)">
+                            <input type="text" id="listurl-${k}" class="form-input" value="${l.listUrl || ''}" placeholder="https://x.com/i/lists/..." style="font-size:12px; padding:6px 10px;" oninput="updateListUrl('${k}', this.value)">
                             <div style="font-size:10.5px; color:var(--text-secondary); margin-top:4px; line-height:1.3;">
-                              🎯 <strong>${l.category} strictly supports Twitter List URLs only</strong> (e.g. <code>https://x.com/i/lists/2103557569319219223</code>).
+                              🎯 <strong>${l.category} strictly supports Twitter List URLs only</strong> (e.g. <code>https://x.com/i/lists/...</code>).
                             </div>
                           </div>
 
@@ -5717,8 +5717,8 @@ function promptAddNewCustomList() {
   } else {
     if (cat === '3') category = 'Followers Increase';
     else category = 'Audience Builder';
-    const enteredUrl = prompt(`Enter Twitter/X List URL for ${category} (e.g. https://x.com/i/lists/2103557569319219223):`, 'https://x.com/i/lists/2103557569319219223');
-    listUrl = (enteredUrl || 'https://x.com/i/lists/2103557569319219223').trim();
+    const enteredUrl = prompt(`Enter Twitter/X List URL for ${category} (e.g. https://x.com/i/lists/...):`, '');
+    listUrl = (enteredUrl || '').trim();
     targets = [];
   }
 
@@ -5790,7 +5790,7 @@ async function saveCuratedListsToServer() {
       const trimmedUrl = (item.listUrl || '').trim();
       const isValidList = trimmedUrl.includes('x.com/i/lists/') || trimmedUrl.includes('twitter.com/i/lists/') || /^\d{10,25}$/.test(trimmedUrl);
       if (!isValidList) {
-        alert(`⚠️ Cannot Save: "${item.name}" is assigned to ${cat}.\n\nThis agent ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/2103557569319219223). CSV and username handles are not allowed.\n\nPlease enter a valid Twitter List URL.`);
+        alert(`⚠️ Cannot Save: "${item.name}" is assigned to ${cat}.\n\nThis agent ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/...). CSV and username handles are not allowed.\n\nPlease enter a valid Twitter List URL.`);
         return false;
       }
     } else if (cat === 'Increase Sorsa Score') {
@@ -5837,7 +5837,7 @@ function updateListCategory(listKey, newCategory) {
     if (newCategory === 'Audience Builder' || newCategory === 'Followers Increase') {
       AtomXState.curatedLists[listKey].targets = [];
       if (!AtomXState.curatedLists[listKey].listUrl || !AtomXState.curatedLists[listKey].listUrl.includes('x.com/i/lists/')) {
-        AtomXState.curatedLists[listKey].listUrl = 'https://x.com/i/lists/2103557569319219223';
+        AtomXState.curatedLists[listKey].listUrl = '';
       }
       showToast(`✓ Set to ${newCategory}: Live Twitter List URL only (CSV/usernames disabled)`);
     } else if (newCategory === 'Increase Sorsa Score') {

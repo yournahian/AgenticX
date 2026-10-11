@@ -959,6 +959,7 @@ async function processAgentWorkflowStep() {
         type: 'EXECUTE_FOLLOWERS_LIST_CYCLE',
         targetCount,
         freshness: options.freshness || '1h',
+        sortPriority: options.sortPriority || 'active',
         likePosts: options.likePosts !== false,
         replyPosts: options.replyPosts !== false,
         repostPosts: options.repostPosts === true,
@@ -971,6 +972,15 @@ async function processAgentWorkflowStep() {
       const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
       if (cycleRes?.aborted || chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
         console.log('[ATOMX BG] Followers Increase cycle stopped/aborted by user.');
+        return;
+      }
+
+      if (cycleRes?.emptyTimeframe) {
+        workflow.active = false;
+        workflow.successCount = 0;
+        workflow.total = targetCount;
+        await syncAgentHud(workflow, cycleRes?.statusText || `No unengaged posts found in selected timeframe (${options.freshness || '1h'}).`, 'DONE', 100);
+        await finishAgentWorkflow(workflow);
         return;
       }
 
@@ -1039,15 +1049,32 @@ async function processAgentWorkflowStep() {
           if (collectedCommenters.length >= targetCount) break;
           if (!t.url) continue;
 
+          const chkBefore = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+          if (chkBefore?.atomx_agent_workflow?.isStopped || !chkBefore?.atomx_agent_workflow?.active || chkBefore?.atomx_active_hud?.stateBadge === 'STOPPED') {
+            console.log('[ATOMX BG] Audience Builder thread collection stopped by user.');
+            return;
+          }
+
           await syncAgentHud(workflow, `Extracting commenters from top tweet by @${t.author || 'creator'} (${t.repliesCount || 0} replies)...`, 'COLLECTING', 20);
           await getOrCreateReusedTab(tabId, t.url);
           await waitForTabLoad(tabId, 15000);
           await delay(3000);
 
+          const chkMid = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+          if (chkMid?.atomx_agent_workflow?.isStopped || !chkMid?.atomx_agent_workflow?.active || chkMid?.atomx_active_hud?.stateBadge === 'STOPPED') {
+            console.log('[ATOMX BG] Audience Builder stopped before scraping thread.');
+            return;
+          }
+
           const threadRes = await sendMessageToTab(tabId, {
             type: 'COLLECT_REPLIERS_FROM_TWEET_THREAD',
             targetCount: targetCount - collectedCommenters.length
           }, 60000);
+
+          if (threadRes?.aborted) {
+            console.log('[ATOMX BG] Thread replier collection aborted.');
+            return;
+          }
 
           const repliers = Array.isArray(threadRes?.profiles) ? threadRes.profiles : (Array.isArray(threadRes) ? threadRes : []);
           for (const rep of repliers) {

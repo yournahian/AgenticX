@@ -1150,30 +1150,59 @@ function ensureFloatingHud() {
   });
 
   // Stop workflow listener — Instant response
-  hud.querySelector('#hud-stop-btn')?.addEventListener('click', (e) => {
+  hud.querySelector('#hud-stop-btn')?.addEventListener('click', async (e) => {
     e.stopPropagation();
     isWorkflowAborted = true;
-    updateFloatingHud({
+
+    const stored = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+    const prevWf = stored?.atomx_agent_workflow || {};
+    const prevHud = stored?.atomx_active_hud || {};
+    const agentId = prevWf.agentId || 'audience';
+    const title = prevWf.title || prevHud.title || 'AtomX Agent';
+    const total = prevWf.total || prevHud.collected || 0;
+    const done = prevWf.successCount ?? prevHud.done ?? 0;
+    const skipped = prevWf.ignoredCount ?? prevHud.skipped ?? 0;
+
+    const stoppedHud = {
+      ...prevHud,
+      title,
       stateBadge: 'STOPPED',
       statusText: 'Workflow stopped by user.',
       timerBadge: '🛑 Stopped',
       countdownText: '',
+      nextAction: 'Stopped',
       isStopped: true,
-      active: false
-    });
-    chrome.storage.local.set({
-      atomx_active_hud: {
-        stateBadge: 'STOPPED',
-        statusText: 'Workflow stopped by user.',
-        timerBadge: '🛑 Stopped',
-        countdownText: '',
-        isStopped: true,
-        active: false
-      },
+      active: false,
+      done,
+      collected: total,
+      skipped,
+      indicator: `${done}/${total}`
+    };
+
+    const stoppedWf = {
+      ...prevWf,
+      agentId,
+      title,
+      active: false,
+      isStopped: true,
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      countdownText: '',
+      timerBadge: '🛑 Stopped',
+      total,
+      successCount: done,
+      ignoredCount: skipped
+    };
+
+    updateFloatingHud(stoppedHud);
+
+    await chrome.storage.local.set({
+      atomx_active_hud: stoppedHud,
+      atomx_agent_workflow: stoppedWf,
       atomx_workflow_paused: false,
-      atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true },
-      atomx_agent_workflow: { active: false, stateBadge: 'STOPPED', isStopped: true }
+      atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true }
     }).catch(() => null);
+
     chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
   });
@@ -1357,23 +1386,28 @@ function updateFloatingHud(data = {}) {
     }
   }
 
-  // Sync Pause Button appearance
+  // Sync Pause, Skip, Stop, Dismiss appearance
   const pauseBtn = hud.querySelector('#hud-pause-btn');
-  if (pauseBtn) {
-    const isPaused = data.stateBadge === 'PAUSED' || isHudWorkflowPaused;
-    pauseBtn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
-    pauseBtn.style.color = isPaused ? '#34D399' : '#FBBF24';
-    pauseBtn.style.background = isPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
-    pauseBtn.style.borderColor = isPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
-  }
-
+  const skipBtn = hud.querySelector('#hud-skip-action-btn');
   const stopBtn = hud.querySelector('#hud-stop-btn');
   const dismissBtn = hud.querySelector('#hud-dismiss-btn');
+
   if (data.isStopped || data.stateBadge === 'DONE' || data.stateBadge === 'STOPPED') {
     if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
     if (dismissBtn) dismissBtn.style.display = 'flex';
   } else {
     if (stopBtn) stopBtn.style.display = 'flex';
+    if (pauseBtn) {
+      pauseBtn.style.display = 'flex';
+      const isPaused = data.stateBadge === 'PAUSED' || isHudWorkflowPaused;
+      pauseBtn.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.style.color = isPaused ? '#34D399' : '#FBBF24';
+      pauseBtn.style.background = isPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
+      pauseBtn.style.borderColor = isPaused ? 'rgba(16, 185, 129, 0.5)' : 'rgba(245, 158, 11, 0.5)';
+    }
+    if (skipBtn) skipBtn.style.display = 'flex';
     if (dismissBtn) dismissBtn.style.display = 'none';
   }
 }
@@ -1550,6 +1584,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'UPDATE_FLOATING_HUD') {
     const payload = message.data || message.hud || message.payload || message;
     updateFloatingHud(payload);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'ABORT_WORKFLOW' || message.type === 'BG_ABORT_AGENT_WORKFLOW' || message.type === 'STOP_WORKFLOW') {
+    isWorkflowAborted = true;
+    updateFloatingHud({
+      stateBadge: 'STOPPED',
+      statusText: 'Workflow stopped by user.',
+      timerBadge: '🛑 Stopped',
+      countdownText: '',
+      isStopped: true,
+      active: false
+    });
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'TOGGLE_WORKFLOW_PAUSE') {
+    isHudWorkflowPaused = Boolean(message.isPaused);
+    const pauseBtn = floatingHudEl?.querySelector('#hud-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.textContent = isHudWorkflowPaused ? '▶️ Resume' : '⏸️ Pause';
+      pauseBtn.style.color = isHudWorkflowPaused ? '#34D399' : '#FBBF24';
+      pauseBtn.style.background = isHudWorkflowPaused ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)';
+    }
+    const badge = floatingHudEl?.querySelector('#hud-badge');
+    if (badge && !isWorkflowAborted) {
+      badge.textContent = isHudWorkflowPaused ? 'PAUSED' : 'RUNNING';
+      badge.style.color = isHudWorkflowPaused ? '#FBBF24' : '#10B981';
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'SKIP_WORKFLOW_ITEM') {
+    if (floatingHudEl) {
+      const statusEl = floatingHudEl.querySelector('#hud-status-text');
+      if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
+      const timerBadge = floatingHudEl.querySelector('#hud-timer-badge');
+      if (timerBadge) timerBadge.textContent = '⏭️ Skip';
+    }
     sendResponse({ success: true });
     return true;
   }
@@ -2286,6 +2362,12 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
 
   for (let s = 0; s < maxThreadScrolls; s++) {
     if (isWorkflowAborted || collected.length >= numTarget) break;
+
+    const stopCheck = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+    if (stopCheck?.atomx_agent_workflow?.isStopped || stopCheck?.atomx_active_hud?.stateBadge === 'STOPPED' || stopCheck?.atomx_agent_workflow?.active === false) {
+      isWorkflowAborted = true;
+      break;
+    }
 
     const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     // Replies are articles after index 0 (index 0 is focal post)
@@ -3469,20 +3551,39 @@ async function discoverTopEngagedListTweets(params = {}) {
 
   const topTweetsMap = new Map();
   let consecutiveEmptyScrolls = 0;
-  const maxScrolls = 20;
+  let consecutiveOlderCount = 0;
+  const maxScrolls = 50;
+
+  console.log(`[ATOMX AUDIENCE] Scanning full timeframe (${freshness}) for highest engaged tweets...`);
 
   for (let s = 0; s < maxScrolls; s++) {
     if (isWorkflowAborted) break;
 
+    const stopCheck = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+    if (stopCheck?.atomx_agent_workflow?.isStopped || stopCheck?.atomx_active_hud?.stateBadge === 'STOPPED' || stopCheck?.atomx_agent_workflow?.active === false) {
+      isWorkflowAborted = true;
+      break;
+    }
+
+    while (isHudWorkflowPaused && !isWorkflowAborted) {
+      await sleep(1000);
+    }
+
     const initialCount = topTweetsMap.size;
     const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    let foundOlderInPass = 0;
 
     for (const art of articles) {
+      if (isWorkflowAborted) break;
+
       const timeEl = art.querySelector('time');
       const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
       const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
       const ageMs = Date.now() - timestamp;
-      if (ageMs > freshnessMs) continue;
+      if (ageMs > freshnessMs) {
+        foundOlderInPass++;
+        continue;
+      }
 
       // Filter out comments / replies strictly
       const artText = (art.innerText || '');
@@ -3492,7 +3593,7 @@ async function discoverTopEngagedListTweets(params = {}) {
       if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
 
       const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
-      const repliesCount = extractTwitterMetric(replyBtn);
+      const repliesCount = extractTwitterMetric(replyBtn) || 0;
 
       const statusLink = art.querySelector('a[href*="/status/"]');
       if (!statusLink) continue;
@@ -3501,11 +3602,12 @@ async function discoverTopEngagedListTweets(params = {}) {
 
       const tweetData = extractTweetData(art);
       const author = (tweetData.authorHandle || '').replace(/^@/, '').trim();
+      if (author && author.toLowerCase() === loggedInHandle) continue;
 
       if (!topTweetsMap.has(fullUrl)) {
         topTweetsMap.set(fullUrl, {
           url: fullUrl,
-          repliesCount: repliesCount || 0,
+          repliesCount,
           author,
           timestamp
         });
@@ -3514,30 +3616,52 @@ async function discoverTopEngagedListTweets(params = {}) {
 
     if (topTweetsMap.size === initialCount) {
       consecutiveEmptyScrolls++;
-      if (consecutiveEmptyScrolls >= 5) {
-        console.log('[ATOMX AUDIENCE] 5 scrolls found no fresh tweets. Refreshing list timeline...');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        await sleep(1000);
-        window.location.reload();
-        await sleep(4500);
-        consecutiveEmptyScrolls = 0;
-        continue;
-      }
     } else {
       consecutiveEmptyScrolls = 0;
     }
 
-    if (topTweetsMap.size >= 12) break;
+    // If bottom tweets are consistently beyond user's timeframe, stop scanning
+    if (foundOlderInPass > 3) {
+      consecutiveOlderCount++;
+      if (consecutiveOlderCount >= 3) {
+        console.log(`[ATOMX AUDIENCE] Reached timeframe boundary (${freshness}). Completed deep scan.`);
+        break;
+      }
+    } else {
+      consecutiveOlderCount = 0;
+    }
+
+    // Provide live scan progress on HUD
+    const maxRepliesFound = Array.from(topTweetsMap.values()).reduce((max, t) => Math.max(max, t.repliesCount || 0), 0);
+    updateFloatingHud({
+      title: 'Audience Builder',
+      stateBadge: 'SCANNING',
+      statusText: `Scanning list (${freshness})... Found ${topTweetsMap.size} posts (top: ${maxRepliesFound} replies)`
+    });
+
+    if (consecutiveEmptyScrolls >= 8) {
+      // Reached bottom of timeline without new DOM elements
+      break;
+    }
+
     await smoothScrollAndHydrate(650, 900);
   }
 
-  // Sort descending by highest replies count ("most engaged (sobche beshi reply) ar recent tweet")
-  const sorted = Array.from(topTweetsMap.values())
-    .sort((a, b) => b.repliesCount - a.repliesCount);
+  // Filter & prioritize tweets with genuine engagement (avoid 2-3 comment posts)
+  const allCandidates = Array.from(topTweetsMap.values());
+  const highReplyCandidates = allCandidates.filter(t => t.repliesCount >= 3);
+  const filtered = highReplyCandidates.length > 0 ? highReplyCandidates : allCandidates.filter(t => t.repliesCount >= 1);
+  const finalCandidates = filtered.length > 0 ? filtered : allCandidates;
+
+  // Sort descending by highest replies count
+  const sorted = finalCandidates.sort((a, b) => b.repliesCount - a.repliesCount);
+
+  console.log(`[ATOMX AUDIENCE] Selected ${sorted.length} top engaged list tweets:`, sorted.slice(0, 5));
 
   return {
     success: true,
-    topTweets: sorted
+    topTweets: sorted,
+    aborted: isWorkflowAborted
   };
 }
 
@@ -3551,6 +3675,7 @@ async function executeFollowersListCycle(params = {}) {
   isWorkflowAborted = false;
   const targetCount = Number(params.targetCount || 8);
   const freshness = params.freshness || '1h';
+  const sortPriority = params.sortPriority || 'active'; // 'active' (Most Active) vs 'recent' (Newest Tweets First)
   const likePosts = params.likePosts !== false;
   const replyPosts = params.replyPosts !== false;
   const repostPosts = params.repostPosts === true;
@@ -3584,224 +3709,420 @@ async function executeFollowersListCycle(params = {}) {
   const postWaitSec = Number(safety.postWait) || 20;
 
   let engagedCount = 0;
-  let consecutiveEmptyScrolls = 0;
+  let skippedCount = 0;
   const processedTweetIds = new Set();
-  const maxScrolls = 80;
 
-  console.log(`[ATOMX FOLLOWERS] Starting Followers Increase timeline engine. Target: ${targetCount} posts, Freshness: ${freshness}`);
+  console.log(`[ATOMX FOLLOWERS] Starting Followers Increase engine. Mode: ${sortPriority === 'active' ? 'Most Active' : 'Newest First'}, Target: ${targetCount}, Freshness: ${freshness}`);
 
-  for (let s = 0; s < maxScrolls; s++) {
-    if (isWorkflowAborted || engagedCount >= targetCount) break;
+  // Helper: Execute engagement actions on a single tweet element
+  async function performActionsOnTweet(art, tweetData, tweetId, authorHandle) {
+    art.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    await sleep(700);
 
-    // Respect HUD Pause
-    while (isHudWorkflowPaused && !isWorkflowAborted) {
-      await sleep(1000);
+    const statusMsg = `Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}...`;
+    updateFloatingHud({
+      title: 'Followers Increase',
+      stateBadge: 'ENGAGING',
+      indicator: `${engagedCount}/${targetCount}`,
+      done: engagedCount,
+      collected: targetCount,
+      skipped: skippedCount,
+      progressPercent: Math.round((engagedCount / targetCount) * 100),
+      statusText: statusMsg
+    });
+
+    // 1. ❤️ Like
+    if (likePosts && !isWorkflowAborted) {
+      await simulateHumanLikeClick(art);
+      await sleep(500);
     }
 
-    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
-    let foundNewInPass = false;
+    // 2. 🔁 Repost
+    if (repostPosts && !isWorkflowAborted) {
+      await simulateHumanRepostClick(art);
+      await sleep(500);
+    }
 
-    for (const art of articles) {
-      if (isWorkflowAborted || engagedCount >= targetCount) break;
+    // 3. 💬 Comment
+    if (replyPosts && !isWorkflowAborted) {
+      const tweetText = (tweetData.text || '').trim();
+      let replyContent = '';
+      try {
+        const aiRes = await chrome.runtime.sendMessage({
+          type: 'GENERATE_INLINE_REPLY',
+          tweetText,
+          tweetAuthor: `@${authorHandle}`,
+          tweetAuthorName: tweetData.authorName || authorHandle,
+          style,
+          stylePrompt
+        });
+        if (aiRes?.reply) replyContent = aiRes.reply.trim();
+      } catch (e) {
+        console.warn('[ATOMX FOLLOWERS] AI reply error:', e);
+      }
+
+      if (!replyContent) {
+        replyContent = 'Solid point. Appreciate the clear insight here.';
+      }
+
+      replyContent = sanitizeClientComment(replyContent, 10);
+      if (replyContent && !isWorkflowAborted) {
+        await postCommentOnTargetArticle(art, replyContent);
+        await sleep(900);
+      }
+    }
+
+    // 4. ➕ Follow author
+    if (autoFollow && authorHandle && !isWorkflowAborted) {
+      const followBtn = art.querySelector('button[data-testid*="-follow"], div[data-testid*="-follow"]') ||
+        Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => (b.innerText || '').trim() === 'Follow');
+      if (followBtn) {
+        await simulateHumanFollowClick(followBtn);
+        await sleep(500);
+      }
+    }
+
+    engagedCount++;
+    engagedTweets[tweetId] = Date.now();
+    if (authorHandle) engagedAuthors[authorHandle] = Date.now();
+
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set({
+        atomx_follower_engaged_tweets: engagedTweets,
+        atomx_follower_engaged_history: engagedAuthors
+      }).catch(() => null);
+    }
+
+    updateFloatingHud({
+      title: 'Followers Increase',
+      stateBadge: engagedCount >= targetCount ? 'DONE' : 'ENGAGING',
+      indicator: `${engagedCount}/${targetCount}`,
+      done: engagedCount,
+      collected: targetCount,
+      skipped: skippedCount,
+      progressPercent: Math.round((engagedCount / targetCount) * 100),
+      statusText: `✓ Engaged [${engagedCount}/${targetCount}] on @${authorHandle || 'user'}'s post`
+    });
+
+    if (engagedCount >= targetCount || isWorkflowAborted) return;
+
+    // Pacing countdown between posts
+    const waitSec = Math.max(8, postWaitSec + Math.floor(Math.random() * 6 - 3));
+    for (let sec = waitSec; sec > 0 && !isWorkflowAborted; sec--) {
+      const check = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+      if (check?.atomx_agent_workflow?.active === false || check?.atomx_agent_workflow?.isStopped || check?.atomx_active_hud?.isStopped || check?.atomx_active_hud?.stateBadge === 'STOPPED') {
+        isWorkflowAborted = true;
+        break;
+      }
+      updateFloatingHud({
+        countdownText: `⏱️ Next post in ${sec}s...`,
+        timerBadge: `⏱️ ${sec}s`
+      });
+      await sleep(1000);
+      if (isWorkflowAborted) break;
+    }
+  }
+
+  // =========================================================================
+  // STRATEGY 1: "MOST ACTIVE" (Sort by highest replies within timeframe)
+  // =========================================================================
+  if (sortPriority === 'active') {
+    const candidateMap = new Map();
+    let consecutiveOlderCount = 0;
+    let consecutiveEmptyScrolls = 0;
+    const maxScanScrolls = 50;
+
+    for (let s = 0; s < maxScanScrolls; s++) {
+      if (isWorkflowAborted) break;
+
+      const stopCheck = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+      if (stopCheck?.atomx_agent_workflow?.isStopped || stopCheck?.atomx_active_hud?.stateBadge === 'STOPPED' || stopCheck?.atomx_agent_workflow?.active === false) {
+        isWorkflowAborted = true;
+        break;
+      }
 
       while (isHudWorkflowPaused && !isWorkflowAborted) {
         await sleep(1000);
       }
 
-      const tweetData = extractTweetData(art);
-      const tweetId = tweetData.id || tweetData.tweetUrl;
-      const authorHandle = (tweetData.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+      const initialCandidateCount = candidateMap.size;
+      const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+      let foundOlderInPass = 0;
 
-      if (!tweetId || processedTweetIds.has(tweetId)) continue;
-      processedTweetIds.add(tweetId);
+      for (const art of articles) {
+        if (isWorkflowAborted) break;
 
-      // Skip own tweets
-      if (authorHandle && authorHandle === loggedInHandle) continue;
+        const tweetData = extractTweetData(art);
+        const tweetId = tweetData.id || tweetData.tweetUrl;
+        const authorHandle = (tweetData.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+        if (!tweetId) continue;
 
-      // Skip if already engaged on this tweet
-      if (engagedTweets[tweetId]) continue;
-      const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
-      if (alreadyLiked) {
-        engagedTweets[tweetId] = Date.now();
-        continue;
-      }
+        // Skip own tweets
+        if (authorHandle && authorHandle === loggedInHandle) continue;
 
-      // Check timeframe freshness
-      const timeEl = art.querySelector('time');
-      const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
-      const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
-      const ageMs = Date.now() - timestamp;
-      if (ageMs > freshnessMs) {
-        continue; // Older than timeframe
-      }
+        // Check freshness
+        const timeEl = art.querySelector('time');
+        const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+        const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
+        const ageMs = Date.now() - timestamp;
+        if (ageMs > freshnessMs) {
+          foundOlderInPass++;
+          continue;
+        }
 
-      // STRICT CHECK: Only recent posts, NEVER comments / replies
-      // "sudu matro recent post a. recent comment gulai na"
-      const artText = (art.innerText || '');
-      const hasReplyingText = /replying to/i.test(artText);
-      const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
-      const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
-      const isReplying = hasReplyingText || hasThreadConnector || hasReplyLink;
-      if (isReplying) {
-        console.log(`[ATOMX FOLLOWERS] Skipping comment/reply tweet by @${authorHandle}`);
-        continue; // STRICT: Skip comments/replies!
-      }
+        // Already engaged -> Skip and keep scrolling
+        if (engagedTweets[tweetId]) {
+          if (!processedTweetIds.has(tweetId)) {
+            processedTweetIds.add(tweetId);
+            skippedCount++;
+          }
+          continue;
+        }
 
-      // WEAK TWEET FILTER (short, spam): skip
-      // "week tweet(short, spam): skip"
-      const tweetText = (tweetData.text || '').trim();
-      const words = tweetText.split(/\s+/).filter(Boolean);
-      if (tweetText.length < 15 || words.length < 4) {
-        console.log(`[ATOMX FOLLOWERS] Skipping weak short post (${tweetText.length} chars, ${words.length} words): "${tweetText}"`);
-        continue;
-      }
+        const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
+        if (alreadyLiked) {
+          engagedTweets[tweetId] = Date.now();
+          if (!processedTweetIds.has(tweetId)) {
+            processedTweetIds.add(tweetId);
+            skippedCount++;
+          }
+          continue;
+        }
 
-      const lowerText = tweetText.toLowerCase();
-      const spamKeywords = [
-        'airdrop', 'send 0.1 eth', 'send eth', 'giveaway bot', 'dm to claim',
-        'presale', 'free mint', 'claim your free', 'airdrop bot', 'pump',
-        'drop wallet', 'drop address', 'whitelist slot'
-      ];
-      if (spamKeywords.some(kw => lowerText.includes(kw))) {
-        console.log(`[ATOMX FOLLOWERS] Skipping spam post: "${tweetText.slice(0, 50)}"`);
-        continue;
-      }
+        // STRICT: Root post only, skip replies/comments
+        const artText = (art.innerText || '');
+        const hasReplyingText = /replying to/i.test(artText);
+        const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
+        const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
+        if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
 
-      // QUALIFYING RECENT POST FOUND!
-      foundNewInPass = true;
-      consecutiveEmptyScrolls = 0;
+        // Weak & Spam filter
+        const tweetText = (tweetData.text || '').trim();
+        const words = tweetText.split(/\s+/).filter(Boolean);
+        if (tweetText.length < 15 || words.length < 4) continue;
+        const lowerText = tweetText.toLowerCase();
+        const spamKeywords = [
+          'airdrop', 'send 0.1 eth', 'send eth', 'giveaway bot', 'dm to claim',
+          'presale', 'free mint', 'claim your free', 'airdrop bot', 'pump',
+          'drop wallet', 'drop address', 'whitelist slot'
+        ];
+        if (spamKeywords.some(kw => lowerText.includes(kw))) continue;
 
-      art.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(700);
+        // Extract replies count
+        const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+        const repliesCount = extractTwitterMetric(replyBtn) || 0;
 
-      const statusMsg = `Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}...`;
-      updateFloatingHud({
-        title: 'Followers Increase',
-        stateBadge: 'ENGAGING',
-        indicator: `${engagedCount}/${targetCount}`,
-        done: engagedCount,
-        collected: targetCount,
-        skipped: 0,
-        progressPercent: Math.round((engagedCount / targetCount) * 100),
-        statusText: statusMsg
-      });
-
-      // Execute checked actions:
-      // 1. ❤️ Like
-      if (likePosts && !isWorkflowAborted) {
-        await simulateHumanLikeClick(art);
-        await sleep(500);
-      }
-
-      // 2. 🔁 Repost
-      if (repostPosts && !isWorkflowAborted) {
-        await simulateHumanRepostClick(art);
-        await sleep(500);
-      }
-
-      // 3. 💬 Comment
-      if (replyPosts && !isWorkflowAborted) {
-        let replyContent = '';
-        try {
-          const aiRes = await chrome.runtime.sendMessage({
-            type: 'GENERATE_INLINE_REPLY',
-            tweetText,
-            tweetAuthor: `@${authorHandle}`,
-            tweetAuthorName: tweetData.authorName || authorHandle,
-            style,
-            stylePrompt
+        if (!candidateMap.has(tweetId)) {
+          candidateMap.set(tweetId, {
+            art,
+            tweetData,
+            tweetId,
+            authorHandle,
+            repliesCount,
+            timestamp,
+            ageMs
           });
-          if (aiRes?.reply) replyContent = aiRes.reply.trim();
-        } catch (e) {
-          console.warn('[ATOMX FOLLOWERS] AI reply error:', e);
-        }
-
-        if (!replyContent) {
-          replyContent = 'Solid point. Appreciate the clear insight here.';
-        }
-
-        replyContent = sanitizeClientComment(replyContent, 10);
-        if (replyContent && !isWorkflowAborted) {
-          await postCommentOnTargetArticle(art, replyContent);
-          await sleep(900);
         }
       }
 
-      // 4. ➕ Follow author
-      if (autoFollow && authorHandle && !isWorkflowAborted) {
-        const followBtn = art.querySelector('button[data-testid*="-follow"], div[data-testid*="-follow"]') ||
-          Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => (b.innerText || '').trim() === 'Follow');
-        if (followBtn) {
-          await simulateHumanFollowClick(followBtn);
-          await sleep(500);
-        }
+      if (candidateMap.size === initialCandidateCount) {
+        consecutiveEmptyScrolls++;
+      } else {
+        consecutiveEmptyScrolls = 0;
       }
 
-      engagedCount++;
-      engagedTweets[tweetId] = Date.now();
-      if (authorHandle) engagedAuthors[authorHandle] = Date.now();
-
-      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-        chrome.storage.local.set({
-          atomx_follower_engaged_tweets: engagedTweets,
-          atomx_follower_engaged_history: engagedAuthors
-        }).catch(() => null);
-      }
-
-      updateFloatingHud({
-        title: 'Followers Increase',
-        stateBadge: engagedCount >= targetCount ? 'DONE' : 'ENGAGING',
-        indicator: `${engagedCount}/${targetCount}`,
-        done: engagedCount,
-        collected: targetCount,
-        skipped: 0,
-        progressPercent: Math.round((engagedCount / targetCount) * 100),
-        statusText: `✓ Engaged [${engagedCount}/${targetCount}] on @${authorHandle || 'user'}'s post`
-      });
-
-      if (engagedCount >= targetCount || isWorkflowAborted) break;
-
-      // Pacing countdown between posts
-      const waitSec = Math.max(8, postWaitSec + Math.floor(Math.random() * 6 - 3));
-      for (let sec = waitSec; sec > 0 && !isWorkflowAborted; sec--) {
-        const check = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
-        if (check?.atomx_agent_workflow?.active === false || check?.atomx_agent_workflow?.isStopped || check?.atomx_active_hud?.isStopped || check?.atomx_active_hud?.stateBadge === 'STOPPED') {
-          isWorkflowAborted = true;
+      if (foundOlderInPass > 3) {
+        consecutiveOlderCount++;
+        if (consecutiveOlderCount >= 3) {
+          console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}). Scan complete.`);
           break;
         }
-        updateFloatingHud({
-          countdownText: `⏱️ Next post in ${sec}s...`,
-          timerBadge: `⏱️ ${sec}s`
-        });
-        await sleep(1000);
-        if (isWorkflowAborted) break;
+      } else {
+        consecutiveOlderCount = 0;
       }
-    }
 
-    if (engagedCount >= targetCount || isWorkflowAborted) break;
-
-    if (!foundNewInPass) {
-      consecutiveEmptyScrolls++;
-    } else {
-      consecutiveEmptyScrolls = 0;
-    }
-
-    // "No new tweet in 5to6 scroll: refresh the list"
-    if (consecutiveEmptyScrolls >= 5) {
-      console.log('[ATOMX FOLLOWERS] No new qualifying tweets in 5-6 scrolls. Refreshing list page...');
       updateFloatingHud({
-        statusText: 'No new tweets in 5-6 scrolls. Refreshing list...',
-        stateBadge: 'REFRESHING'
+        title: 'Followers Increase',
+        stateBadge: 'SCANNING',
+        statusText: `Scanning (${freshness}). Found ${candidateMap.size} unengaged posts (${skippedCount} skipped)...`,
+        skipped: skippedCount
       });
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      await sleep(1000);
-      window.location.reload();
-      await sleep(5000);
-      consecutiveEmptyScrolls = 0;
-      continue;
+
+      if (consecutiveEmptyScrolls >= 8) break;
+      await smoothScrollAndHydrate(700, 1000);
     }
 
-    await smoothScrollAndHydrate(700, 1000);
+    if (candidateMap.size === 0 && !isWorkflowAborted) {
+      console.log(`[ATOMX FOLLOWERS] No unengaged posts found in timeframe (${freshness}).`);
+      const emptyMsg = `No unengaged posts found in selected timeframe (${freshness}).`;
+      updateFloatingHud({
+        title: 'Followers Increase',
+        stateBadge: 'DONE',
+        statusText: emptyMsg,
+        timerBadge: '✓ Finished',
+        done: 0,
+        collected: targetCount,
+        skipped: skippedCount,
+        progressPercent: 100,
+        countdownText: ''
+      });
+      return {
+        success: true,
+        engagedCount: 0,
+        targetCount,
+        emptyTimeframe: true,
+        statusText: emptyMsg,
+        aborted: false
+      };
+    }
+
+    // Sort descending by highest replies count
+    const rankedCandidates = Array.from(candidateMap.values())
+      .sort((a, b) => b.repliesCount - a.repliesCount)
+      .slice(0, targetCount);
+
+    console.log(`[ATOMX FOLLOWERS] Engaging top ${rankedCandidates.length} most active posts:`, rankedCandidates);
+
+    for (const item of rankedCandidates) {
+      if (engagedCount >= targetCount || isWorkflowAborted) break;
+      await performActionsOnTweet(item.art, item.tweetData, item.tweetId, item.authorHandle);
+    }
+  }
+
+  // =========================================================================
+  // STRATEGY 2: "NEWEST TWEETS FIRST" (Chronological downward scroll)
+  // =========================================================================
+  else {
+    const maxRecentScrolls = 65;
+    let consecutiveOlderCount = 0;
+    let consecutiveEmptyScrolls = 0;
+
+    for (let s = 0; s < maxRecentScrolls; s++) {
+      if (isWorkflowAborted || engagedCount >= targetCount) break;
+
+      const stopCheck = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+      if (stopCheck?.atomx_agent_workflow?.isStopped || stopCheck?.atomx_active_hud?.stateBadge === 'STOPPED' || stopCheck?.atomx_agent_workflow?.active === false) {
+        isWorkflowAborted = true;
+        break;
+      }
+
+      while (isHudWorkflowPaused && !isWorkflowAborted) {
+        await sleep(1000);
+      }
+
+      const initialEngaged = engagedCount;
+      const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+      let foundOlderInPass = 0;
+
+      for (const art of articles) {
+        if (isWorkflowAborted || engagedCount >= targetCount) break;
+
+        const tweetData = extractTweetData(art);
+        const tweetId = tweetData.id || tweetData.tweetUrl;
+        const authorHandle = (tweetData.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+
+        if (!tweetId || processedTweetIds.has(tweetId)) continue;
+        processedTweetIds.add(tweetId);
+
+        // Skip own tweets
+        if (authorHandle && authorHandle === loggedInHandle) continue;
+
+        // Check timeframe freshness
+        const timeEl = art.querySelector('time');
+        const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+        const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
+        const ageMs = Date.now() - timestamp;
+        if (ageMs > freshnessMs) {
+          foundOlderInPass++;
+          continue;
+        }
+
+        // Skip if already engaged on this tweet -> KEEP SCROLLING!
+        if (engagedTweets[tweetId]) {
+          skippedCount++;
+          updateFloatingHud({
+            skipped: skippedCount,
+            statusText: `Skipping already engaged post by @${authorHandle || 'user'}... Scrolling deeper...`
+          });
+          continue;
+        }
+        const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
+        if (alreadyLiked) {
+          engagedTweets[tweetId] = Date.now();
+          skippedCount++;
+          updateFloatingHud({
+            skipped: skippedCount,
+            statusText: `Skipping already liked post by @${authorHandle || 'user'}... Scrolling deeper...`
+          });
+          continue;
+        }
+
+        // STRICT: Root posts only
+        const artText = (art.innerText || '');
+        const hasReplyingText = /replying to/i.test(artText);
+        const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
+        const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
+        if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
+
+        // Weak & Spam filter
+        const tweetText = (tweetData.text || '').trim();
+        const words = tweetText.split(/\s+/).filter(Boolean);
+        if (tweetText.length < 15 || words.length < 4) continue;
+        const lowerText = tweetText.toLowerCase();
+        const spamKeywords = [
+          'airdrop', 'send 0.1 eth', 'send eth', 'giveaway bot', 'dm to claim',
+          'presale', 'free mint', 'claim your free', 'airdrop bot', 'pump',
+          'drop wallet', 'drop address', 'whitelist slot'
+        ];
+        if (spamKeywords.some(kw => lowerText.includes(kw))) continue;
+
+        // QUALIFYING RECENT POST FOUND!
+        await performActionsOnTweet(art, tweetData, tweetId, authorHandle);
+      }
+
+      if (engagedCount === initialEngaged) {
+        consecutiveEmptyScrolls++;
+      } else {
+        consecutiveEmptyScrolls = 0;
+      }
+
+      if (foundOlderInPass > 3) {
+        consecutiveOlderCount++;
+        if (consecutiveOlderCount >= 3) {
+          console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}).`);
+          break;
+        }
+      } else {
+        consecutiveOlderCount = 0;
+      }
+
+      if (consecutiveEmptyScrolls >= 10) break;
+      await smoothScrollAndHydrate(700, 1000);
+    }
+
+    if (engagedCount === 0 && !isWorkflowAborted) {
+      console.log(`[ATOMX FOLLOWERS] No unengaged posts found in timeframe (${freshness}).`);
+      const emptyMsg = `No unengaged posts found in selected timeframe (${freshness}).`;
+      updateFloatingHud({
+        title: 'Followers Increase',
+        stateBadge: 'DONE',
+        statusText: emptyMsg,
+        timerBadge: '✓ Finished',
+        done: 0,
+        collected: targetCount,
+        skipped: skippedCount,
+        progressPercent: 100,
+        countdownText: ''
+      });
+      return {
+        success: true,
+        engagedCount: 0,
+        targetCount,
+        emptyTimeframe: true,
+        statusText: emptyMsg,
+        aborted: false
+      };
+    }
   }
 
   if (isWorkflowAborted) {

@@ -442,7 +442,7 @@ exports.saveCuratedLists = async (req, res) => {
       if (cat.includes('audience') || cat.includes('follower')) {
         item.targets = [];
         if (!item.listUrl || typeof item.listUrl !== 'string' || !item.listUrl.trim()) {
-          item.listUrl = 'https://x.com/i/lists/2103557569319219223';
+          item.listUrl = '';
         } else {
           item.listUrl = item.listUrl.trim();
         }
