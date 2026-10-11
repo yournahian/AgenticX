@@ -3119,7 +3119,8 @@ async function startCommenterReciprocatorWorkflow() {
       followUser: optFollow,
       style: tone,
       stylePrompt: tonePrompt,
-      backendUrl
+      backendUrl,
+      verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
     }
   });
 }
@@ -4108,7 +4109,8 @@ async function startAudienceBuilderWorkflow() {
       replyPosts,
       repostPosts,
       autoFollow,
-      backendUrl
+      backendUrl,
+      verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
     }
   });
 }
@@ -4228,7 +4230,8 @@ async function startSorsaScoreBoosterWorkflow() {
       replyPosts,
       repostPosts,
       autoFollow,
-      backendUrl
+      backendUrl,
+      verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
     }
   });
 }
@@ -4349,7 +4352,8 @@ async function startFollowersIncreaseWorkflow() {
       replyPosts,
       repostPosts,
       autoFollow,
-      backendUrl
+      backendUrl,
+      verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
     }
   });
 }
@@ -4442,7 +4446,8 @@ async function startReplyBackLoopWorkflow() {
       maxReplies: maxComments,
       style: tone,
       autoLike,
-      backendUrl
+      backendUrl,
+      verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
     }
   }, (res) => {
     if (chrome.runtime?.lastError || !res?.ok) {
@@ -5260,12 +5265,22 @@ async function checkAccountVerificationLock() {
   if (extCredits) extCredits.textContent = `${(state.credits || 0).toLocaleString()} Credits`;
 
 
-  // Real-time tab check with active Twitter/X tab
+  // Real-time tab check with active Twitter/X tab or any open Twitter tab
   try {
+    let checkTab = null;
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     const activeTab = tabs && tabs[0];
     if (activeTab && (activeTab.url?.includes('x.com') || activeTab.url?.includes('twitter.com'))) {
-      const response = await chrome.tabs.sendMessage(activeTab.id, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }).catch(() => null);
+      checkTab = activeTab;
+    } else {
+      const xTabs = await chrome.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] });
+      if (xTabs && xTabs.length > 0) {
+        checkTab = xTabs[0];
+      }
+    }
+
+    if (checkTab) {
+      const response = await chrome.tabs.sendMessage(checkTab.id, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }).catch(() => null);
       if (response && response.success) {
         state.activeTwitterHandle = (response.rawHandle || '').toLowerCase().trim();
         if (!state.activeTwitterHandle) {

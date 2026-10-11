@@ -759,6 +759,68 @@ async function syncTgHud(raid, statusText, stateBadge = 'ENGAGING', progressPerc
 
 let agentWorkflowWorkingTabId = null;
 
+/**
+ * Instant Account Lock Enforcement:
+ * Checks active Twitter account on working tab against AtomX verified account.
+ * If mismatch or logged out, shows modal on page, updates HUD, and halts instantly.
+ */
+async function verifyTabAccountLock(tabId, expectedHandle, workflow) {
+  if (!tabId || !expectedHandle) return { ok: true };
+  const expected = expectedHandle.replace(/^@/, '').toLowerCase().trim();
+
+  try {
+    const res = await sendMessageToTab(tabId, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' }, 8000);
+    const current = (res?.rawHandle || '').toLowerCase().trim();
+
+    if (current && current !== expected) {
+      console.warn(`[ATOMX BG] ACCOUNT LOCK MISMATCH DETECTED! Active: @${current}, Expected: @${expected}`);
+      await sendMessageToTab(tabId, {
+        type: 'SHOW_ACCOUNT_MISMATCH_MODAL',
+        expected,
+        current
+      }, 5000).catch(() => null);
+
+      if (workflow) {
+        workflow.active = false;
+        workflow.isStopped = true;
+        workflow.status = 'STOPPED';
+        await syncAgentHud(workflow, `🛑 Account Mismatch: Active @${current} ≠ Verified @${expected}. Locked.`, 'STOPPED', 0);
+        await chrome.storage.local.set({
+          atomx_agent_workflow: workflow,
+          atomx_active_hud: {
+            visible: true,
+            title: workflow.title || 'AtomX Agent',
+            statusText: `🛑 Account Mismatch: Active @${current} ≠ Verified @${expected}. Locked.`,
+            stateBadge: 'STOPPED',
+            isStopped: true
+          }
+        });
+      }
+      return { ok: false, current, expected, reason: 'ID_MISMATCH' };
+    }
+
+    if (!current && res?.isDefinitelyLoggedOut) {
+      await sendMessageToTab(tabId, {
+        type: 'SHOW_ACCOUNT_MISMATCH_MODAL',
+        expected,
+        current: 'Not Logged In'
+      }, 5000).catch(() => null);
+
+      if (workflow) {
+        workflow.active = false;
+        workflow.isStopped = true;
+        workflow.status = 'STOPPED';
+        await syncAgentHud(workflow, `🛑 Please log into verified Twitter account @${expected}. Locked.`, 'STOPPED', 0);
+        await chrome.storage.local.set({ atomx_agent_workflow: workflow });
+      }
+      return { ok: false, expected, reason: 'X_NOT_LOGGED_IN' };
+    }
+  } catch (err) {
+    console.warn('[ATOMX BG] verifyTabAccountLock check notice:', err);
+  }
+  return { ok: true };
+}
+
 async function handleStartAgentWorkflow(request, sendResponse) {
   const { agentId, title, items = [], options = {} } = request;
   if ((!items || items.length === 0) && !(agentId === 'reciprocator' && options.postUrl) && !(options.feedUrl) && !(agentId === 'followers') && !(agentId === 'audience')) {
@@ -877,6 +939,11 @@ async function processAgentWorkflowStep() {
       await waitForTabLoad(tabId, 15000);
       await delay(3000);
 
+      // Instant Account Lock Check
+      const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
+      const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+      if (!lockCheck.ok) return;
+
       const scanRes = await sendMessageToTab(tabId, {
         type: 'COLLECT_RECIPROCATOR_COMMENTERS',
         targetCount: options.maxCount || 10,
@@ -938,57 +1005,74 @@ async function processAgentWorkflowStep() {
 
   // Dynamic live scan phase (Followers Increase, Sorsa Booster custom list, Audience Builder custom list)
   // =========================================================================
-  // AGENT 4: FOLLOWERS INCREASE (Direct List Timeline Engagement)
-  // Engages directly on the List's recent posts (not comments) within timeframe.
-  // Skips weak tweets (< 15 chars, < 4 words, spam). Auto-refreshes on 5-6 scrolls.
+  // AGENT 4: FOLLOWERS INCREASE (Queue-based direct engagement on top list posts)
+  // Scans list feed within timeframe, filters posts, queues top items, and engages directly.
   // =========================================================================
-  if (agentId === 'followers') {
+  if (agentId === 'followers' && (!items || items.length === 0)) {
     const rawFeedUrl = options.feedUrl || (options.listId
       ? `https://x.com/search?q=${encodeURIComponent(`list:${options.listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live`
       : 'https://x.com');
     const targetCount = Number(options.targetCount) || 8;
+    const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
 
-    await syncAgentHud(workflow, `Opening Twitter List timeline to engage recent posts...`, 'ENGAGING', 10);
+    await syncAgentHud(workflow, `Opening Twitter List timeline to discover top posts...`, 'SCANNING', 10);
     try {
       const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, rawFeedUrl);
       agentWorkflowWorkingTabId = tabId;
       await waitForTabLoad(tabId, 15000);
       await delay(3000);
 
-      const cycleRes = await sendMessageToTab(tabId, {
-        type: 'EXECUTE_FOLLOWERS_LIST_CYCLE',
+      // Instant Account Lock Check before any scanning
+      const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+      if (!lockCheck.ok) return;
+
+      const discRes = await sendMessageToTab(tabId, {
+        type: 'DISCOVER_TOP_ACTIVE_LIST_TWEETS',
         targetCount,
         freshness: options.freshness || '1h',
         sortPriority: options.sortPriority || 'active',
-        likePosts: options.likePosts !== false,
-        replyPosts: options.replyPosts !== false,
-        repostPosts: options.repostPosts === true,
-        autoFollow: options.autoFollow !== false,
-        style: options.style || 'Natural & Concise',
-        stylePrompt: options.stylePrompt || null,
-        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
-      }, 900000);
+        verifiedXHandle
+      }, 300000);
 
       const chk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
-      if (cycleRes?.aborted || chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
+      if (discRes?.aborted || chk?.atomx_agent_workflow?.isStopped || !chk?.atomx_agent_workflow?.active) {
         console.log('[ATOMX BG] Followers Increase cycle stopped/aborted by user.');
         return;
       }
 
-      if (cycleRes?.emptyTimeframe) {
+      const topTweets = Array.isArray(discRes?.topTweets) ? discRes.topTweets : [];
+      if (topTweets.length === 0) {
         workflow.active = false;
         workflow.successCount = 0;
         workflow.total = targetCount;
-        await syncAgentHud(workflow, cycleRes?.statusText || `No unengaged posts found in selected timeframe (${options.freshness || '1h'}).`, 'DONE', 100);
+        await syncAgentHud(workflow, `No unengaged posts found in selected timeframe (${options.freshness || '1h'}).`, 'DONE', 100);
         await finishAgentWorkflow(workflow);
         return;
       }
 
-      workflow.active = false;
-      workflow.successCount = cycleRes?.engagedCount || targetCount;
-      workflow.total = targetCount;
-      await syncAgentHud(workflow, `Completed engagement on ${cycleRes?.engagedCount || targetCount} recent list posts.`, 'DONE', 100);
-      await finishAgentWorkflow(workflow);
+      // Populate workflow queue with top posts!
+      const workflowItems = topTweets.slice(0, targetCount).map(t => ({
+        tweetUrl: t.tweetUrl,
+        tweetId: t.tweetId,
+        targetHandle: t.authorHandle,
+        authorHandle: t.authorHandle,
+        authorName: t.authorName,
+        text: t.text,
+        repliesCount: t.repliesCount
+      }));
+
+      const updatedWorkflow = {
+        ...workflow,
+        items: workflowItems,
+        total: workflowItems.length,
+        currentIndex: 0,
+        successCount: 0,
+        ignoredCount: 0,
+        statusText: `Discovered ${workflowItems.length} top posts (${options.sortPriority === 'active' ? 'Most Active' : 'Newest First'}). Starting direct engagement...`
+      };
+      await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
+      await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 15);
+      setTimeout(() => processAgentWorkflowStep(), 800);
       return;
     } catch (fErr) {
       console.warn('[ATOMX BG] Error in Followers Increase cycle:', fErr);
@@ -1023,6 +1107,11 @@ async function processAgentWorkflowStep() {
       await waitForTabLoad(tabId, 15000);
       await delay(3000);
 
+      // Instant Account Lock Check before any scanning
+      const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
+      const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+      if (!lockCheck.ok) return;
+
       // Step A: Discover top engaged tweets (highest reply counts) in timeframe
       const topTweetsRes = await sendMessageToTab(tabId, {
         type: 'DISCOVER_TOP_ENGAGED_LIST_TWEETS',
@@ -1055,7 +1144,7 @@ async function processAgentWorkflowStep() {
             return;
           }
 
-          await syncAgentHud(workflow, `Extracting commenters from top tweet by @${t.author || 'creator'} (${t.repliesCount || 0} replies)...`, 'COLLECTING', 20);
+          await syncAgentHud(workflow, `Extracting commenters from top post by @${t.author || 'creator'} (${t.repliesCount || 0} comments)...`, 'COLLECTING', 20);
           await getOrCreateReusedTab(tabId, t.url);
           await waitForTabLoad(tabId, 15000);
           await delay(3000);
@@ -1090,27 +1179,9 @@ async function processAgentWorkflowStep() {
         }
       }
 
-      // Fallback: If thread navigation yielded fewer than needed, run timeline fallback
-      if (collectedCommenters.length < targetCount) {
-        const fallbackRes = await sendMessageToTab(tabId, {
-          type: 'COLLECT_AUDIENCE_FROM_LIST',
-          targetCount: targetCount - collectedCommenters.length,
-          freshness: options.freshness || '2h'
-        }, 55000).catch(() => ({ profiles: [] }));
-
-        const moreProfiles = Array.isArray(fallbackRes?.profiles) ? fallbackRes.profiles : [];
-        for (const p of moreProfiles) {
-          const clean = (p.cleanHandle || p.handle || '').toLowerCase().replace(/^@/, '').trim();
-          if (!clean || seenHandles.has(clean) || persistedHistory[clean]) continue;
-          seenHandles.add(clean);
-          collectedCommenters.push({ cleanHandle: clean, handle: `@${clean}` });
-          if (collectedCommenters.length >= targetCount) break;
-        }
-      }
-
       if (collectedCommenters.length === 0) {
         workflow.active = false;
-        await syncAgentHud(workflow, `No fresh un-engaged commenters found in chosen timeframe.`, 'DONE', 100);
+        await syncAgentHud(workflow, `No fresh un-engaged commenters found on top posts in chosen timeframe.`, 'DONE', 100);
         await finishAgentWorkflow(workflow);
         return;
       }
@@ -1146,9 +1217,10 @@ async function processAgentWorkflowStep() {
   const targetHandle = (item.cleanHandle || item.handle || '').replace(/^@/, '').trim();
   const indexStr = `[${currentIndex + 1}/${total}]`;
 
+  const displayTarget = item.authorHandle ? `@${item.authorHandle}` : (targetHandle ? `@${targetHandle}` : 'target');
   await syncAgentHud(
     workflow,
-    `${indexStr} Visiting @${targetHandle || 'target'}...`,
+    `${indexStr} Visiting ${displayTarget}...`,
     'ENGAGING',
     Math.round((currentIndex / total) * 100)
   );
@@ -1158,7 +1230,27 @@ async function processAgentWorkflowStep() {
     let messagePayload = null;
     let timeoutMs = 45000;
 
-    if (agentId === 'replyback') {
+    if (agentId === 'followers') {
+      targetUrl = item.tweetUrl;
+      messagePayload = {
+        type: 'EXECUTE_AUTONOMOUS_ENGAGEMENT',
+        tweetUrl: item.tweetUrl,
+        tweetId: item.tweetId,
+        authorHandle: item.authorHandle,
+        actions: {
+          like: options.likePosts !== false,
+          comment: options.replyPosts !== false,
+          repost: options.repostPosts === true,
+          follow: options.autoFollow !== false,
+          scroll: true
+        },
+        style: options.style || 'Natural & Concise',
+        stylePrompt: options.stylePrompt || null,
+        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
+        verifiedXHandle: options.verifiedXHandle
+      };
+      timeoutMs = 65000;
+    } else if (agentId === 'replyback') {
       targetUrl = item.tweetUrl || options.tweetUrl;
       messagePayload = {
         type: 'EXECUTE_REPLY_BACK_CYCLE',
@@ -1166,7 +1258,8 @@ async function processAgentWorkflowStep() {
         delaySec: options.delaySec || 12,
         autoLike: options.autoLike !== false,
         style: options.style || 'Natural & Concise',
-        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
+        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
+        verifiedXHandle: options.verifiedXHandle
       };
       timeoutMs = 180000; // 3 minutes timeout for multiple replies with delaySec
     } else if (agentId === 'reciprocator') {
@@ -1181,7 +1274,8 @@ async function processAgentWorkflowStep() {
         postsCount: options.postsCount || options.postsPerProfile || 'random',
         style: options.style || 'Bullish (5-10 words)',
         stylePrompt: options.stylePrompt || null,
-        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
+        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
+        verifiedXHandle: options.verifiedXHandle
       };
       timeoutMs = 45000;
     } else {
@@ -1199,7 +1293,8 @@ async function processAgentWorkflowStep() {
         postsCount: options.postsCount || options.postsPerProfile || 'random',
         style: options.style || 'Bullish (5-10 words)',
         stylePrompt: options.stylePrompt || null,
-        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL
+        backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
+        verifiedXHandle: options.verifiedXHandle
       };
       timeoutMs = 45000;
     }
@@ -1209,6 +1304,11 @@ async function processAgentWorkflowStep() {
 
     await waitForTabLoad(tabId, 12000);
     await delay(2500);
+
+    // Instant Account Lock Check before executing task
+    const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
+    const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+    if (!lockCheck.ok) return;
 
     const recheck = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
     if (!recheck?.atomx_agent_workflow?.active) {
@@ -1235,6 +1335,16 @@ async function processAgentWorkflowStep() {
           const list = Array.isArray(r?.atomx_reciprocated_commenters) ? r.atomx_reciprocated_commenters : [];
           list.push(targetHandle);
           chrome.storage.local.set({ atomx_reciprocated_commenters: list }).catch(() => null);
+        });
+      }
+
+      if (agentId === 'followers' && item.tweetId) {
+        chrome.storage.local.get(['atomx_follower_engaged_tweets', 'atomx_follower_engaged_history'], (r) => {
+          const tweets = (r?.atomx_follower_engaged_tweets && typeof r.atomx_follower_engaged_tweets === 'object') ? r.atomx_follower_engaged_tweets : {};
+          const authors = (r?.atomx_follower_engaged_history && typeof r.atomx_follower_engaged_history === 'object') ? r.atomx_follower_engaged_history : {};
+          tweets[item.tweetId] = Date.now();
+          if (item.authorHandle) authors[item.authorHandle.toLowerCase()] = Date.now();
+          chrome.storage.local.set({ atomx_follower_engaged_tweets: tweets, atomx_follower_engaged_history: authors }).catch(() => null);
         });
       }
     }
@@ -1272,8 +1382,8 @@ async function processAgentWorkflowStep() {
     await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
 
     const statusLabel = isIgnored
-      ? `${indexStr} Skipped @${targetHandle || 'target'} (${result?.reason || 'already engaged'})`
-      : `${indexStr} ✓ Engaged @${targetHandle || 'target'}`;
+      ? `${indexStr} Skipped ${displayTarget} (${result?.reason || 'already engaged'})`
+      : `${indexStr} ✓ Engaged ${displayTarget}`;
 
     await syncAgentHud(updatedWorkflow, statusLabel, 'ENGAGING', Math.round(((currentIndex + 1) / total) * 100));
 

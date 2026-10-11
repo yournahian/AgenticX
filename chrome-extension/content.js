@@ -1536,6 +1536,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'SHOW_ACCOUNT_MISMATCH_MODAL') {
+    showAccountMismatchModal(message.expected, message.current);
+    sendResponse({ ok: true });
+    return true;
+  }
+
   if (message.type === 'ABORT_WORKFLOW') {
     isWorkflowAborted = true;
     console.log('[ATOMX] Abort signal received. Stopping all automation.');
@@ -1786,6 +1792,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Agent 1: Audience Builder — Discover most engaged recent tweets from list query
   if (message.type === 'DISCOVER_TOP_ENGAGED_LIST_TWEETS') {
     discoverTopEngagedListTweets(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message, topTweets: [] }));
+    return true;
+  }
+
+  // Agent 4: Followers Increase — Discover top active/recent posts from List timeline
+  if (message.type === 'DISCOVER_TOP_ACTIVE_LIST_TWEETS') {
+    discoverTopActiveListTweets(message)
       .then(res => sendResponse(res))
       .catch(err => sendResponse({ success: false, error: err.message, topTweets: [] }));
     return true;
@@ -3636,7 +3650,7 @@ async function discoverTopEngagedListTweets(params = {}) {
     updateFloatingHud({
       title: 'Audience Builder',
       stateBadge: 'SCANNING',
-      statusText: `Scanning list (${freshness})... Found ${topTweetsMap.size} posts (top: ${maxRepliesFound} replies)`
+      statusText: `Scanning list (${freshness})... Found ${topTweetsMap.size} posts (Highest: ${maxRepliesFound} comments)`
     });
 
     if (consecutiveEmptyScrolls >= 8) {
@@ -3657,6 +3671,184 @@ async function discoverTopEngagedListTweets(params = {}) {
   const sorted = finalCandidates.sort((a, b) => b.repliesCount - a.repliesCount);
 
   console.log(`[ATOMX AUDIENCE] Selected ${sorted.length} top engaged list tweets:`, sorted.slice(0, 5));
+
+  return {
+    success: true,
+    topTweets: sorted,
+    aborted: isWorkflowAborted
+  };
+}
+
+// =========================================================================
+// AGENT 4: FOLLOWERS INCREASE — DISCOVER TOP ACTIVE/RECENT POSTS FROM LIST
+// Scans timeline within timeframe, extracts candidate posts for queue-based execution.
+// =========================================================================
+async function discoverTopActiveListTweets(params = {}) {
+  isWorkflowAborted = false;
+  const targetCount = Number(params.targetCount || 8);
+  const freshness = params.freshness || '1h';
+  const sortPriority = params.sortPriority || 'active'; // 'active' (Most Active) vs 'recent' (Newest First)
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase().replace(/^@/, '').trim();
+
+  let freshnessMs = 60 * 60 * 1000;
+  if (freshness === '15m') freshnessMs = 15 * 60 * 1000;
+  else if (freshness === '30m') freshnessMs = 30 * 60 * 1000;
+  else if (freshness === '1h') freshnessMs = 60 * 60 * 1000;
+  else if (freshness === '2h') freshnessMs = 2 * 3600 * 1000;
+  else if (freshness === '6h') freshnessMs = 6 * 3600 * 1000;
+  else if (freshness === '12h') freshnessMs = 12 * 3600 * 1000;
+  else if (freshness === '24h') freshnessMs = 24 * 3600 * 1000;
+  else if (freshness === '3d') freshnessMs = 3 * 24 * 3600 * 1000;
+  else if (freshness === '7d') freshnessMs = 7 * 24 * 3600 * 1000;
+
+  const stored = await new Promise(r => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.get(['atomx_follower_engaged_tweets', 'atomx_follower_engaged_history'], r);
+    } else r({});
+  });
+  const engagedTweets = (stored?.atomx_follower_engaged_tweets && typeof stored.atomx_follower_engaged_tweets === 'object')
+    ? stored.atomx_follower_engaged_tweets : {};
+  const engagedAuthors = (stored?.atomx_follower_engaged_history && typeof stored.atomx_follower_engaged_history === 'object')
+    ? stored.atomx_follower_engaged_history : {};
+
+  const candidateMap = new Map();
+  let consecutiveOlderCount = 0;
+  let consecutiveEmptyScrolls = 0;
+  let skippedCount = 0;
+  const maxScanScrolls = 50;
+
+  console.log(`[ATOMX FOLLOWERS] Scanning timeframe (${freshness}) for top posts. Mode: ${sortPriority === 'active' ? 'Most Active' : 'Newest First'}`);
+
+  for (let s = 0; s < maxScanScrolls; s++) {
+    if (isWorkflowAborted) break;
+
+    const stopCheck = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+    if (stopCheck?.atomx_agent_workflow?.isStopped || stopCheck?.atomx_active_hud?.stateBadge === 'STOPPED' || stopCheck?.atomx_agent_workflow?.active === false) {
+      isWorkflowAborted = true;
+      break;
+    }
+
+    while (isHudWorkflowPaused && !isWorkflowAborted) {
+      await sleep(1000);
+    }
+
+    const initialCandidateCount = candidateMap.size;
+    const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    let foundOlderInPass = 0;
+
+    for (const art of articles) {
+      if (isWorkflowAborted) break;
+
+      const tweetData = extractTweetData(art);
+      const tweetId = tweetData.id || tweetData.tweetUrl;
+      const authorHandle = (tweetData.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+      if (!tweetId || !authorHandle) continue;
+
+      // Skip own tweets
+      if (authorHandle === loggedInHandle) continue;
+
+      // Check freshness
+      const timeEl = art.querySelector('time');
+      const timeStr = timeEl ? timeEl.getAttribute('datetime') : null;
+      const timestamp = timeStr ? new Date(timeStr).getTime() : Date.now();
+      const ageMs = Date.now() - timestamp;
+      if (ageMs > freshnessMs) {
+        foundOlderInPass++;
+        continue;
+      }
+
+      // Check already engaged or already liked
+      if (engagedTweets[tweetId] || engagedAuthors[authorHandle]) {
+        skippedCount++;
+        continue;
+      }
+
+      const alreadyLiked = art.querySelector('button[data-testid="unlike"]');
+      if (alreadyLiked) {
+        engagedTweets[tweetId] = Date.now();
+        skippedCount++;
+        continue;
+      }
+
+      // STRICT: Root post only, skip replies/comments
+      const artText = (art.innerText || '');
+      const hasReplyingText = /replying to/i.test(artText);
+      const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
+      const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
+      if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
+
+      // Weak & Spam filter
+      const tweetText = (tweetData.text || '').trim();
+      const words = tweetText.split(/\s+/).filter(Boolean);
+      if (tweetText.length < 15 || words.length < 4) continue;
+      const lowerText = tweetText.toLowerCase();
+      const spamKeywords = [
+        'airdrop', 'send 0.1 eth', 'send eth', 'giveaway bot', 'dm to claim',
+        'presale', 'free mint', 'claim your free', 'airdrop bot', 'pump',
+        'drop wallet', 'drop address', 'whitelist slot'
+      ];
+      if (spamKeywords.some(kw => lowerText.includes(kw))) continue;
+
+      // Extract replies count
+      const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
+      const repliesCount = extractTwitterMetric(replyBtn) || 0;
+
+      const statusLink = art.querySelector('a[href*="/status/"]');
+      let tweetUrl = statusLink ? (statusLink.getAttribute('href') || '') : '';
+      if (tweetUrl && !tweetUrl.startsWith('http')) tweetUrl = `https://x.com${tweetUrl}`;
+      if (!tweetUrl && authorHandle && tweetId) tweetUrl = `https://x.com/${authorHandle}/status/${tweetId}`;
+
+      if (!candidateMap.has(tweetId)) {
+        candidateMap.set(tweetId, {
+          tweetUrl,
+          tweetId,
+          authorHandle,
+          authorName: tweetData.authorName || authorHandle,
+          text: tweetText,
+          repliesCount,
+          timestamp,
+          ageMs
+        });
+      }
+    }
+
+    if (candidateMap.size === initialCandidateCount) {
+      consecutiveEmptyScrolls++;
+    } else {
+      consecutiveEmptyScrolls = 0;
+    }
+
+    if (foundOlderInPass > 3) {
+      consecutiveOlderCount++;
+      if (consecutiveOlderCount >= 3) {
+        console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}). Deep scan complete.`);
+        break;
+      }
+    } else {
+      consecutiveOlderCount = 0;
+    }
+
+    const maxReplies = Array.from(candidateMap.values()).reduce((m, c) => Math.max(m, c.repliesCount || 0), 0);
+    updateFloatingHud({
+      title: 'Followers Increase',
+      stateBadge: 'SCANNING',
+      statusText: `Scanning list (${freshness})... Found ${candidateMap.size} posts (Highest: ${maxReplies} comments)`,
+      skipped: skippedCount
+    });
+
+    if (consecutiveEmptyScrolls >= 8) break;
+    await smoothScrollAndHydrate(700, 1000);
+  }
+
+  const allCandidates = Array.from(candidateMap.values());
+  let sorted = [];
+  if (sortPriority === 'active') {
+    sorted = allCandidates.sort((a, b) => b.repliesCount - a.repliesCount);
+  } else {
+    sorted = allCandidates.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  console.log(`[ATOMX FOLLOWERS] Discovered ${sorted.length} unengaged candidate posts in timeframe (${freshness}).`);
 
   return {
     success: true,
