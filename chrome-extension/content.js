@@ -699,8 +699,8 @@ async function typeTextHumanLike(editor, text) {
   // 4. Type character by character with realistic speed & typos
   try {
     for (let i = 0; i < text.length; i++) {
-      if (isWorkflowAborted) {
-        console.log('[ATOMX] Typing aborted by user.');
+      if (isWorkflowAborted || isWorkflowItemSkipped) {
+        console.log('[ATOMX] Typing aborted or skipped by user.');
         return false;
       }
 
@@ -719,12 +719,12 @@ async function typeTextHumanLike(editor, text) {
 
         const reactionDelay = Math.floor(Math.random() * 120) + 160;
         await sleep(reactionDelay);
-        if (isWorkflowAborted) return false;
+        if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
         document.execCommand('delete', false, null);
         editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
         await sleep(Math.floor(Math.random() * 80) + 90);
-        if (isWorkflowAborted) return false;
+        if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
         document.execCommand('insertText', false, char);
         editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: char }));
@@ -796,7 +796,10 @@ async function typeTextHumanLike(editor, text) {
  * scopes typing & submit strictly to the dialog, and prevents self-commenting bugs.
  */
 async function postCommentOnTargetArticle(targetArticle, commentText) {
-  if (!commentText || isWorkflowAborted) return { success: false, error: 'Empty text or aborted' };
+  if (!commentText || isWorkflowAborted || isWorkflowItemSkipped) {
+    if (isWorkflowItemSkipped) closeAnyOpenTwitterDialog();
+    return { success: false, error: 'Empty text, skipped or aborted' };
+  }
 
   console.log('[ATOMX COMMENT ENGINE] Posting comment:', commentText);
 
@@ -845,15 +848,19 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     }
   }
 
-  if (!textarea) {
-    console.warn('[ATOMX COMMENT ENGINE] Reply textarea not found!');
-    return { success: false, error: 'Textarea not found on page' };
+  if (!textarea || isWorkflowAborted || isWorkflowItemSkipped) {
+    if (isWorkflowItemSkipped) closeAnyOpenTwitterDialog();
+    console.warn('[ATOMX COMMENT ENGINE] Reply textarea not found, skipped or aborted!');
+    return { success: false, error: 'Textarea not found, skipped or aborted' };
   }
 
   // 3. Type human-like into the editor
   await typeTextHumanLike(textarea, commentText);
 
-  if (isWorkflowAborted) return { success: false, aborted: true, error: 'Workflow was aborted by user' };
+  if (isWorkflowAborted || isWorkflowItemSkipped) {
+    closeAnyOpenTwitterDialog();
+    return { success: false, aborted: isWorkflowAborted, skipped: isWorkflowItemSkipped, error: 'Workflow was aborted or skipped by user' };
+  }
 
   await sleep(600);
 
@@ -1148,6 +1155,7 @@ function ensureFloatingHud() {
   hud.querySelector('#hud-skip-action-btn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     isWorkflowItemSkipped = true;
+    closeAnyOpenTwitterDialog();
     chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
     const statusEl = hud.querySelector('#hud-status-text');
@@ -1160,6 +1168,7 @@ function ensureFloatingHud() {
   hud.querySelector('#hud-stop-btn')?.addEventListener('click', async (e) => {
     e.stopPropagation();
     isWorkflowAborted = true;
+    closeAnyOpenTwitterDialog();
 
     const stored = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
     const prevWf = stored?.atomx_agent_workflow || {};
@@ -1615,6 +1624,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'SKIP_WORKFLOW_ITEM') {
     isWorkflowItemSkipped = true;
+    closeAnyOpenTwitterDialog();
     const statusEl = floatingHudEl?.querySelector('#hud-status-text');
     if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
     const timerBadge = floatingHudEl?.querySelector('#hud-timer-badge');
@@ -1632,6 +1642,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ABORT_WORKFLOW' || message.type === 'BG_ABORT_AGENT_WORKFLOW' || message.type === 'STOP_WORKFLOW') {
     isWorkflowAborted = true;
+    closeAnyOpenTwitterDialog();
     updateFloatingHud({
       stateBadge: 'STOPPED',
       statusText: 'Workflow stopped by user.',
@@ -1814,7 +1825,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// Wait for element helper with timeout
+// Helper: Closes any open modal/compose dialog or discard confirmation on Twitter
+function closeAnyOpenTwitterDialog() {
+  try {
+    const discardBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"]');
+    if (discardBtn) {
+      discardBtn.click();
+      return;
+    }
+    const dialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
+    if (dialog) {
+      const closeBtn = dialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"], button[data-testid="app-bar-close"]');
+      if (closeBtn) {
+        closeBtn.click();
+      } else {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+      }
+      setTimeout(() => {
+        const confirmDiscard = document.querySelector('button[data-testid="confirmationSheetConfirm"]');
+        if (confirmDiscard) confirmDiscard.click();
+      }, 250);
+    }
+  } catch (e) {}
+}
+
+// Wait for element helper with timeout and abort support
 function waitForElement(selector, timeout = 7000) {
   return new Promise((resolve) => {
     const el = document.querySelector(selector);
@@ -1822,6 +1857,10 @@ function waitForElement(selector, timeout = 7000) {
 
     const startTime = Date.now();
     const interval = setInterval(() => {
+      if (isWorkflowAborted) {
+        clearInterval(interval);
+        return resolve(null);
+      }
       const found = document.querySelector(selector);
       if (found) {
         clearInterval(interval);
@@ -3954,12 +3993,14 @@ async function executeFollowersListCycle(params = {}) {
   async function performActionsOnTweet(art, tweetData, tweetId, authorHandle) {
     if (isWorkflowItemSkipped) {
       isWorkflowItemSkipped = false;
+      closeAnyOpenTwitterDialog();
       await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
       skippedCount++;
       updateFloatingHud({
         skipped: skippedCount,
         statusText: `Skipped @${authorHandle || 'user'}'s post. Moving to next...`
       });
+      window.scrollBy({ top: 450, behavior: 'smooth' });
       return;
     }
 
@@ -3968,12 +4009,14 @@ async function executeFollowersListCycle(params = {}) {
 
     if (isWorkflowItemSkipped) {
       isWorkflowItemSkipped = false;
+      closeAnyOpenTwitterDialog();
       await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
       skippedCount++;
       updateFloatingHud({
         skipped: skippedCount,
         statusText: `Skipped @${authorHandle || 'user'}'s post. Moving to next...`
       });
+      window.scrollBy({ top: 450, behavior: 'smooth' });
       return;
     }
 
@@ -3994,8 +4037,10 @@ async function executeFollowersListCycle(params = {}) {
     if (likePosts && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
+        closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
         skippedCount++;
+        window.scrollBy({ top: 450, behavior: 'smooth' });
         return;
       }
       await simulateHumanLikeClick(art);
@@ -4006,8 +4051,10 @@ async function executeFollowersListCycle(params = {}) {
     if (repostPosts && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
+        closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
         skippedCount++;
+        window.scrollBy({ top: 450, behavior: 'smooth' });
         return;
       }
       await simulateHumanRepostClick(art);
@@ -4018,8 +4065,10 @@ async function executeFollowersListCycle(params = {}) {
     if (replyPosts && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
+        closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
         skippedCount++;
+        window.scrollBy({ top: 450, behavior: 'smooth' });
         return;
       }
       const tweetText = (tweetData.text || '').trim();
@@ -4046,8 +4095,10 @@ async function executeFollowersListCycle(params = {}) {
       if (replyContent && !isWorkflowAborted) {
         if (isWorkflowItemSkipped) {
           isWorkflowItemSkipped = false;
+          closeAnyOpenTwitterDialog();
           await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
           skippedCount++;
+          window.scrollBy({ top: 450, behavior: 'smooth' });
           return;
         }
         await postCommentOnTargetArticle(art, replyContent);
@@ -4059,7 +4110,9 @@ async function executeFollowersListCycle(params = {}) {
     if (autoFollow && authorHandle && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
+        closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+        window.scrollBy({ top: 450, behavior: 'smooth' });
         return;
       }
       const followBtn = art.querySelector('button[data-testid*="-follow"], div[data-testid*="-follow"]') ||
@@ -4105,6 +4158,7 @@ async function executeFollowersListCycle(params = {}) {
       }
       if (isWorkflowItemSkipped || check?.atomx_skip_current) {
         isWorkflowItemSkipped = false;
+        closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
         console.log('[ATOMX FOLLOWERS] Skip signal received during pacing delay. Advancing to next post.');
         break;
@@ -4309,6 +4363,7 @@ async function executeFollowersListCycle(params = {}) {
 
       const initialEngaged = engagedCount;
       const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+      let foundNewInPass = 0;
 
       for (const art of articles) {
         if (isWorkflowAborted || engagedCount >= targetCount) break;
@@ -4319,6 +4374,7 @@ async function executeFollowersListCycle(params = {}) {
 
         if (!tweetId || processedTweetIds.has(tweetId)) continue;
         processedTweetIds.add(tweetId);
+        foundNewInPass++;
 
         // Skip own tweets
         if (authorHandle && authorHandle === loggedInHandle) continue;
@@ -4369,19 +4425,19 @@ async function executeFollowersListCycle(params = {}) {
 
       if (engagedCount >= targetCount) break;
 
-      if (engagedCount === initialEngaged) {
-        consecutiveEmptyScrolls++;
-      } else {
+      if (foundNewInPass > 0 || engagedCount > initialEngaged) {
         consecutiveEmptyScrolls = 0;
+      } else {
+        consecutiveEmptyScrolls++;
       }
 
-      if (consecutiveEmptyScrolls >= 10) {
+      if (consecutiveEmptyScrolls >= 12) {
         console.log('[ATOMX FOLLOWERS] Reached end of scrollable feed.');
         break;
       }
 
       // Smooth scroll down to bring next tweets into view
-      await smoothScrollAndHydrate(700, 1000);
+      await smoothScrollAndHydrate(850, 1000);
     }
 
     if (engagedCount === 0 && !isWorkflowAborted) {

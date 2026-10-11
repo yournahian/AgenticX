@@ -1098,11 +1098,13 @@ async function processAgentWorkflowStep() {
     // BRANCH B: "MOST ACTIVE" (Scan within timeframe, rank by replies, queue top posts)
     // ─────────────────────────────────────────────────────────────────────
     else {
+      const searchUrl = (options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : null));
       const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : (options.feedUrl || 'https://x.com'));
+      const primaryFeedUrl = searchUrl || canonicalListUrl;
 
-      await syncAgentHud(workflow, `Scanning list timeline for top active posts (${options.freshness || '1h'})...`, 'SCANNING', 10);
+      await syncAgentHud(workflow, `Opening filtered search feed for top active posts (${options.freshness || '1h'})...`, 'SCANNING', 10);
       try {
-        const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, canonicalListUrl);
+        const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, primaryFeedUrl);
         agentWorkflowWorkingTabId = tabId;
         await waitForTabLoad(tabId, 15000);
         await delay(3000);
@@ -1117,6 +1119,10 @@ async function processAgentWorkflowStep() {
           sortPriority: 'active',
           verifiedXHandle
         }, 300000);
+
+        // Immediate stop check after scan
+        const stopCheck = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+        if (stopCheck?.atomx_agent_workflow?.isStopped || !stopCheck?.atomx_agent_workflow?.active) return;
 
         const topTweets = Array.isArray(discRes?.topTweets) ? discRes.topTweets : [];
 
@@ -1569,7 +1575,7 @@ async function processAgentWorkflowStep() {
 async function scheduleAgentPacingCountdown(delaySec, workflow, completedIndex, total, nextActionText = '') {
   for (let sec = delaySec; sec > 0; sec--) {
     let recheck = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
-    if (!recheck?.atomx_agent_workflow?.active) return;
+    if (!recheck?.atomx_agent_workflow?.active || recheck?.atomx_agent_workflow?.isStopped) return;
 
     if (recheck?.atomx_skip_current) {
       await chrome.storage.local.set({ atomx_skip_current: false });
@@ -1580,7 +1586,7 @@ async function scheduleAgentPacingCountdown(delaySec, workflow, completedIndex, 
     while (recheck?.atomx_workflow_paused || recheck?.atomx_agent_workflow?.isPaused) {
       await delay(400);
       recheck = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
-      if (!recheck?.atomx_agent_workflow?.active) return;
+      if (!recheck?.atomx_agent_workflow?.active || recheck?.atomx_agent_workflow?.isStopped) return;
       if (recheck?.atomx_skip_current) {
         await chrome.storage.local.set({ atomx_skip_current: false });
         setTimeout(() => processAgentWorkflowStep(), 100);
