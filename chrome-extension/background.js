@@ -13,15 +13,8 @@
 const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
 function safeRemoveTab(tabId) {
-  if (typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0) {
-    try {
-      chrome.tabs.remove(tabId, () => {
-        if (chrome.runtime?.lastError) { /* ignore silently */ }
-      });
-    } catch (e) {
-      // ignore
-    }
-  }
+  // Safety rule: never close active browser tabs or windows automatically
+  return;
 }
 
 // Reuses a SINGLE browser tab/window for all links/actions instead of opening/closing repeatedly
@@ -225,7 +218,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'SKIP_WORKFLOW_ITEM') {
-    chrome.storage.local.set({ atomx_skip_current: true });
+    chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
     // Tell current active working tab to abort current tweet action
     if (tgRaidWorkingTabId) {
       chrome.tabs.sendMessage(tgRaidWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
@@ -234,29 +227,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.tabs.sendMessage(agentWorkflowWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
     }
 
-    chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow'], (res) => {
-      if (res?.atomx_tg_raid?.active) {
-        const raid = res.atomx_tg_raid;
-        const updatedRaid = {
-          ...raid,
-          currentIndex: raid.currentIndex + 1,
-          ignoredCount: (raid.ignoredCount || 0) + 1
-        };
-        chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
-        // Immediately advance to next step without waiting on an alarm!
-        setTimeout(() => processTgRaidStep(), 150);
-      } else if (res?.atomx_agent_workflow?.active) {
-        const wf = res.atomx_agent_workflow;
-        const updatedWf = {
-          ...wf,
-          currentIndex: wf.currentIndex + 1,
-          ignoredCount: (wf.ignoredCount || 0) + 1
-        };
-        chrome.storage.local.set({ atomx_agent_workflow: updatedWf, atomx_skip_current: false });
-        // Immediately advance to next step without waiting on an alarm!
-        setTimeout(() => processAgentWorkflowStep(), 150);
-      }
-    });
     sendResponse({ ok: true });
     return true;
   }
@@ -994,10 +964,7 @@ async function processAgentWorkflowStep() {
       return;
     } catch (auditErr) {
       console.warn('[ATOMX BG] Error scanning commenters:', auditErr);
-      if (agentWorkflowWorkingTabId) {
-        safeRemoveTab(agentWorkflowWorkingTabId);
-        agentWorkflowWorkingTabId = null;
-      }
+      agentWorkflowWorkingTabId = null;
       await finishAgentWorkflow(workflow);
       return;
     }
@@ -1085,10 +1052,7 @@ async function processAgentWorkflowStep() {
         return;
       } catch (fErr) {
         console.warn('[ATOMX BG] Error in Followers Increase Newest cycle:', fErr);
-        if (agentWorkflowWorkingTabId) {
-          safeRemoveTab(agentWorkflowWorkingTabId);
-          agentWorkflowWorkingTabId = null;
-        }
+        agentWorkflowWorkingTabId = null;
         await finishAgentWorkflow(workflow);
         return;
       }
@@ -1162,10 +1126,7 @@ async function processAgentWorkflowStep() {
         return;
       } catch (aErr) {
         console.warn('[ATOMX BG] Error in Followers Most Active scan:', aErr);
-        if (agentWorkflowWorkingTabId) {
-          safeRemoveTab(agentWorkflowWorkingTabId);
-          agentWorkflowWorkingTabId = null;
-        }
+        agentWorkflowWorkingTabId = null;
         await finishAgentWorkflow(workflow);
         return;
       }
@@ -1316,10 +1277,7 @@ async function processAgentWorkflowStep() {
       return;
     } catch (auditErr) {
       console.warn('[ATOMX BG] Error discovering audience commenters:', auditErr);
-      if (agentWorkflowWorkingTabId) {
-        safeRemoveTab(agentWorkflowWorkingTabId);
-        agentWorkflowWorkingTabId = null;
-      }
+      agentWorkflowWorkingTabId = null;
       await finishAgentWorkflow(workflow);
       return;
     }

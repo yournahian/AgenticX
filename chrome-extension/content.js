@@ -3454,13 +3454,11 @@ async function collectAudienceFromListTimeline(params = {}) {
       consecutiveEmptyScrolls = 0;
     }
 
-    // Dynamic refresh: if 5-6 scrolls find no fresh tweets, reload list page to fetch fresh tweets
+    // If 5-6 scrolls find no fresh tweets, scroll back up slightly to re-trigger feed hydration
     if (consecutiveEmptyScrolls >= 5) {
-      console.log('[ATOMX AUDIENCE] 5 scrolls found no fresh tweets. Re-hydrating list page...');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      await sleep(1000);
-      window.location.reload();
-      await sleep(4500);
+      console.log('[ATOMX AUDIENCE] 5 scrolls found no fresh tweets. Re-hydrating feed...');
+      window.scrollTo({ top: Math.max(0, window.scrollY - 800), behavior: 'smooth' });
+      await sleep(1500);
       consecutiveEmptyScrolls = 0;
       continue;
     }
@@ -3570,13 +3568,11 @@ async function collectEngagingNicheProfiles(params = {}) {
       consecutiveEmptyScrolls = 0;
     }
 
-    // 5-6 scroll refresh if no new tweets found
+    // If 5-6 scrolls find no fresh tweets, re-hydrate feed without reloading page
     if (consecutiveEmptyScrolls >= 5) {
-      console.log('[ATOMX FOLLOWERS] 5-6 scrolls found no new tweets. Refreshing list page...');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      await sleep(1000);
-      window.location.reload();
-      await sleep(4000);
+      console.log('[ATOMX FOLLOWERS] 5-6 scrolls found no new tweets. Re-hydrating feed...');
+      window.scrollTo({ top: Math.max(0, window.scrollY - 800), behavior: 'smooth' });
+      await sleep(1500);
       consecutiveEmptyScrolls = 0;
       continue;
     }

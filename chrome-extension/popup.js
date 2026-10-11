@@ -6,15 +6,8 @@
 const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
 function safeRemoveTab(tabId) {
-  if (typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0) {
-    try {
-      chrome.tabs.remove(tabId, () => {
-        if (chrome.runtime?.lastError) { /* ignore silently */ }
-      });
-    } catch (e) {
-      // ignore
-    }
-  }
+  // Safety rule: never close active browser tabs or windows automatically
+  return;
 }
 
 // Reuses a SINGLE browser tab/window for all links/actions instead of opening/closing repeatedly
