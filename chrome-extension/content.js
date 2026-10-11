@@ -320,6 +320,41 @@ function gentleScrollIntoView(element) {
 }
 
 /**
+ * Global Rule: First smoothly scroll target post and its like/action button into viewport,
+ * wait for scroll animation to settle so the button is visibly shown on screen, and THEN engage.
+ */
+async function scrollElementIntoViewAndEnsureVisible(element, blockPosition = 'center') {
+  if (!element) return false;
+  try {
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    let rect = element.getBoundingClientRect();
+
+    // If not comfortably within visible middle area of viewport, smoothly scroll
+    const isNicelyInView = (rect.top >= 100 && rect.bottom <= vh - 70);
+    if (!isNicelyInView) {
+      element.scrollIntoView({ behavior: 'smooth', block: blockPosition, inline: 'nearest' });
+      // Crucial: wait for browser smooth scroll to finish so the element is physically visible on screen
+      await sleep(650);
+    } else {
+      await sleep(200);
+    }
+
+    if (isWorkflowAborted || isWorkflowItemSkipped) return false;
+
+    // Safety check: if still offscreen, position directly
+    rect = element.getBoundingClientRect();
+    if (rect.top < 50 || rect.bottom > vh) {
+      element.scrollIntoView({ behavior: 'auto', block: blockPosition });
+      await sleep(150);
+    }
+    return true;
+  } catch (err) {
+    console.warn('[ATOMX] Scroll into view error:', err);
+    return false;
+  }
+}
+
+/**
  * Natural human-like reading scroll for tweet status pages.
  * Smoothly scrolls down through the tweet text to bring the action toolbar
  * (like/repost) and reply/comment composer comfortably into the lower-middle viewport.
@@ -426,7 +461,7 @@ function isPostAlreadyLiked(targetArticle) {
 
 /**
  * 100% reliable Like Click with zero random skips.
- * Dispatches full pointer events and renders a pulse effect so the heart visibly turns pink/red.
+ * Global Rule: First scrolls post and like button onto screen, waits until visible, then clicks.
  */
 async function simulateHumanLikeClick(targetArticle) {
   if (!targetArticle) return false;
@@ -436,18 +471,33 @@ async function simulateHumanLikeClick(targetArticle) {
     return true; // Already liked
   }
 
-  // Find like button with all possible Twitter/X selectors
+  // 1. Global Rule: Scroll article into view first so user sees the post
+  await scrollElementIntoViewAndEnsureVisible(targetArticle, 'center');
+  if (isWorkflowAborted || isWorkflowItemSkipped) return false;
+
+  // 2. Find like button with all possible Twitter/X selectors
   let likeBtn = targetArticle.querySelector('button[data-testid="like"], div[data-testid="like"], [data-testid="like"]') ||
                 Array.from(targetArticle.querySelectorAll('button, div[role="button"]')).find(b => {
                   const label = (b.getAttribute('aria-label') || '').toLowerCase();
                   return label.includes('like') && !label.includes('unlike');
                 });
 
+  if (!likeBtn) {
+    await sleep(350);
+    likeBtn = targetArticle.querySelector('button[data-testid="like"], div[data-testid="like"], [data-testid="like"]');
+  }
+
   if (!likeBtn) return false;
 
-  try {
-    gentleScrollIntoView(likeBtn);
+  // 3. Ensure the like button itself is visibly positioned on screen
+  await scrollElementIntoViewAndEnsureVisible(likeBtn, 'nearest');
+  if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
+  // Natural human pause so the like button and post are visibly clear on screen before clicking
+  await sleep(400);
+  if (isWorkflowAborted || isWorkflowItemSkipped) return false;
+
+  try {
     // Visual heart pulse effect
     likeBtn.style.transition = 'transform 0.2s ease, filter 0.2s ease';
     likeBtn.style.transform = 'scale(1.25)';
@@ -465,8 +515,8 @@ async function simulateHumanLikeClick(targetArticle) {
 
     // Verify if like took effect; if not, retry click once
     await sleep(350);
-    const isNowLiked = !!targetArticle.querySelector('[data-testid="unlike"]');
-    if (!isNowLiked) {
+    const isNowLiked = isPostAlreadyLiked(targetArticle);
+    if (!isNowLiked && !isWorkflowAborted && !isWorkflowItemSkipped) {
       likeBtn.click();
       await sleep(300);
     }
@@ -586,6 +636,10 @@ async function simulateHumanRepostClick(targetArticle) {
     return true; // Already reposted
   }
 
+  // Scroll article into view first
+  await scrollElementIntoViewAndEnsureVisible(targetArticle, 'center');
+  if (isWorkflowAborted || isWorkflowItemSkipped) return false;
+
   const rtBtn = targetArticle.querySelector('button[data-testid="retweet"], div[data-testid="retweet"]') ||
                 Array.from(targetArticle.querySelectorAll('button, div[role="button"]')).find(b => {
                   const label = (b.getAttribute('aria-label') || '').toLowerCase();
@@ -594,7 +648,10 @@ async function simulateHumanRepostClick(targetArticle) {
   if (!rtBtn) return false;
 
   try {
-    gentleScrollIntoView(rtBtn);
+    await scrollElementIntoViewAndEnsureVisible(rtBtn, 'nearest');
+    await sleep(300);
+    if (isWorkflowAborted || isWorkflowItemSkipped) return false;
+
     rtBtn.style.transition = 'transform 0.2s ease, filter 0.2s ease';
     rtBtn.style.transform = 'scale(1.2)';
     rtBtn.style.filter = 'drop-shadow(0 0 10px rgba(16, 185, 129, 0.85))';
@@ -1563,6 +1620,13 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       isHudDismissedLocally = Boolean(changes.atomx_hud_dismissed.newValue);
       if (isHudDismissedLocally) {
         hideFloatingHud();
+      }
+    }
+
+    if (changes.atomx_skip_current !== undefined) {
+      if (changes.atomx_skip_current.newValue === true) {
+        isWorkflowItemSkipped = true;
+        closeAnyOpenTwitterDialog();
       }
     }
 
@@ -2883,6 +2947,15 @@ async function executeProfileUnfollowAction(followingInfo, targetHandle = '') {
  */
 async function engageAndFollowProfile(options = {}) {
   isWorkflowAborted = false;
+
+  // Instant 1-click skip detection from storage or memory
+  const initialSkip = await chrome.storage.local.get(['atomx_skip_current']).catch(() => ({}));
+  if (initialSkip?.atomx_skip_current || isWorkflowItemSkipped) {
+    isWorkflowItemSkipped = false;
+    await chrome.storage.local.set({ atomx_skip_current: false }).catch(() => null);
+    console.log('[ATOMX] Target profile was skipped by user before execution.');
+    return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
+  }
   isWorkflowItemSkipped = false;
 
   // 1-to-1 Verified Account Enforcement
@@ -3005,7 +3078,13 @@ async function engageAndFollowProfile(options = {}) {
     }
     const postsSlice = candidatePosts.slice(0, numPostsToEngage);
 
-    // Step 4: Like selected posts
+    // Global Rule: Scroll the primary post into center view before engaging so user sees it
+    await scrollElementIntoViewAndEnsureVisible(targetRecentPost, 'center');
+    if (isWorkflowItemSkipped || isWorkflowAborted) {
+      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
+    }
+
+    // Step 4: Like selected posts (each post is smoothly scrolled & verified visible before click)
     if (likePosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
       for (const art of postsSlice) {
         if (isWorkflowAborted || isWorkflowItemSkipped) break;
@@ -4430,7 +4509,8 @@ async function executeFollowersListCycle(params = {}) {
 
   // Helper: Execute engagement actions on a single tweet element
   async function performActionsOnTweet(art, tweetData, tweetId, authorHandle) {
-    if (isWorkflowItemSkipped) {
+    const skipCheckFollowers = await chrome.storage.local.get(['atomx_skip_current']).catch(() => ({}));
+    if (skipCheckFollowers?.atomx_skip_current || isWorkflowItemSkipped) {
       isWorkflowItemSkipped = false;
       closeAnyOpenTwitterDialog();
       await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
@@ -4443,8 +4523,9 @@ async function executeFollowersListCycle(params = {}) {
       return;
     }
 
-    art.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await sleep(700);
+    // Global Rule: Scroll post into center of screen and ensure visible before acting
+    await scrollElementIntoViewAndEnsureVisible(art, 'center');
+    await sleep(350);
 
     if (isWorkflowItemSkipped) {
       isWorkflowItemSkipped = false;

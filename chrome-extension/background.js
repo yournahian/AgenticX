@@ -1467,6 +1467,23 @@ async function processAgentWorkflowStep() {
     agentWorkflowWorkingTabId = tabId;
 
     await waitForTabLoad(tabId, 12000);
+
+    // Instant skip check right after tab load
+    const skipCheckLoad = await chrome.storage.local.get(['atomx_skip_current']).catch(() => ({}));
+    if (skipCheckLoad?.atomx_skip_current) {
+      await chrome.storage.local.set({ atomx_skip_current: false });
+      console.log(`[ATOMX BG] Target @${targetHandle} skipped on 1st click during tab load.`);
+      const updatedWorkflow = {
+        ...workflow,
+        currentIndex: currentIndex + 1,
+        ignoredCount: ignoredCount + 1
+      };
+      await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
+      await syncAgentHud(updatedWorkflow, `${indexStr} Skipped ${displayTarget} (skipped by user)`, 'SKIPPED', Math.round(((currentIndex + 1) / total) * 100));
+      setTimeout(() => processAgentWorkflowStep(), 100);
+      return;
+    }
+
     await delay(2500);
 
     // Instant Account Lock Check before executing task
@@ -1474,8 +1491,22 @@ async function processAgentWorkflowStep() {
     const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
     if (!lockCheck.ok) return;
 
-    const recheck = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+    const recheck = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_skip_current']).catch(() => ({}));
     if (!recheck?.atomx_agent_workflow?.active) {
+      return;
+    }
+
+    if (recheck?.atomx_skip_current) {
+      await chrome.storage.local.set({ atomx_skip_current: false });
+      console.log(`[ATOMX BG] Target @${targetHandle} skipped on 1st click before message dispatch.`);
+      const updatedWorkflow = {
+        ...workflow,
+        currentIndex: currentIndex + 1,
+        ignoredCount: ignoredCount + 1
+      };
+      await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
+      await syncAgentHud(updatedWorkflow, `${indexStr} Skipped ${displayTarget} (skipped by user)`, 'SKIPPED', Math.round(((currentIndex + 1) / total) * 100));
+      setTimeout(() => processAgentWorkflowStep(), 100);
       return;
     }
 
@@ -1746,8 +1777,15 @@ async function abortAgentWorkflow() {
 // UTILITIES
 // ─────────────────────────────────────────────
 
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+async function delay(ms) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    const s = await chrome.storage.local.get(['atomx_skip_current', 'atomx_agent_workflow']).catch(() => ({}));
+    if (s?.atomx_skip_current || s?.atomx_agent_workflow?.isStopped) break;
+    const chunk = Math.min(100, ms - (Date.now() - start));
+    if (chunk <= 0) break;
+    await new Promise(r => setTimeout(r, chunk));
+  }
 }
 
 async function waitForTabLoad(tabId, initialTimeout = 15000) {
