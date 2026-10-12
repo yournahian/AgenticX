@@ -392,14 +392,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'SKIP_WORKFLOW_ITEM') {
-    chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
-    // Tell current active working tab to abort current tweet action
-    if (tgRaidWorkingTabId) {
-      chrome.tabs.sendMessage(tgRaidWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
-    }
-    if (agentWorkflowWorkingTabId) {
-      chrome.tabs.sendMessage(agentWorkflowWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
-    }
+    chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud', 'atomx_tg_raid'], async (res) => {
+      const wf = res?.atomx_agent_workflow;
+      const activeHud = res?.atomx_active_hud;
+      if (wf && wf.active) {
+        const newSkipped = (wf.ignoredCount || 0) + 1;
+        const total = wf.total || 10;
+        const done = wf.successCount || 0;
+        const nextIdx = Math.min(total, done + newSkipped);
+        wf.ignoredCount = newSkipped;
+        wf.currentIndex = nextIdx;
+        wf.statusText = '⏭️ Skipping current item...';
+
+        const updatedHud = {
+          ...(activeHud || {}),
+          skipped: newSkipped,
+          indicator: `${nextIdx}/${total}`,
+          statusText: '⏭️ Skipping current item...'
+        };
+
+        await chrome.storage.local.set({
+          atomx_skip_current: true,
+          atomx_agent_workflow: wf,
+          atomx_active_hud: updatedHud
+        });
+
+        broadcastHudToTabs(updatedHud);
+      } else {
+        await chrome.storage.local.set({ atomx_skip_current: true });
+      }
+
+      if (tgRaidWorkingTabId) {
+        chrome.tabs.sendMessage(tgRaidWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+      }
+      if (agentWorkflowWorkingTabId) {
+        chrome.tabs.sendMessage(agentWorkflowWorkingTabId, { type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+      }
+    });
 
     sendResponse({ ok: true });
     return true;
@@ -1439,8 +1468,21 @@ async function processAgentWorkflowStep() {
 
         // Inside this post: iteratively find unliked comment -> like comment -> visit profile in same tab -> engage -> go back -> repeat
         while ((workflow.successCount || 0) < targetCount) {
-          const stopChk = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+          const stopChk = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_skip_current']).catch(() => ({}));
           if (stopChk?.atomx_agent_workflow?.isStopped || !stopChk?.atomx_agent_workflow?.active) return;
+
+          if (stopChk?.atomx_skip_current) {
+            await chrome.storage.local.set({ atomx_skip_current: false });
+            workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+            workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+            await syncAgentHud(
+              workflow,
+              `[${(workflow.successCount || 0) + 1}/${targetCount}] ⏭️ Skipped current item. Finding next...`,
+              'SCANNING',
+              Math.round(((workflow.successCount || 0) / targetCount) * 100)
+            );
+            continue;
+          }
 
           await syncAgentHud(
             workflow,
@@ -1460,6 +1502,18 @@ async function processAgentWorkflowStep() {
 
           if (!commentRes || !commentRes.found) {
             console.log(`[ATOMX BG] Comments exhausted or completed on post by @${mainAuthor}. Moving to next top post.`);
+            const skipAfterFind = await chrome.storage.local.get(['atomx_skip_current']).catch(() => ({}));
+            if (skipAfterFind?.atomx_skip_current) {
+              await chrome.storage.local.set({ atomx_skip_current: false });
+              workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+              workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+              await syncAgentHud(
+                workflow,
+                `[${workflow.successCount || 0}/${targetCount}] ⏭️ Skipped comment scan. Moving to next top post...`,
+                'SCANNING',
+                Math.round(((workflow.successCount || 0) / targetCount) * 100)
+              );
+            }
             break; // Move to next post in topTweets
           }
 
@@ -1509,8 +1563,12 @@ async function processAgentWorkflowStep() {
               if (curCredits > 0) chrome.storage.local.set({ credits: curCredits - 1 });
             });
           } else {
-            workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+            const curWf = (await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({})))?.atomx_agent_workflow;
+            workflow.ignoredCount = Math.max((workflow.ignoredCount || 0) + 1, curWf?.ignoredCount || 0);
           }
+
+          // Clear skip flag
+          await chrome.storage.local.set({ atomx_skip_current: false });
 
           // Persist history so commenter isn't targeted again within 24h
           chrome.storage.local.get(['atomx_audience_engaged_history'], (r) => {
@@ -1519,15 +1577,18 @@ async function processAgentWorkflowStep() {
             chrome.storage.local.set({ atomx_audience_engaged_history: hist }).catch(() => null);
           });
 
-          workflow.currentIndex = workflow.successCount;
+          // Accurately compute currentIndex = successCount + ignoredCount
+          workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
           workflow.total = targetCount;
           await chrome.storage.local.set({ atomx_agent_workflow: workflow });
 
           await syncAgentHud(
             workflow,
-            `[${workflow.successCount}/${targetCount}] ✓ Engaged @${cleanHandle}! Returning back to post in same tab...`,
+            isIgnored
+              ? `[${workflow.successCount}/${targetCount}] ⏭️ Skipped @${cleanHandle}! Returning back to post in same tab...`
+              : `[${workflow.successCount}/${targetCount}] ✓ Engaged @${cleanHandle}! Returning back to post in same tab...`,
             'ENGAGING',
-            Math.round((workflow.successCount / targetCount) * 100)
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
           );
 
           // Return back to post in the EXACT SAME tab!
@@ -1544,11 +1605,13 @@ async function processAgentWorkflowStep() {
 
           if ((workflow.successCount || 0) >= targetCount) break;
 
-          // Natural pacing delay countdown before next comment
-          const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
-          const profileWait = Number(safetyRes?.atomx_safety_settings?.profileWait) || 15;
-          const delaySec = Math.max(5, profileWait + Math.floor(Math.random() * 5 - 2));
-          await scheduleAgentPacingCountdown(delaySec, workflow, workflow.successCount, targetCount, `Next commenter from post`);
+          // Natural pacing delay countdown before next comment (bypassed if skipped)
+          if (!isIgnored) {
+            const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+            const profileWait = Number(safetyRes?.atomx_safety_settings?.profileWait) || 15;
+            const delaySec = Math.max(5, profileWait + Math.floor(Math.random() * 5 - 2));
+            await scheduleAgentPacingCountdown(delaySec, workflow, workflow.successCount, targetCount, `Next commenter from post`);
+          }
         }
       }
 

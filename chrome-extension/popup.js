@@ -1152,6 +1152,31 @@ async function handleToggleWorkflowPause() {
 
 async function handleSkipWorkflowItem() {
   await chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
+
+  chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud'], (res) => {
+    const wf = res?.atomx_agent_workflow;
+    const hud = res?.atomx_active_hud;
+    if (wf && wf.active) {
+      const newSkipped = (wf.ignoredCount || 0) + 1;
+      const total = wf.total || 10;
+      const done = wf.successCount || 0;
+      const nextIdx = Math.min(total, done + newSkipped);
+      wf.ignoredCount = newSkipped;
+      wf.currentIndex = nextIdx;
+      wf.statusText = '⏭️ Skipping current item...';
+      updateAgentWorkflowProgressUI(wf);
+      chrome.storage.local.set({
+        atomx_agent_workflow: wf,
+        atomx_active_hud: {
+          ...(hud || {}),
+          skipped: newSkipped,
+          indicator: `${nextIdx}/${total}`,
+          statusText: '⏭️ Skipping current item...'
+        }
+      }).catch(() => null);
+    }
+  });
+
   chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
 
   // Broadcast skip to all open X tabs (mobile-safe — no-op if chrome.tabs unavailable)

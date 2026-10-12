@@ -1698,17 +1698,57 @@ function ensureFloatingHud() {
     chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: isHudWorkflowPaused }).catch(() => null);
   });
 
-  // Skip current item listener — Instant response
+  // Skip current item listener — Instant response & real-time tracker update
   hud.querySelector('#hud-skip-action-btn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     isWorkflowItemSkipped = true;
-    closeAnyOpenTwitterDialog();
-    chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
-    chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
+    clearAnyDraftComment();
+
+    // Instant local HUD visual feedback
+    const skipEl = hud.querySelector('#hud-skip-count');
+    let newSkipped = 1;
+    if (skipEl) {
+      newSkipped = (parseInt(skipEl.textContent, 10) || 0) + 1;
+      skipEl.textContent = String(newSkipped);
+    }
     const statusEl = hud.querySelector('#hud-status-text');
     if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
     const timerBadge = hud.querySelector('#hud-timer-badge');
     if (timerBadge) timerBadge.textContent = '⏭️ Skip';
+
+    chrome.storage.local.get(['atomx_active_hud', 'atomx_agent_workflow'], (res) => {
+      const activeHud = res?.atomx_active_hud || {};
+      const wf = res?.atomx_agent_workflow;
+      const prevSkipped = (activeHud.skipped || 0) + 1;
+      const total = activeHud.collected || activeHud.total || (wf?.total || 10);
+      const done = activeHud.done || (wf?.successCount || 0);
+      const nextIdx = Math.min(total, done + prevSkipped);
+
+      const indEl = hud.querySelector('#hud-indicator');
+      if (indEl) indEl.textContent = `${nextIdx}/${total}`;
+
+      const updatedHud = {
+        ...activeHud,
+        skipped: prevSkipped,
+        indicator: `${nextIdx}/${total}`,
+        statusText: '⏭️ Skipping current item...'
+      };
+      const updates = {
+        atomx_skip_current: true,
+        atomx_active_hud: updatedHud
+      };
+      if (wf && wf.active) {
+        updates.atomx_agent_workflow = {
+          ...wf,
+          ignoredCount: prevSkipped,
+          currentIndex: nextIdx,
+          statusText: '⏭️ Skipping current item...'
+        };
+      }
+      chrome.storage.local.set(updates).catch(() => null);
+    });
+
+    chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
   });
 
   // Stop workflow listener — Instant response
@@ -2201,7 +2241,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'SKIP_WORKFLOW_ITEM') {
     isWorkflowItemSkipped = true;
-    closeAnyOpenTwitterDialog();
+    clearAnyDraftComment();
     const statusEl = floatingHudEl?.querySelector('#hud-status-text');
     if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
     const timerBadge = floatingHudEl?.querySelector('#hud-timer-badge');
