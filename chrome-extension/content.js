@@ -990,9 +990,29 @@ async function performHumanClick(targetElement, options = {}) {
   const targetX = rect.left + padX + Math.random() * Math.max(1, rect.width - padX * 2);
   const targetY = rect.top + padY + Math.random() * Math.max(1, rect.height - padY * 2);
 
-  const strategy = await getActiveExecutionStrategy();
+  // Global Cursor Rules (Applied Identically to BOTH DOM Mode and Debugger Mode):
+  // 1. Ensure Virtual Cursor is active and visible
+  ensureVirtualCursorActive();
 
-  // Mode B: Chrome Debugger API Integration (Advanced Desktop Mode)
+  // 2. Visibly animate cursor from current position to target element with organic Bezier transit
+  await animateVirtualCursorTo(targetX, targetY, options.animDuration || (550 + Math.random() * 150));
+
+  // 3. Human dwell pause (480-680ms) so cursor visibly rests on the button before clicking
+  await sleep(options.hoverDwell || (480 + Math.random() * 200));
+
+  // 4. Trigger cursor press animation and click ripple effect
+  triggerVirtualCursorClickEffect();
+
+  // Press dwell: natural human finger hold duration before release (160-220ms)
+  await sleep(160 + Math.random() * 60);
+
+  // 5. Visual element pulse (button glows with action color)
+  triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
+
+  // 6. Action Execution: Native CDP Debugger API (Hardware-level isTrusted: true) OR DOM Event Dispatch
+  const strategy = await getActiveExecutionStrategy();
+  let cdpSucceeded = false;
+
   if (strategy === 'debugger') {
     try {
       console.log(`[ATOMX ACTION] Dispatching CDP click via Debugger API at (${Math.round(targetX)}, ${Math.round(targetY)})`);
@@ -1003,40 +1023,23 @@ async function performHumanClick(targetElement, options = {}) {
       });
 
       if (response && response.ok) {
-        triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
-        await sleep(options.postPause || 450);
-        return true;
+        cdpSucceeded = true;
+      } else {
+        console.warn('[ATOMX ACTION] CDP click response not ok, gracefully falling back to DOM events:', response?.error);
       }
-      console.warn('[ATOMX ACTION] CDP click response not ok, falling back to Visual DOM mode:', response?.error);
     } catch (err) {
-      console.warn('[ATOMX ACTION] CDP message failed, falling back to Visual DOM mode:', err);
+      console.warn('[ATOMX ACTION] CDP message failed, gracefully falling back to DOM events:', err);
     }
-    // Graceful fallback to Mode A if debugger is unavailable (e.g. on mobile/Kiwi)
   }
 
-  // Mode A: Enhanced Visual DOM Simulation (Default & Safe Mode)
-  ensureVirtualCursorActive();
+  // If in DOM mode OR if Debugger API failed/unavailable (e.g. on mobile/Kiwi):
+  if (!cdpSucceeded) {
+    dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
+  }
 
-  // 1. Visibly animate cursor from current position to target element FIRST (smooth, unhurried transit)
-  await animateVirtualCursorTo(targetX, targetY, options.animDuration || (550 + Math.random() * 150));
-
-  // 2. Human dwell pause (480-680ms) so user visibly sees the cursor resting ON the button before clicking
-  await sleep(options.hoverDwell || (480 + Math.random() * 200));
-
-  // 3. Trigger click ripple effect and cursor press animation
-  triggerVirtualCursorClickEffect();
-
-  // Press dwell: natural human finger hold duration before release (160-220ms)
-  await sleep(160 + Math.random() * 60);
-
-  // 4. Visual element pulse (button reacts to cursor click)
-  triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
-
-  // 5. Dispatch single human event sequence (single click only)
-  dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
-
-  // Post-click pause (450-650ms) to let action register visibly
+  // 7. Post-click pause (450-650ms) to let action register visibly
   await sleep(options.postPause || (450 + Math.random() * 200));
+  dismissLingeringTwitterTooltips();
   return true;
 }
 
