@@ -1065,7 +1065,7 @@ async function verifyTabAccountLock(tabId, expectedHandle, workflow) {
 
 async function handleStartAgentWorkflow(request, sendResponse) {
   const { agentId, title, items = [], options = {}, tabId } = request;
-  if ((!items || items.length === 0) && !(agentId === 'reciprocator' && options.postUrl) && !(agentId === 'feedengager') && !(options.feedUrl) && !(agentId === 'followers') && !(agentId === 'audience')) {
+  if ((!items || items.length === 0) && !(agentId === 'reciprocator' && options.postUrl) && !(agentId === 'feedengager') && !(agentId === 'nicheengager') && !(options.feedUrl) && !(agentId === 'followers') && !(agentId === 'audience')) {
     sendResponse({ ok: false, error: 'No targets/items provided.' });
     return;
   }
@@ -1104,7 +1104,7 @@ async function handleStartAgentWorkflow(request, sendResponse) {
     }
   }
 
-  const total = agentId === 'feedengager'
+  const total = (agentId === 'feedengager' || agentId === 'nicheengager')
     ? (Number(options.targetCount) || 10)
     : (agentId === 'reciprocator' && workflowItems.length === 0 ? (Number(options.maxCount || options.targetCount) || 10) : workflowItems.length);
   const workflowState = {
@@ -1124,9 +1124,11 @@ async function handleStartAgentWorkflow(request, sendResponse) {
       ? `Scanning post comments for ${title || 'Reciprocator'}...`
       : (agentId === 'feedengager'
         ? `Navigating to Home Timeline (x.com/home)... Filtering Ads & scanning posts.`
-        : (agentId === 'audience'
-          ? `Opening Twitter List to discover top engaged posts...`
-          : `Starting fresh ${title || 'Agent'} automation (${total || options.targetCount || 10} targets)...`))
+        : (agentId === 'nicheengager'
+          ? `Searching X for "${options.keyword || 'niche'}"... Filtering Ads & scanning posts.`
+          : (agentId === 'audience'
+            ? `Opening Twitter List to discover top engaged posts...`
+            : `Starting fresh ${title || 'Agent'} automation (${total || options.targetCount || 10} targets)...`)))
   };
 
   await chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
@@ -1560,6 +1562,168 @@ async function processAgentWorkflowStep() {
       return;
     } catch (err) {
       console.warn('[ATOMX BG] Error in feedengager workflow:', err);
+      agentWorkflowWorkingTabId = null;
+      await finishAgentWorkflow(workflow);
+      return;
+    }
+  }
+
+  // =========================================================================
+  // AGENT 15: NICHE SEARCH ENGAGER (x.com/search with Ad Skip & AI Voice)
+  // =========================================================================
+  if (agentId === 'nicheengager') {
+    const keyword = (options.keyword || '').trim();
+    const targetCount = Number(options.targetCount) || 10;
+    const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
+    const pacingDelaySec = Math.max(5, Number(options.pacingDelaySec) || 10);
+    const localData = await chrome.storage.local.get(['backendUrl', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}));
+    const backendUrl = (options.backendUrl || localData.backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
+
+    const searchUrl = options.feedMode === 'top'
+      ? `https://x.com/search?q=${encodeURIComponent(keyword)}&src=typed_query`
+      : `https://x.com/search?q=${encodeURIComponent(keyword)}&f=live`;
+
+    await syncAgentHud(workflow, `Searching X for "${keyword}"...`, 'SCANNING', 5);
+
+    try {
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, searchUrl);
+      agentWorkflowWorkingTabId = tabId;
+      await waitForTabLoad(tabId, 15000);
+      await delay(2500);
+
+      // Account Lock Check
+      const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+      if (!lockCheck.ok) return;
+
+      while ((workflow.successCount || 0) < targetCount) {
+        const stopChk = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_skip_current', 'atomx_workflow_paused', 'engagedTweetIds']).catch(() => ({}));
+        if (stopChk?.atomx_agent_workflow?.isStopped || !stopChk?.atomx_agent_workflow?.active) return;
+
+        // Handle user pause
+        while (stopChk?.atomx_workflow_paused || stopChk?.atomx_agent_workflow?.isPaused) {
+          await syncAgentHud(
+            workflow,
+            '⏸️ Niche Search Engager Paused by User',
+            'PAUSED',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100),
+            '',
+            'Resume to continue',
+            '⏸️ Paused'
+          );
+          await delay(500);
+          const repause = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_workflow_paused']).catch(() => ({}));
+          if (repause?.atomx_agent_workflow?.isStopped || !repause?.atomx_agent_workflow?.active) return;
+          if (!repause?.atomx_workflow_paused && !repause?.atomx_agent_workflow?.isPaused) break;
+        }
+
+        // Handle user skip
+        if (stopChk?.atomx_skip_current) {
+          await chrome.storage.local.set({ atomx_skip_current: false });
+          workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+          workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] ⏭️ Skipped post by user. Finding next...`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
+          await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
+          await delay(1200);
+          continue;
+        }
+
+        const curDone = workflow.successCount || 0;
+        await syncAgentHud(
+          workflow,
+          `[${curDone + 1}/${targetCount}] Scanning "${keyword}" search feed (filtering Ads & detecting fresh posts)...`,
+          'SCANNING',
+          Math.round((curDone / targetCount) * 100)
+        );
+
+        const feedRes = await sendMessageToTab(tabId, {
+          type: 'EXECUTE_HOME_FEED_ENGAGEMENT_STEP',
+          actions: {
+            like: options.likePosts ?? true,
+            comment: options.commentPosts ?? true,
+            repost: options.repostPosts ?? false,
+            follow: options.followPosts ?? false
+          },
+          style: options.style || localData.selectedTone || 'Bullish (5-10 words)',
+          stylePrompt: options.stylePrompt || localData.selectedTonePrompt || null,
+          backendUrl,
+          verifiedXHandle,
+          alreadyEngagedIds: stopChk?.engagedTweetIds || []
+        }, 60000);
+
+        const stopChk2 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+        if (stopChk2?.atomx_agent_workflow?.isStopped || !stopChk2?.atomx_agent_workflow?.active) return;
+
+        if (feedRes?.aborted || feedRes?.rateLimited) {
+          await finishAgentWorkflow(workflow);
+          return;
+        }
+
+        if (feedRes?.success && feedRes?.engaged) {
+          workflow.successCount = (workflow.successCount || 0) + 1;
+          workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+
+          if (feedRes.commented) {
+            const credData = await chrome.storage.local.get(['credits']).catch(() => ({}));
+            const newCredits = Math.max(0, (credData.credits || 0) - 1);
+            await chrome.storage.local.set({ credits: newCredits }).catch(() => null);
+          }
+
+          if (feedRes.tweetId) {
+            const engData = await chrome.storage.local.get(['engagedTweetIds']).catch(() => ({}));
+            const engIds = Array.from(new Set([...(engData.engagedTweetIds || []), feedRes.tweetId].filter(Boolean)));
+            await chrome.storage.local.set({ engagedTweetIds: engIds }).catch(() => null);
+          }
+
+          const actionList = Object.entries(feedRes.performed || {})
+            .filter(([, v]) => v)
+            .map(([k]) => k.toUpperCase())
+            .join(' + ');
+
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount}/${targetCount}] ✓ Engaged @${feedRes.authorHandle || 'creator'} (${actionList || 'DONE'})`,
+            'SUCCESS',
+            Math.round((workflow.successCount / targetCount) * 100)
+          );
+
+          // Anti-ban safety pacing countdown before next post
+          if (workflow.successCount < targetCount) {
+            const randomizedDelay = pacingDelaySec + Math.floor(Math.random() * 5 - 2);
+            await scheduleAgentPacingCountdown(
+              Math.max(5, randomizedDelay),
+              workflow,
+              workflow.successCount,
+              targetCount,
+              `post ${workflow.successCount + 1}/${targetCount}`
+            );
+          }
+        } else if (feedRes?.skippedAd) {
+          workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] 🛡️ Promoted Ad detected & skipped automatically.`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
+          await delay(1000);
+        } else {
+          // No fresh post in current screen, scroll down to hydrate more posts
+          await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
+          await delay(1500);
+        }
+      }
+
+      workflow.active = false;
+      await syncAgentHud(workflow, `✓ Niche search engagement complete! Engaged ${workflow.successCount || 0} posts for "${keyword}".`, 'DONE', 100);
+      await finishAgentWorkflow(workflow);
+      return;
+    } catch (err) {
+      console.warn('[ATOMX BG] Error in nicheengager workflow:', err);
       agentWorkflowWorkingTabId = null;
       await finishAgentWorkflow(workflow);
       return;

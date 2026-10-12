@@ -927,6 +927,14 @@ function updateAgentWorkflowProgressUI(wf) {
       pauseBtn: 'pauseFeedEngagerBtn', skipBtn: 'skipFeedEngagerBtn',
       resetBtn: 'resetFeedEngagerBtn'
     },
+    nicheengager: {
+      card: 'nicheEngagerProgressCard', badge: 'nicheEngagerStateBadge', ind: 'nicheEngagerQueueIndicator',
+      done: 'nicheEngagerCountDone', col: 'nicheEngagerCountQueue', skip: 'nicheEngagerCountSkipped',
+      bar: 'nicheEngagerProgressBar', status: 'nicheEngagerLiveStatusText', cd: 'nicheEngagerCountdownText',
+      startBtn: 'runNicheEngagerBtn', stopBtn: 'stopNicheEngagerBtn',
+      pauseBtn: 'pauseNicheEngagerBtn', skipBtn: 'skipNicheEngagerBtn',
+      resetBtn: 'resetNicheEngagerBtn'
+    },
     tg: {
       card: 'telegramProgressCard', badge: 'tgStateBadge', ind: null,
       done: 'tgDoneCount', col: 'tgTotalCount', skip: 'tgSkippedCount',
@@ -947,6 +955,7 @@ function updateAgentWorkflowProgressUI(wf) {
     else if (t.includes('unfollow')) agentId = 'unfollow';
     else if (t.includes('reciprocator')) agentId = 'reciprocator';
     else if (t.includes('feed') || t.includes('home')) agentId = 'feedengager';
+    else if (t.includes('niche')) agentId = 'nicheengager';
   }
   if (!agentId) {
     const activePanel = document.querySelector('.agent-panel-content:not([style*="display: none"])');
@@ -1579,11 +1588,13 @@ function renderTonePills() {
   const followerVoiceLabel = document.getElementById('followerActiveToneLabel');
   const recipVoiceLabel = document.getElementById('reciprocatorActiveToneLabel');
   const feedVoiceLabel = document.getElementById('feedActiveToneLabel');
+  const nicheVoiceLabel = document.getElementById('nicheActiveToneLabel');
   if (tgVoiceLabel) tgVoiceLabel.textContent = activeVoiceText;
   if (sorsaVoiceLabel) sorsaVoiceLabel.textContent = activeVoiceText;
   if (followerVoiceLabel) followerVoiceLabel.textContent = activeVoiceText;
   if (recipVoiceLabel) recipVoiceLabel.textContent = activeVoiceText;
   if (feedVoiceLabel) feedVoiceLabel.textContent = activeVoiceText;
+  if (nicheVoiceLabel) nicheVoiceLabel.textContent = activeVoiceText;
 
   // Update limit display in drawer
   state.maxCustomTemplates = getPlanMaxCustomTones(state.userPlan);
@@ -2056,7 +2067,8 @@ const AGENT_META = {
   defaulter: { title: 'Find Defaulters', icon: '🔍', badge: 'AUDIT POD', desc: 'Scan post comments & detect members who skipped commenting' },
   tgliveliker: { title: 'TG Live Liker (Proof Rec)', icon: '🔴', badge: 'PROOF REC', desc: 'Continuous raid liker — keeps tab open for screen record proof' },
   reciprocator: { title: 'Commenter Reciprocator', icon: '🤝', badge: 'RECIPROCAL', desc: 'Visits accounts who commented on your post & comments back on their recent posts' },
-  feedengager: { title: 'Home Feed Engager', icon: '🏠', badge: 'FEED AI', desc: 'Autonomous engagement on your X Home Timeline with Ad skip & AI voice' }
+  feedengager: { title: 'Home Feed Engager', icon: '🏠', badge: 'FEED AI', desc: 'Autonomous engagement on your X Home Timeline with Ad skip & AI voice' },
+  nicheengager: { title: 'Niche Search Engager', icon: '🎯', badge: 'NICHE AI', desc: 'Search any niche keyword (e.g. "follow for follow") & engage posts with Ad skip' }
 };
 
 function extractTwitterListUrl(text) {
@@ -2443,7 +2455,8 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     { id: 'stopReplyBackBtn', agentId: 'replyback', title: 'Reply Back Loop' },
     { id: 'stopAutoUnfollowBtn', agentId: 'unfollow', title: 'Auto Unfollow' },
     { id: 'stopReciprocatorBtn', agentId: 'reciprocator', title: 'Commenter Reciprocator' },
-    { id: 'stopFeedEngagerBtn', agentId: 'feedengager', title: 'Home Feed Engager' }
+    { id: 'stopFeedEngagerBtn', agentId: 'feedengager', title: 'Home Feed Engager' },
+    { id: 'stopNicheEngagerBtn', agentId: 'nicheengager', title: 'Niche Search Engager' }
   ];
 
   stopButtonConfigs.forEach(({ id, agentId, title }) => {
@@ -2461,7 +2474,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   // Wire all Pause Buttons
   [
     'pauseTgEngageBtn', 'pauseAudienceBuilderBtn', 'pauseSorsaBoosterBtn', 'pauseFollowerIncreaseBtn',
-    'pauseReplyBackBtn', 'pauseAutoUnfollowBtn', 'pauseReciprocatorBtn', 'pauseFeedEngagerBtn'
+    'pauseReplyBackBtn', 'pauseAutoUnfollowBtn', 'pauseReciprocatorBtn', 'pauseFeedEngagerBtn', 'pauseNicheEngagerBtn'
   ].forEach(id => {
     document.getElementById(id)?.addEventListener('click', handleToggleWorkflowPause);
   });
@@ -2469,9 +2482,23 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   // Wire all Skip Buttons
   [
     'skipTgEngageBtn', 'skipAudienceBuilderBtn', 'skipSorsaBoosterBtn', 'skipFollowerIncreaseBtn',
-    'skipReplyBackBtn', 'skipAutoUnfollowBtn', 'skipReciprocatorBtn', 'skipFeedEngagerBtn'
+    'skipReplyBackBtn', 'skipAutoUnfollowBtn', 'skipReciprocatorBtn', 'skipFeedEngagerBtn', 'skipNicheEngagerBtn'
   ].forEach(id => {
     document.getElementById(id)?.addEventListener('click', handleSkipWorkflowItem);
+  });
+
+  // Target Preset Badges (Feed & Niche)
+  document.querySelectorAll('.feed-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const inp = document.getElementById('feedTargetCountInput');
+      if (inp) inp.value = btn.dataset.count;
+    });
+  });
+  document.querySelectorAll('.niche-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const inp = document.getElementById('nicheTargetCountInput');
+      if (inp) inp.value = btn.dataset.count;
+    });
   });
 
   // Home Feed Engager Launch & Reset Buttons
@@ -2490,11 +2517,13 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     const stopBtn = document.getElementById('stopFeedEngagerBtn');
     const pauseBtn = document.getElementById('pauseFeedEngagerBtn');
     const skipBtn = document.getElementById('skipFeedEngagerBtn');
+    const inp = document.getElementById('feedTargetCountInput');
 
+    const defaultCnt = inp ? inp.value || '10' : '10';
     if (doneEl) doneEl.textContent = '0';
-    if (queueEl) queueEl.textContent = '10';
+    if (queueEl) queueEl.textContent = defaultCnt;
     if (skipEl) skipEl.textContent = '0';
-    if (qInd) qInd.textContent = 'Post 0/10';
+    if (qInd) qInd.textContent = `Post 0/${defaultCnt}`;
     if (bar) bar.style.width = '0%';
     if (badge) { badge.textContent = 'IDLE'; badge.className = 'badge-mini'; }
     if (status) status.textContent = 'Ready to engage feed...';
@@ -2505,6 +2534,41 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     if (pauseBtn) pauseBtn.style.display = 'none';
     if (skipBtn) skipBtn.style.display = 'none';
     showExtToast('Home Feed Engager Reset', '🔄');
+  });
+
+  // Niche Search Engager Launch & Reset Buttons
+  document.getElementById('runNicheEngagerBtn')?.addEventListener('click', startNicheSearchEngagerWorkflow);
+  document.getElementById('resetNicheEngagerBtn')?.addEventListener('click', () => {
+    const doneEl = document.getElementById('nicheEngagerCountDone');
+    const queueEl = document.getElementById('nicheEngagerCountQueue');
+    const skipEl = document.getElementById('nicheEngagerCountSkipped');
+    const qInd = document.getElementById('nicheEngagerQueueIndicator');
+    const bar = document.getElementById('nicheEngagerProgressBar');
+    const status = document.getElementById('nicheEngagerLiveStatusText');
+    const badge = document.getElementById('nicheEngagerStateBadge');
+    const countdown = document.getElementById('nicheEngagerCountdownText');
+    const card = document.getElementById('nicheEngagerProgressCard');
+    const startBtn = document.getElementById('runNicheEngagerBtn');
+    const stopBtn = document.getElementById('stopNicheEngagerBtn');
+    const pauseBtn = document.getElementById('pauseNicheEngagerBtn');
+    const skipBtn = document.getElementById('skipNicheEngagerBtn');
+    const inp = document.getElementById('nicheTargetCountInput');
+
+    const defaultCnt = inp ? inp.value || '10' : '10';
+    if (doneEl) doneEl.textContent = '0';
+    if (queueEl) queueEl.textContent = defaultCnt;
+    if (skipEl) skipEl.textContent = '0';
+    if (qInd) qInd.textContent = `Post 0/${defaultCnt}`;
+    if (bar) bar.style.width = '0%';
+    if (badge) { badge.textContent = 'IDLE'; badge.className = 'badge-mini'; }
+    if (status) status.textContent = 'Ready to engage niche posts...';
+    if (countdown) countdown.style.display = 'none';
+    if (card) card.style.display = 'none';
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    showExtToast('Niche Search Engager Reset', '🔄');
   });
 
   // Telegram Engage Reset Button
@@ -3658,7 +3722,7 @@ async function startCommenterReciprocatorWorkflow() {
 async function startHomeFeedEngagerWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
 
-  const targetCount = Number(document.getElementById('feedTargetCountSelect')?.value || 10);
+  const targetCount = Math.max(1, Number(document.getElementById('feedTargetCountInput')?.value || document.getElementById('feedTargetCountSelect')?.value || 10));
   const pacingDelaySec = Number(document.getElementById('feedPacingDelaySelect')?.value || 10);
 
   const optLike = document.getElementById('feedOptLike')?.checked ?? true;
@@ -3725,6 +3789,102 @@ async function startHomeFeedEngagerWorkflow() {
     tabId,
     items: [],
     options: {
+      targetCount,
+      pacingDelaySec,
+      likePosts: optLike,
+      commentPosts: optComment,
+      repostPosts: optRepost,
+      followPosts: optFollow,
+      style: tone,
+      stylePrompt: tonePrompt,
+      backendUrl,
+      verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
+    }
+  });
+}
+
+// =========================================================================
+// AGENT 15: NICHE SEARCH ENGAGER WORKFLOW ENGINE (x.com/search with Ad Skip)
+// =========================================================================
+async function startNicheSearchEngagerWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
+  const keyword = (document.getElementById('nicheKeywordInput')?.value || '').trim();
+  if (!keyword) {
+    showExtToast('Please enter a niche keyword or topic (e.g. "follow for follow")', '⚠️');
+    return;
+  }
+
+  const targetCount = Math.max(1, Number(document.getElementById('nicheTargetCountInput')?.value || 10));
+  const feedFilter = document.getElementById('nicheFeedFilterSelect')?.value || 'live';
+  const pacingDelaySec = Number(document.getElementById('nichePacingDelaySelect')?.value || 10);
+
+  const optLike = document.getElementById('nicheOptLike')?.checked ?? true;
+  const optComment = document.getElementById('nicheOptComment')?.checked ?? true;
+  const optRepost = document.getElementById('nicheOptRepost')?.checked ?? false;
+  const optFollow = document.getElementById('nicheOptFollow')?.checked ?? false;
+
+  if (!optLike && !optComment && !optRepost && !optFollow) {
+    showExtToast('Select at least one action (Like, Comment, Repost, or Follow)', '⚠️');
+    return;
+  }
+
+  const startBtn = document.getElementById('runNicheEngagerBtn');
+  const stopBtn = document.getElementById('stopNicheEngagerBtn');
+  const pauseBtn = document.getElementById('pauseNicheEngagerBtn');
+  const skipBtn = document.getElementById('skipNicheEngagerBtn');
+  const progressCard = document.getElementById('nicheEngagerProgressCard');
+  const stateBadge = document.getElementById('nicheEngagerStateBadge');
+  const queueIndicator = document.getElementById('nicheEngagerQueueIndicator');
+  const barEl = document.getElementById('nicheEngagerProgressBar');
+  const doneEl = document.getElementById('nicheEngagerCountDone');
+  const queueEl = document.getElementById('nicheEngagerCountQueue');
+  const skipEl = document.getElementById('nicheEngagerCountSkipped');
+  const statusText = document.getElementById('nicheEngagerLiveStatusText');
+  const countdownEl = document.getElementById('nicheEngagerCountdownText');
+
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-flex';
+  if (pauseBtn) pauseBtn.style.display = 'inline-flex';
+  if (skipBtn) skipBtn.style.display = 'inline-flex';
+  if (progressCard) progressCard.style.display = 'block';
+
+  if (stateBadge) stateBadge.textContent = 'SCANNING';
+  if (doneEl) doneEl.textContent = '0';
+  if (queueEl) queueEl.textContent = String(targetCount);
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '5%';
+  if (countdownEl) countdownEl.style.display = 'none';
+  if (queueIndicator) queueIndicator.textContent = `Post 0/${targetCount}`;
+  if (statusText) statusText.textContent = `Searching X for "${keyword}"... Filtering Ads & scanning posts.`;
+
+  syncFloatingHud(null, {
+    title: 'Niche Search Engager',
+    stateBadge: 'SCANNING',
+    indicator: `Post 0/${targetCount}`,
+    done: 0,
+    collected: targetCount,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: `Searching X for "${keyword}"... Filtering Ads & scanning posts.`
+  });
+
+  const backendUrl = await getBackendUrl();
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
+  const tone = state.selectedTone || 'Bullish (5-10 words)';
+  const tonePrompt = state.selectedTonePrompt || null;
+
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'nicheengager',
+    title: 'Niche Search Engager',
+    tabId,
+    items: [],
+    options: {
+      keyword,
+      feedMode: feedFilter,
       targetCount,
       pacingDelaySec,
       likePosts: optLike,
