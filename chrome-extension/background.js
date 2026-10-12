@@ -1415,17 +1415,11 @@ async function processAgentWorkflowStep() {
           isAllFound ? 70 : Math.round((currentTotalDone / targetCount) * 100)
         );
 
-        // Return back to post in the EXACT SAME tab!
-        await chrome.tabs.goBack(tabId).catch(() => null);
-        await delay(1500);
-        try {
-          const curTab = await chrome.tabs.get(tabId);
-          if (!curTab?.url || !curTab.url.includes('/status/')) {
-            await getOrCreateReusedTab(tabId, postUrl);
-            await waitForTabLoad(tabId, 12000);
-          }
-        } catch (e) {}
-        await delay(2500);
+        // Return cleanly back to post in the EXACT SAME tab! (Direct URL navigation prevents exiting X or hanging on browser new tab)
+        console.log(`[ATOMX BG] Navigating cleanly back to post: ${postUrl}...`);
+        await getOrCreateReusedTab(tabId, postUrl);
+        await waitForTabLoad(tabId, 12000);
+        await delay(2000);
 
         if (!isIgnored) {
           const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));

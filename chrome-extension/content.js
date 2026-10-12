@@ -14,16 +14,21 @@ function isExtensionValid() {
 }
 
 // Observe DOM changes to inject ATOMX buttons into tweet action toolbars
-const observer = new MutationObserver(() => {
+if (window.__atomx_observer) {
+  try { window.__atomx_observer.disconnect(); } catch (e) {}
+}
+
+var atomxDomObserver = new MutationObserver(() => {
   if (!isExtensionValid()) {
-    try { observer.disconnect(); } catch (e) {}
+    try { atomxDomObserver.disconnect(); } catch (e) {}
     return;
   }
   injectAtomXButtons();
 });
+window.__atomx_observer = atomxDomObserver;
 
 if (isExtensionValid()) {
-  observer.observe(document.body, { childList: true, subtree: true });
+  atomxDomObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function injectAtomXButtons() {
@@ -129,8 +134,8 @@ function extractTweetData(article) {
   return { text, authorName, authorHandle, tweetUrl, tweetId };
 }
 
-let isWorkflowAborted = false;
-let isWorkflowItemSkipped = false;
+var isWorkflowAborted = false;
+var isWorkflowItemSkipped = false;
 
 // Human-like typing delay simulator with instant pause & abort support
 async function sleep(ms) {
@@ -403,7 +408,7 @@ function hasUserAlreadyCommented(myHandle) {
 }
 
 // QWERTY keyboard adjacent keys map for realistic typo simulation
-const QWERTY_NEIGHBORS = {
+var QWERTY_NEIGHBORS = {
   a: ['s', 'q', 'z'],
   b: ['v', 'g', 'h', 'n'],
   c: ['x', 'd', 'v'],
@@ -609,10 +614,10 @@ async function smoothScrollPostForReading(mainArticle) {
 // HYBRID HUMANIZED ACTION ENGINE (MODE A: VIRTUAL CURSOR | MODE B: CDP DEBUGGER)
 // ─────────────────────────────────────────────────────────────────────────────
 
-let virtualCursorEl = null;
-let currentCursorPos = { x: -100, y: -100 };
-let isCursorAnimating = false;
-let lastScrollTime = 0;
+var virtualCursorEl = null;
+var currentCursorPos = { x: -100, y: -100 };
+var isCursorAnimating = false;
+var lastScrollTime = 0;
 
 function injectVirtualCursorStylesFallback() {
   if (document.getElementById('atomx-virtual-cursor-styles')) return;
@@ -922,15 +927,12 @@ function dispatchEnhancedHumanEvents(element, clientX, clientY) {
     element.dispatchEvent(new MouseEvent('click', { ...mouseProps, buttons: 0 }));
   }
 
-  // 10. Release hover & focus state so Twitter automatically removes lingering tooltips ("Reply", "Unlike", "Like")
+  // 10. Release hover state so Twitter automatically removes lingering tooltips ("Reply", "Unlike", "Like")
   try {
     element.dispatchEvent(new MouseEvent('mouseout', { ...mouseProps, buttons: 0 }));
     element.dispatchEvent(new MouseEvent('mouseleave', { ...mouseProps, buttons: 0 }));
     element.dispatchEvent(new PointerEvent('pointerout', { ...pointerProps, buttons: 0, pressure: 0 }));
     element.dispatchEvent(new PointerEvent('pointerleave', { ...pointerProps, buttons: 0, pressure: 0 }));
-    if (typeof element.blur === 'function') {
-      element.blur();
-    }
   } catch (e) {}
 
   dismissLingeringTwitterTooltips();
@@ -1009,17 +1011,22 @@ async function performHumanClick(targetElement, options = {}) {
   // 5. Visual element pulse (button glows with action color)
   triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
 
+  // Re-calculate FRESH current coordinates right before clicking to ensure 100% target accuracy even if page shifted
+  const freshRect = targetElement.getBoundingClientRect();
+  const finalClickX = (freshRect.width > 0) ? (freshRect.left + freshRect.width / 2) : targetX;
+  const finalClickY = (freshRect.height > 0) ? (freshRect.top + freshRect.height / 2) : targetY;
+
   // 6. Action Execution: Native CDP Debugger API (Hardware-level isTrusted: true) OR DOM Event Dispatch
   const strategy = await getActiveExecutionStrategy();
   let cdpSucceeded = false;
 
   if (strategy === 'debugger') {
     try {
-      console.log(`[ATOMX ACTION] Dispatching CDP click via Debugger API at (${Math.round(targetX)}, ${Math.round(targetY)})`);
+      console.log(`[ATOMX ACTION] Dispatching CDP click via Debugger API at (${Math.round(finalClickX)}, ${Math.round(finalClickY)})`);
       const response = await chrome.runtime.sendMessage({
         type: 'CDP_DISPATCH_MOUSE_CLICK',
-        x: targetX,
-        y: targetY
+        x: finalClickX,
+        y: finalClickY
       });
 
       if (response && response.ok) {
@@ -1034,7 +1041,7 @@ async function performHumanClick(targetElement, options = {}) {
 
   // If in DOM mode OR if Debugger API failed/unavailable (e.g. on mobile/Kiwi):
   if (!cdpSucceeded) {
-    dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
+    dispatchEnhancedHumanEvents(targetElement, finalClickX, finalClickY);
   }
 
   // 7. Post-click pause (450-650ms) to let action register visibly
@@ -1147,7 +1154,7 @@ async function simulateHumanReplyClick(replyBtn) {
  * 100% reliable single-click Submit with visual blue pulse & pointer events.
  * Submits the reply/comment without triggering duplicate submission warnings.
  */
-let lastSubmitClickTimestamp = 0;
+var lastSubmitClickTimestamp = 0;
 async function simulateHumanSubmitClick(btn) {
   if (!btn) return false;
   // Debounce guard: Prevent duplicate click within 3 seconds
@@ -1539,19 +1546,32 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     await simulateHumanReplyClick(replyBtn);
     await sleep(400);
 
-    // Wait explicitly for the modal dialog to appear first (prevents matching root compose box behind dialog!)
-    dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 7000);
+    // Wait for the modal dialog to appear
+    dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 3500);
     if (!dialog) {
-      console.warn('[ATOMX COMMENT ENGINE] Reply modal dialog did not appear!');
-      return { success: false, error: 'Reply dialog modal did not open' };
+      console.log('[ATOMX COMMENT ENGINE] Modal dialog did not open after first click. Attempting direct authentic click retry...');
+      try { replyBtn.click(); } catch (e) {}
+      dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 3500);
     }
-    isDialog = true;
 
-    // Inside the dialog, find tweetTextarea_0 strictly within the dialog scope
-    for (let w = 0; w < 15; w++) {
-      textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
-      if (textarea) break;
-      await sleep(200);
+    if (dialog) {
+      isDialog = true;
+      for (let w = 0; w < 15; w++) {
+        textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+        if (textarea) break;
+        await sleep(200);
+      }
+    } else {
+      // Check if clicking reply focused an inline reply composer (common on status pages / thread detail)
+      const inline = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
+      if (inline) {
+        console.log('[ATOMX COMMENT ENGINE] Inline reply textarea detected after click!');
+        textarea = inline;
+        isDialog = false;
+      } else {
+        console.warn('[ATOMX COMMENT ENGINE] Reply modal dialog did not appear!');
+        return { success: false, error: 'Reply dialog modal did not open' };
+      }
     }
   }
 
@@ -1784,10 +1804,10 @@ function triggerRateLimitAbort(reason = 'Sorry, you are rate limited.') {
 // =========================================================================
 // ATOMX FLOATING MINI HUD (ON-PAGE OVERLAY WIDGET)
 // =========================================================================
-let floatingHudEl = null;
-let isHudDismissedLocally = false;
-let isPopupOpenLocally = false;
-let isHudWorkflowPaused = false;
+var floatingHudEl = null;
+var isHudDismissedLocally = false;
+var isPopupOpenLocally = false;
+var isHudWorkflowPaused = false;
 
 if (typeof chrome !== 'undefined' && chrome.storage?.local) {
   chrome.storage.local.get(['atomx_popup_open', 'atomx_hud_dismissed', 'atomx_workflow_paused']).then(res => {
@@ -2770,7 +2790,7 @@ function findTwitterDiscardButton() {
   return null;
 }
 
-// Executes click on Discard button via CDP Debugger API (hardware click) or enhanced pointer events
+// Executes click on Discard button immediately and reliably to dismiss prompts without hanging
 async function executeHumanDiscardClick(discardBtn) {
   if (!discardBtn) return false;
   try {
@@ -2779,35 +2799,13 @@ async function executeHumanDiscardClick(discardBtn) {
       const targetX = rect.left + rect.width / 2;
       const targetY = rect.top + rect.height / 2;
 
-      // Animate virtual cursor to Discard button so user/video visibly witnesses the discard
-      if (typeof animateVirtualCursorTo === 'function') {
-        await animateVirtualCursorTo(targetX, targetY, 200).catch(() => null);
-        if (typeof triggerVirtualCursorClickEffect === 'function') {
-          triggerVirtualCursorClickEffect();
-        }
-      }
+      // 1. Instant native click
+      discardBtn.click();
 
-      // Mode A: Chrome DevTools Protocol (CDP) Hardware-level Click if debugger active
-      const strategy = await getActiveExecutionStrategy();
-      if (strategy === 'debugger') {
-        try {
-          console.log('[ATOMX CDP] Clicking Discard button via Debugger API at (' + Math.round(targetX) + ', ' + Math.round(targetY) + ')...');
-          const cdpRes = await chrome.runtime.sendMessage({
-            type: 'CDP_DISPATCH_MOUSE_CLICK',
-            x: targetX,
-            y: targetY
-          });
-          if (cdpRes && cdpRes.ok) {
-            await sleep(150);
-          }
-        } catch (cdpErr) {}
-      }
-
-      // Mode B: Standard DOM Pointer/Mouse event chain (works seamlessly on Kiwi & Desktop)
+      // 2. Dispatch synthetic pointer & mouse sequence for full event handling
       const evOpts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: targetX, clientY: targetY };
       discardBtn.dispatchEvent(new PointerEvent('pointerdown', evOpts));
       discardBtn.dispatchEvent(new MouseEvent('mousedown', evOpts));
-      await sleep(40);
       discardBtn.dispatchEvent(new PointerEvent('pointerup', evOpts));
       discardBtn.dispatchEvent(new MouseEvent('mouseup', evOpts));
       discardBtn.click();
@@ -2830,19 +2828,23 @@ async function clearAnyDraftComment() {
     const discardBtn = findTwitterDiscardButton();
     if (discardBtn) {
       await executeHumanDiscardClick(discardBtn);
-      await sleep(250);
+      await sleep(150);
     }
 
-    // 2. Clear any lingering text from composer editor
+    // 2. Clear any lingering text from composer editor (Lexical/DraftJS compliant)
     const textarea = document.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
-    if (textarea && (textarea.innerText || textarea.textContent || '').trim()) {
-      textarea.focus({ preventScroll: true });
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(textarea);
-      sel.removeAllRanges();
-      sel.addRange(range);
-      document.execCommand('delete', false, null);
+    if (textarea) {
+      try {
+        textarea.focus({ preventScroll: true });
+        textarea.dispatchEvent(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true, composed: true }));
+        document.execCommand('selectAll', false, null);
+        document.execCommand('delete', false, null);
+        if (textarea.innerText || textarea.textContent) {
+          textarea.textContent = '';
+        }
+        textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      } catch (err) {}
     }
 
     // 3. Close open modal dialogs
@@ -3491,7 +3493,7 @@ async function huntAudienceUsers(options = {}) {
 }
 
 // Backward compatibility alias
-const scanActiveProfilesFromList = (count) => huntAudienceUsers({ targetCount: count });
+var scanActiveProfilesFromList = (count) => huntAudienceUsers({ targetCount: count });
 
 /**
  * Agent 1 & Agent 4: Collect active repliers/commenters from a busy tweet discussion thread
@@ -4249,7 +4251,7 @@ async function engageAndFollowProfile(options = {}) {
 }
 
 // Backward compatibility alias
-const followUserOnPage = (handle) => engageAndFollowProfile({ handle, likePosts: false, replyPosts: false });
+var followUserOnPage = (handle) => engageAndFollowProfile({ handle, likePosts: false, replyPosts: false });
 
 /**
  * Agent 2: Reply Back Loop Execution on Current Post
