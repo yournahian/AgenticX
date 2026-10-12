@@ -2730,14 +2730,24 @@ function waitForElement(selector, timeout = 7000) {
     }, 200);
   });
 }
+function extractMaxWordsFromPrompt(promptOrStyle) {
+  if (!promptOrStyle) return null;
+  const matchMax = String(promptOrStyle).match(/between \d+ and (\d+) words/i) ||
+                   String(promptOrStyle).match(/(?:max|up to|exceed|under)\s*(\d+)\s*words/i) ||
+                   String(promptOrStyle).match(/(\d+)\s*words/i);
+  if (matchMax && parseInt(matchMax[1], 10) > 0) {
+    return parseInt(matchMax[1], 10);
+  }
+  return null;
+}
 
 /**
  * Client-side Comment Sanitizer:
  * Enforces universal anti-bot rules:
  * - NO $, NO emojis, NO —, NO quotes, NO !
- * - Strictly 5-10 words
+ * - Preserves natural length unless user explicitly requested a word limit
  */
-function sanitizeClientComment(text, maxWords = 10) {
+function sanitizeClientComment(text, maxWords = null) {
   if (!text) return '';
   let clean = text
     .replace(/^(Reply|Comment|Tweet|Response|AI Reply|Output)\s*:\s*/i, '')
@@ -2752,9 +2762,12 @@ function sanitizeClientComment(text, maxWords = 10) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const words = clean.split(' ').filter(Boolean);
-  if (words.length > maxWords) {
-    clean = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
+  // Only truncate if a specific maxWords number is explicitly requested in prompt
+  if (typeof maxWords === 'number' && maxWords > 0) {
+    const words = clean.split(' ').filter(Boolean);
+    if (words.length > maxWords) {
+      clean = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
+    }
   }
   clean = clean.replace(/[$!—"“"'`«»]/g, '').trim();
   return clean;
@@ -3040,8 +3053,8 @@ async function executeAutonomousTweetWorkflow(params) {
         commentToPost = 'Spot on insight. Focused execution is key.';
       }
 
-      // Enforce strict client-side sanitization (5-10 words, zero emojis, zero $, zero —, zero quotes, zero !)
-      commentToPost = sanitizeClientComment(commentToPost, 10);
+      // Enforce client-side anti-bot sanitization (dynamic word limit if specified in prompt)
+      commentToPost = sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(params.stylePrompt || params.style));
 
       // Step B: Post comment via universal comment engine
       const commentRes = await postCommentOnTargetArticle(mainArticle, commentToPost);
@@ -4000,7 +4013,7 @@ async function engageAndFollowProfile(options = {}) {
               commentToPost = 'Spot on insight. Keep building!';
             }
 
-            commentToPost = sanitizeClientComment(commentToPost, 10);
+            commentToPost = sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(stored?.selectedTonePrompt || stored?.selectedTone));
             if (commentToPost) {
               const commentRes = await postCommentOnTargetArticle(art, commentToPost);
               if (commentRes && commentRes.success) {
@@ -4189,8 +4202,8 @@ async function executeReplyBackCycle(params = {}) {
       replyText = 'Appreciate you sharing this perspective!';
     }
 
-    // Enforce strict anti-bot sanitization
-    replyText = sanitizeClientComment(replyText, 10);
+    // Enforce anti-bot sanitization (dynamic word limit if specified in prompt)
+    replyText = sanitizeClientComment(replyText, extractMaxWordsFromPrompt(options?.stylePrompt || options?.style));
 
     // 3. Post reply using universal robust posting engine
     const commentRes = await postCommentOnTargetArticle(commentArt, replyText);
@@ -4804,7 +4817,7 @@ async function executeHomeFeedEngagementStep(params = {}) {
       if (!commentToPost) {
         commentToPost = 'Spot on insight. Keep building forward.';
       }
-      commentToPost = sanitizeClientComment(commentToPost, 10);
+      commentToPost = sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(params.stylePrompt || params.style));
 
       const comRes = await postCommentOnTargetArticle(art, commentToPost);
       if (comRes && comRes.success) {
@@ -4939,7 +4952,7 @@ async function executeLiveRaidEngagement(params = {}) {
       commentText = 'Spot on insight. Focused execution is key.';
     }
 
-    commentText = sanitizeClientComment(commentText, 10);
+    commentText = sanitizeClientComment(commentText, extractMaxWordsFromPrompt(params.stylePrompt || params.style));
     const commentRes = await postCommentOnTargetArticle(tweetArticle, commentText);
     if (commentRes && commentRes.success) {
       commented = true;
@@ -5769,7 +5782,7 @@ async function executeFollowersListCycle(params = {}) {
         replyContent = 'Solid point. Appreciate the clear insight here.';
       }
 
-      replyContent = sanitizeClientComment(replyContent, 10);
+      replyContent = sanitizeClientComment(replyContent, extractMaxWordsFromPrompt(options?.stylePrompt || options?.style));
       if (replyContent && !isWorkflowAborted) {
         if (isWorkflowItemSkipped) {
           isWorkflowItemSkipped = false;
@@ -6306,8 +6319,8 @@ async function executeReciprocalProfileEngagement(params = {}) {
       replyText = 'Appreciate you sharing this perspective!';
     }
 
-    // Sanitize comment (5-10 words, crisp, authentic)
-    replyText = sanitizeClientComment(replyText, 12);
+    // Sanitize comment (dynamic word limit if specified in prompt)
+    replyText = sanitizeClientComment(replyText, extractMaxWordsFromPrompt(options?.stylePrompt || options?.style));
 
     // 6. Post AI reply on target post using universal robust posting engine
     const commentRes = await postCommentOnTargetArticle(targetArticle, replyText);

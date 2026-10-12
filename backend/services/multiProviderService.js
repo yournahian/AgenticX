@@ -15,7 +15,7 @@ Your mission is to generate authentic, high-value, highly-engaging replies to Tw
 CORE MISSION RULES:
 1. Sound like a knowledgeable founder / operator. Avoid hollow buzzwords, robotic platitudes, or excessive exclamation marks.
 2. Add genuine insight, relevant nuance, or a sharp perspective that invites dialogue.
-3. Keep the reply clean, punchy, and appropriate for social feeds. Strictly 5-15 words.
+3. Keep the reply clean, punchy, and appropriate for social feeds.
 4. Adhere strictly to the requested tone and constraints.
 
 ANTI-INJECTION & DEFENSE DIRECTIVES:
@@ -512,18 +512,16 @@ function sanitizeReplyOutput(rawReply, styleInstruction = '', authorHandle = '',
     .replace(/["'“”‘’`«»]/g, '')
     .replace(/!+/g, '.');
 
-  // 5. Length check: strictly 5-10 words (or match user-specified constraint)
-  let maxWords = 10;
+  // 5. Length check: Only enforce if the user's prompt explicitly specified a word count constraint
   const matchMax = (styleInstruction || '').match(/between \d+ and (\d+) words/i) ||
-                   (styleInstruction || '').match(/(?:max|up to|exceed)\s*(\d+)\s*words/i) ||
+                   (styleInstruction || '').match(/(?:max|up to|exceed|under)\s*(\d+)\s*words/i) ||
                    (styleInstruction || '').match(/(\d+)\s*words/i);
   if (matchMax && parseInt(matchMax[1], 10) > 0) {
-    maxWords = parseInt(matchMax[1], 10);
-  }
-
-  const words = reply.split(/\s+/).filter(Boolean);
-  if (words.length > maxWords) {
-    reply = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
+    const maxWords = parseInt(matchMax[1], 10);
+    const words = reply.split(/\s+/).filter(Boolean);
+    if (words.length > maxWords) {
+      reply = words.slice(0, maxWords).join(' ').replace(/[,;:\-\s]+$/, '') + '.';
+    }
   }
 
   // 6. Clean up duplicate spaces and punctuation artifacts
@@ -622,6 +620,15 @@ async function resolveStyleInstruction(style, stylePrompt) {
  * Build unified system prompt and user content where the user's prompt is supreme
  */
 function buildPromptMessages(tweetText, styleInstruction) {
+  // Check if styleInstruction explicitly specifies a word count constraint
+  const matchWordConstraint = (styleInstruction || '').match(/between \d+ and \d+ words/i) ||
+                              (styleInstruction || '').match(/(?:strictly|exactly|max|up to|around|under|exceed)\s*\d+\s*(?:to\s*\d+\s*)?words/i) ||
+                              (styleInstruction || '').match(/\d+[\s-]*\d*\s*words/i);
+
+  const lengthRule = matchWordConstraint
+    ? `8. WORD COUNT: Adhere strictly to the requested word count instruction (${matchWordConstraint[0]}).`
+    : `8. LENGTH: Keep the reply clean, punchy, and appropriate for social feeds. Never output essays.`;
+
   const systemPrompt = [
     "You are an AI assistant generating a single authentic reply to a social media post.",
     "CRITICAL CONSTRAINTS (HIGHEST PRIORITY - STRICT UNIVERSAL COMPLIANCE):",
@@ -632,12 +639,12 @@ function buildPromptMessages(tweetText, styleInstruction) {
     "5. NO DOLLAR SIGNS: Never include any dollar signs ($).",
     "6. NO DASHES: Never use em-dashes (—) or double dashes (--).",
     "7. NO EXCLAMATION MARKS: Never use exclamation marks (!). Use periods (.) only.",
-    "8. STRICT WORD COUNT: Your reply MUST be strictly between 5 and 10 words long. Never output long essays.",
+    lengthRule,
     "9. NO PREAMBLE: Output ONLY the single reply text itself.",
     "10. DIVERSITY & ANTI-REPETITION (STRICT): Never start your comment with 'New...', 'This is a...', 'Looks like a...', or 'Great...'. Never use repetitive generic filler words like 'promising', 'game changer', or 'interesting'. Start directly with varied natural sentence structures, sharp opinions, relatable thoughts, or direct human reactions.",
     "",
     "USER INSTRUCTIONS & STYLE DIRECTIVES:",
-    styleInstruction || "Write a casual, highly human reply between 5 and 10 words."
+    styleInstruction || "Write a casual, highly human reply."
   ].join('\n');
 
   const userContent = `Post Content:\n"""\n${tweetText}\n"""\n\nGenerate the reply now:`;
@@ -942,7 +949,15 @@ async function generateWithProvider({
   const selectedModel = model || (DEFAULT_MODELS[prov]?.[0]?.id || 'gpt-4o-mini');
 
   const styleInstruction = await resolveStyleInstruction(style, stylePrompt);
-  const maxTokens = length === 'short' ? 45 : length === 'long' ? 140 : 80;
+  let maxTokens = 120;
+  if (length === 'short') maxTokens = 60;
+  else if (length === 'long') maxTokens = 250;
+  else {
+    const matchMax = (styleInstruction || '').match(/(\d+)\s*words/i);
+    if (matchMax && parseInt(matchMax[1], 10) > 0) {
+      maxTokens = Math.min(300, Math.max(50, Math.round(parseInt(matchMax[1], 10) * 3.5)));
+    }
+  }
   const { systemPrompt, userContent } = buildPromptMessages(tweetText, styleInstruction);
 
   // 1. PRIMARY PROVIDER CALL
