@@ -921,6 +921,31 @@ function dispatchEnhancedHumanEvents(element, clientX, clientY) {
   } catch (e) {
     element.dispatchEvent(new MouseEvent('click', { ...mouseProps, buttons: 0 }));
   }
+
+  // 10. Release hover & focus state so Twitter automatically removes lingering tooltips ("Reply", "Unlike", "Like")
+  try {
+    element.dispatchEvent(new MouseEvent('mouseout', { ...mouseProps, buttons: 0 }));
+    element.dispatchEvent(new MouseEvent('mouseleave', { ...mouseProps, buttons: 0 }));
+    element.dispatchEvent(new PointerEvent('pointerout', { ...pointerProps, buttons: 0, pressure: 0 }));
+    element.dispatchEvent(new PointerEvent('pointerleave', { ...pointerProps, buttons: 0, pressure: 0 }));
+    if (typeof element.blur === 'function') {
+      element.blur();
+    }
+  } catch (e) {}
+
+  dismissLingeringTwitterTooltips();
+}
+
+/**
+ * Removes any lingering floating Twitter/X tooltip bubbles (e.g. "Reply", "Unlike", "Like") from the screen.
+ */
+function dismissLingeringTwitterTooltips() {
+  try {
+    const tooltips = document.querySelectorAll('div[role="tooltip"]');
+    tooltips.forEach(t => {
+      try { t.remove(); } catch (err) {}
+    });
+  } catch (e) {}
 }
 
 async function getActiveExecutionStrategy() {
@@ -4721,12 +4746,14 @@ async function executeHomeFeedEngagementStep(params = {}) {
       }
     }
 
-    // Ensure dialog is closed so page isn't blocked
+    // Ensure dialog is closed and any floating tooltips ("Reply", "Unlike") are dismissed
     closeAnyOpenTwitterDialog();
+    dismissLingeringTwitterTooltips();
     await sleep(300);
 
     // Scroll down past this engaged post so the next post is brought into viewport
     await humanSmoothScroll(500, { settlePause: 350 });
+    dismissLingeringTwitterTooltips();
 
     return {
       success: true,
