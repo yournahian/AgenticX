@@ -594,6 +594,11 @@ async function processTgRaidStep() {
   );
 
   try {
+    // Discard any unsaved drafts from prior tweet to eliminate browser "Leave site?" prompts
+    if (tgRaidWorkingTabId) {
+      await sendMessageToTab(tgRaidWorkingTabId, { type: 'CLEANUP_DRAFTS_BEFORE_NAV' }, 1500).catch(() => null);
+    }
+
     // Navigate in single reused tab/window across all tweets
     const tabId = await getOrCreateReusedTab(tgRaidWorkingTabId, tweet.canonicalUrl);
     tgRaidWorkingTabId = tabId;
@@ -662,6 +667,11 @@ async function processTgRaidStep() {
       newIgnoredCount++;
       if (result.commentSkipped) newSkippedComments++;
       console.log(`[ATOMX BG] TG Raid ${indexStr}: Auto-ignored — ${result.reason || 'already done'}`);
+
+      // Save to engagedTweetIds so future Telegram raids skip this already-engaged tweet immediately!
+      const engData = await chrome.storage.local.get(['engagedTweetIds']).catch(() => ({}));
+      const engIds = Array.from(new Set([...(engData.engagedTweetIds || []), tweet.tweetId].filter(Boolean)));
+      await chrome.storage.local.set({ engagedTweetIds: engIds }).catch(() => null);
     } else {
       newSuccessCount++;
       const credData = await chrome.storage.local.get(['credits']).catch(() => ({}));
@@ -1640,6 +1650,10 @@ async function processAgentWorkflowStep() {
         verifiedXHandle: options.verifiedXHandle
       };
       timeoutMs = 90000;
+    }
+
+    if (agentWorkflowWorkingTabId) {
+      await sendMessageToTab(agentWorkflowWorkingTabId, { type: 'CLEANUP_DRAFTS_BEFORE_NAV' }, 1500).catch(() => null);
     }
 
     const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, targetUrl);

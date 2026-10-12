@@ -343,15 +343,38 @@ function hasUserAlreadyCommented(myHandle) {
   const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
   if (articles.length <= 1) return false;
 
-  // Comments are all articles after the main tweet (index 1+)
-  const comments = articles.slice(1);
+  // The main focal tweet is identified so we only inspect actual reply/comment articles
+  const mainArticle = getMainPostArticle() || articles[0];
+  const comments = articles.filter(a => a !== mainArticle);
+
   return comments.some(c => {
+    // 1. Direct profile links in the comment author header (e.g. href="/KhanWg60464")
+    const links = Array.from(c.querySelectorAll('a[href]'));
+    const hasProfileLink = links.some(a => {
+      const href = (a.getAttribute('href') || '').toLowerCase().replace(/^\/+/, '').split('?')[0].split('/')[0];
+      return href === cleanHandle;
+    });
+    if (hasProfileLink) return true;
+
+    // 2. Avatar container testid: UserAvatar-Container-<handle>
+    const avatarEl = c.querySelector(`[data-testid*="${cleanHandle}" i]`);
+    if (avatarEl) return true;
+
+    // 3. User-Name testid text content (e.g. "Wg saim Khan @KhanWg60464")
     const userEl = c.querySelector('div[data-testid="User-Name"]');
-    if (!userEl) return false;
-    const txt = userEl.innerText.toLowerCase();
-    // Word boundary regex so @username matches only exact handle, not substrings
+    if (userEl) {
+      const txt = userEl.innerText.toLowerCase();
+      const regex = new RegExp(`@${cleanHandle}(?:\\b|[^a-zA-Z0-9_]|$)`, 'i');
+      if (regex.test(txt)) return true;
+    }
+
+    // 4. Comment author header area text
+    const fullText = (c.innerText || '').toLowerCase();
+    const commentHeader = fullText.slice(0, 300);
     const regex = new RegExp(`@${cleanHandle}(?:\\b|[^a-zA-Z0-9_]|$)`, 'i');
-    return regex.test(txt);
+    if (regex.test(commentHeader)) return true;
+
+    return false;
   });
 }
 
@@ -1361,11 +1384,19 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     return { success: false, error: 'Textarea not found, skipped or aborted' };
   }
 
+  // Pre-typing verification: If comment section just loaded and user already has a reply, abort immediately
+  const curHandle = getLoggedInUserHandle() || '';
+  if (curHandle && hasUserAlreadyCommented(curHandle)) {
+    console.warn(`[ATOMX COMMENT ENGINE] User @${curHandle} already has a comment on this post. Aborting and clearing dialog.`);
+    clearAnyDraftComment();
+    return { success: true, ignored: true, commentSkipped: true, reason: 'Already commented on this post previously.' };
+  }
+
   // 3. Type human-like into the editor
   await typeTextHumanLike(textarea, commentText);
 
   if (isWorkflowAborted || isWorkflowItemSkipped) {
-    closeAnyOpenTwitterDialog();
+    clearAnyDraftComment();
     return { success: false, aborted: isWorkflowAborted, skipped: isWorkflowItemSkipped, error: 'Workflow was aborted or skipped by user' };
   }
 
@@ -1417,6 +1448,13 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   if (!submitBtn) {
     console.warn('[ATOMX COMMENT ENGINE] Submit reply button not found!');
     return { success: false, error: 'Submit button not found' };
+  }
+
+  // Pre-submit verification: If comment section hydrated during typing, abort submission
+  if (curHandle && hasUserAlreadyCommented(curHandle)) {
+    console.warn(`[ATOMX COMMENT ENGINE] User @${curHandle} comment appeared before submit. Aborting submission.`);
+    clearAnyDraftComment();
+    return { success: true, ignored: true, commentSkipped: true, reason: 'Already commented on this post previously.' };
   }
 
   // Wait briefly if aria-disabled is still true to let React state catch up
@@ -2222,6 +2260,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'CLEANUP_DRAFTS_BEFORE_NAV') {
+    clearAnyDraftComment();
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.type === 'EXTRACT_FOCUSED_TWEET') {
     const firstTweet = getMainPostArticle();
     if (firstTweet) {
@@ -2381,6 +2425,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Neutralize Twitter / X "Leave site? Changes you made may not be saved" prompt
+function suppressBeforeUnloadPrompt() {
+  try {
+    window.addEventListener('beforeunload', (e) => {
+      try { e.stopImmediatePropagation(); } catch (err) {}
+    }, true);
+
+    const script = document.createElement('script');
+    script.textContent = `
+      try {
+        window.addEventListener('beforeunload', function(e) {
+          e.stopImmediatePropagation();
+        }, true);
+        window.onbeforeunload = null;
+        Object.defineProperty(window, 'onbeforeunload', {
+          get: () => null,
+          set: () => {}
+        });
+      } catch (e) {}
+    `;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+  } catch (e) {}
+}
+suppressBeforeUnloadPrompt();
+
+// Helper: Discards any unsaved draft comment in editor to prevent browser navigation locks
+function clearAnyDraftComment() {
+  try {
+    const confirmDiscard = document.querySelector('button[data-testid="confirmationSheetConfirm"]');
+    if (confirmDiscard) {
+      confirmDiscard.click();
+      return;
+    }
+
+    const textarea = document.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+    if (textarea && (textarea.innerText || textarea.textContent || '').trim()) {
+      textarea.focus({ preventScroll: true });
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(textarea);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand('delete', false, null);
+    }
+    closeAnyOpenTwitterDialog();
+  } catch (e) {}
+}
+
 // Helper: Closes any open modal/compose dialog or discard confirmation on Twitter
 function closeAnyOpenTwitterDialog() {
   try {
@@ -2400,7 +2493,7 @@ function closeAnyOpenTwitterDialog() {
       setTimeout(() => {
         const confirmDiscard = document.querySelector('button[data-testid="confirmationSheetConfirm"]');
         if (confirmDiscard) confirmDiscard.click();
-      }, 250);
+      }, 150);
     }
   } catch (e) {}
 }
@@ -2488,9 +2581,24 @@ async function executeAutonomousTweetWorkflow(params) {
   }
   if (!mainArticle) mainArticle = document;
 
+  // On status pages: Allow Twitter 1.5 - 2s to stream/hydrate comments under the post!
+  if (window.location.pathname.includes('/status/')) {
+    for (let cWait = 0; cWait < 5; cWait++) {
+      const allArts = document.querySelectorAll('article[data-testid="tweet"]');
+      if (allArts.length > 1) break;
+      await sleep(400);
+    }
+  }
+
   // 2. Detect already liked & already commented status
   const isAlreadyLiked = isPostAlreadyLiked(mainArticle);
-  const loggedInHandle = getLoggedInUserHandle() || (params.verifiedXHandle || '').replace(/^@+/, '');
+  let loggedInHandle = getLoggedInUserHandle() || (params.verifiedXHandle || '').replace(/^@+/, '');
+  if (!loggedInHandle) {
+    try {
+      const stored = await chrome.storage.local.get(['verifiedXHandle']);
+      loggedInHandle = (stored?.verifiedXHandle || '').replace(/^@+/, '');
+    } catch (e) {}
+  }
   const isAlreadyCommented = hasUserAlreadyCommented(loggedInHandle);
 
   console.log(`[ATOMX STATUS CHECK] isAlreadyLiked: ${isAlreadyLiked}, isAlreadyCommented: ${isAlreadyCommented} (user: @${loggedInHandle || 'unknown'})`);
