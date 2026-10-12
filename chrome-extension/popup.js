@@ -5939,7 +5939,7 @@ async function syncServerStateNetwork() {
     }
 
     // IF SERVER CONFIRMS USER IS SUSPENDED, LOCK IMMEDIATELY!
-    if (stData.status === 'SUSPENDED') {
+    if (stData?.status === 'SUSPENDED') {
       console.warn('[ATOMX] Account is SUSPENDED by administrator. Halting all activities.');
       if (!state.user) {
         state.user = { handle: stData.handle || `@${cleanHandle}`, email: stData.email || email, status: 'SUSPENDED' };
@@ -5959,7 +5959,7 @@ async function syncServerStateNetwork() {
       return;
     }
 
-    if (stData.status === 'PENDING') {
+    if (stData?.status === 'PENDING') {
       state.user = null;
       state.verifiedXHandle = '';
       state.pendingRequest = { handle: stData.handle || `@${cleanHandle}`, email: stData.email || email };
@@ -5972,7 +5972,7 @@ async function syncServerStateNetwork() {
       return;
     }
 
-    if (stData.status === 'ACTIVE' || stData.status === 'APPROVED') {
+    if (stData?.status === 'ACTIVE' || stData?.status === 'APPROVED') {
       if (!state.user) {
         state.user = {
           handle: stData.handle || `@${cleanHandle}`,
