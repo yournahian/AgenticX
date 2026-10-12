@@ -1533,7 +1533,29 @@ async function processAgentWorkflowStep() {
         const stopChk2 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
         if (stopChk2?.atomx_agent_workflow?.isStopped || !stopChk2?.atomx_agent_workflow?.active) return;
 
-        if (feedRes?.aborted || feedRes?.rateLimited) {
+        if (feedRes?.rateLimited) {
+          await finishAgentWorkflow(workflow);
+          return;
+        }
+
+        if (feedRes?.skipped || (feedRes?.aborted && !stopChk2?.atomx_agent_workflow?.isStopped)) {
+          // USER CLICKED SKIP: Do not abort! Advance ignored count and continue smoothly to next post
+          await chrome.storage.local.set({ atomx_skip_current: false });
+          workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+          workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+          await chrome.storage.local.set({ atomx_agent_workflow: workflow });
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] ⏭️ Skipped current item. Moving to next post...`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
+          await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
+          await delay(1200);
+          continue;
+        }
+
+        if (feedRes?.aborted) {
           await finishAgentWorkflow(workflow);
           return;
         }
@@ -1700,7 +1722,29 @@ async function processAgentWorkflowStep() {
         const stopChk2 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
         if (stopChk2?.atomx_agent_workflow?.isStopped || !stopChk2?.atomx_agent_workflow?.active) return;
 
-        if (feedRes?.aborted || feedRes?.rateLimited) {
+        if (feedRes?.rateLimited) {
+          await finishAgentWorkflow(workflow);
+          return;
+        }
+
+        if (feedRes?.skipped || (feedRes?.aborted && !stopChk2?.atomx_agent_workflow?.isStopped)) {
+          // USER CLICKED SKIP: Do not abort! Advance ignored count and continue smoothly to next post
+          await chrome.storage.local.set({ atomx_skip_current: false });
+          workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+          workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+          await chrome.storage.local.set({ atomx_agent_workflow: workflow });
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] ⏭️ Skipped current item. Moving to next post...`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
+          await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
+          await delay(1200);
+          continue;
+        }
+
+        if (feedRes?.aborted) {
           await finishAgentWorkflow(workflow);
           return;
         }
@@ -2177,17 +2221,11 @@ async function processAgentWorkflowStep() {
             Math.round(((workflow.successCount || 0) / targetCount) * 100)
           );
 
-          // Return back to post in the EXACT SAME tab!
-          await chrome.tabs.goBack(tabId).catch(() => null);
-          await delay(1500);
-          try {
-            const curTab = await chrome.tabs.get(tabId);
-            if (!curTab?.url || !curTab.url.includes('/status/')) {
-              await getOrCreateReusedTab(tabId, t.url);
-              await waitForTabLoad(tabId, 12000);
-            }
-          } catch (e) {}
-          await delay(2500);
+          // Return cleanly back to post in the EXACT SAME tab! (Direct URL navigation prevents exiting X or hanging on browser new tab)
+          console.log(`[ATOMX BG] Navigating cleanly back to post: ${t.url}...`);
+          await getOrCreateReusedTab(tabId, t.url);
+          await waitForTabLoad(tabId, 12000);
+          await delay(2000);
 
           if ((workflow.successCount || 0) >= targetCount) break;
 

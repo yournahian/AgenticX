@@ -1593,7 +1593,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   await typeTextHumanLike(textarea, commentText);
 
   if (isWorkflowAborted || isWorkflowItemSkipped) {
-    clearAnyDraftComment();
+    await clearAnyDraftComment();
     return { success: false, aborted: isWorkflowAborted, skipped: isWorkflowItemSkipped, error: 'Workflow was aborted or skipped by user' };
   }
 
@@ -2363,7 +2363,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
     if (changes.atomx_skip_current !== undefined) {
       isWorkflowItemSkipped = Boolean(changes.atomx_skip_current.newValue);
       if (isWorkflowItemSkipped) {
-        closeAnyOpenTwitterDialog();
+        clearAnyDraftComment();
       }
     }
 
@@ -2766,23 +2766,23 @@ function findTwitterDiscardButton() {
   const directBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"], [data-testid="confirmationSheetConfirm"]');
   if (directBtn) return directBtn;
 
-  // 2. Button inside confirmationSheetDialog container
-  const sheetDialog = document.querySelector('div[data-testid="confirmationSheetDialog"], div[role="alertdialog"], div[aria-modal="true"]');
-  if (sheetDialog) {
+  // 2. Buttons inside any confirmation/alert/modal dialog
+  const dialogs = Array.from(document.querySelectorAll('div[data-testid="confirmationSheetDialog"], div[role="alertdialog"], div[aria-modal="true"]'));
+  for (const sheetDialog of dialogs) {
     const sheetBtns = Array.from(sheetDialog.querySelectorAll('button, div[role="button"]'));
     for (const btn of sheetBtns) {
       const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-      if (text === 'discard' || text.includes('discard') || text === 'descartar' || text === 'abandonner') {
+      if (text === 'discard' || text.startsWith('discard') || text.includes('discard') || text === 'descartar' || text === 'abandonner') {
         return btn;
       }
     }
   }
 
-  // 3. Fallback: Search all interactive buttons for discard label
+  // 3. Fallback: Search all interactive buttons on the entire page
   const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
   for (const btn of allBtns) {
     const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-    if (text === 'discard') {
+    if (text === 'discard' || text.startsWith('discard') || text.includes('discard')) {
       return btn;
     }
   }
@@ -2873,6 +2873,12 @@ async function closeAnyOpenTwitterDialog() {
         const closeBtn = dialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"], button[data-testid="app-bar-close"]');
         if (closeBtn) {
           closeBtn.click();
+          await sleep(150);
+          const postDiscard = findTwitterDiscardButton();
+          if (postDiscard) {
+            await executeHumanDiscardClick(postDiscard);
+            await sleep(150);
+          }
         } else {
           // If no close button, re-check discard button or dispatch Escape key
           const dBtn = findTwitterDiscardButton();
@@ -4914,7 +4920,12 @@ async function executeHomeFeedEngagementStep(params = {}) {
   }
 
   for (const art of articles) {
-    if (isWorkflowAborted || isWorkflowItemSkipped) return { success: false, aborted: true };
+    if (isWorkflowAborted) return { success: false, aborted: true };
+    if (isWorkflowItemSkipped) {
+      isWorkflowItemSkipped = false;
+      await clearAnyDraftComment();
+      return { success: false, skipped: true, ignored: true };
+    }
 
     // 1. Promoted Ad Check — Auto-skip 100% of Ads and continue to next tweet
     if (isPromotedTweet(art)) {
@@ -5007,6 +5018,13 @@ async function executeHomeFeedEngagementStep(params = {}) {
       const comRes = await postCommentOnTargetArticle(art, commentToPost);
       if (comRes && comRes.success) {
         performed.comment = true;
+      }
+      if (comRes?.skipped || isWorkflowItemSkipped) {
+        isWorkflowItemSkipped = false;
+        await clearAnyDraftComment();
+        await humanSmoothScroll(500, { settlePause: 350 });
+        dismissLingeringTwitterTooltips();
+        return { success: false, skipped: true, performed, authorHandle: data.authorHandle, tweetId };
       }
       await sleep(500);
     }
