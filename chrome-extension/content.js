@@ -1480,32 +1480,40 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
       replyBtn = document.querySelector('button[data-testid="reply"]');
     }
 
-    if (replyBtn) {
-      console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
-      await simulateHumanReplyClick(replyBtn);
+    if (!replyBtn) {
+      console.warn('[ATOMX COMMENT ENGINE] Reply button not found on target article!');
+      return { success: false, error: 'Reply button not found on post' };
     }
 
-    // Wait for the editable textarea to mount in dialog, inline, or compose view
-    textarea = await waitForElement(
-      'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[role="dialog"] [data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]',
-      7000
-    );
+    console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
+    await simulateHumanReplyClick(replyBtn);
+    await sleep(400);
 
-    if (textarea) {
-      dialog = textarea.closest('div[role="dialog"], div[aria-modal="true"]') || document.querySelector('div[role="dialog"]');
-      isDialog = !!dialog;
+    // Wait explicitly for the modal dialog to appear first (prevents matching root compose box behind dialog!)
+    dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 7000);
+    if (!dialog) {
+      console.warn('[ATOMX COMMENT ENGINE] Reply modal dialog did not appear!');
+      return { success: false, error: 'Reply dialog modal did not open' };
+    }
+    isDialog = true;
+
+    // Inside the dialog, find tweetTextarea_0 strictly within the dialog scope
+    for (let w = 0; w < 15; w++) {
+      textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
+      if (textarea) break;
+      await sleep(200);
     }
   }
 
   if (!textarea || isWorkflowAborted || isWorkflowItemSkipped) {
     if (isWorkflowItemSkipped) closeAnyOpenTwitterDialog();
-    console.warn('[ATOMX COMMENT ENGINE] Reply textarea not found, skipped or aborted!');
-    return { success: false, error: 'Textarea not found, skipped or aborted' };
+    console.warn('[ATOMX COMMENT ENGINE] Reply textarea not found inside dialog, skipped or aborted!');
+    return { success: false, error: 'Textarea not found inside dialog, skipped or aborted' };
   }
 
-  // Pre-typing verification: If comment section just loaded and user already has a reply, abort immediately
+  // Pre-typing verification: ONLY on single-tweet status pages (never on Home/Search timelines)
   const curHandle = getLoggedInUserHandle() || '';
-  if (curHandle && hasUserAlreadyCommented(curHandle)) {
+  if (isStatusPage && curHandle && hasUserAlreadyCommented(curHandle)) {
     console.warn(`[ATOMX COMMENT ENGINE] User @${curHandle} already has a comment on this post. Aborting and clearing dialog.`);
     clearAnyDraftComment();
     return { success: true, ignored: true, commentSkipped: true, reason: 'Already commented on this post previously.' };
@@ -4594,13 +4602,45 @@ function isRetweetOrRepost(article) {
 
 /**
  * Detects whether an article is a reply/comment to someone else rather than a root tweet.
+ * Supports multi-language phrases (Spanish, English, French, etc.) and DOM structure.
  */
 function isReplyOrCommentTweet(article) {
   if (!article) return false;
-  const text = article.innerText || '';
-  if (text.includes('Replying to @') || text.includes('Replying to\n@') || text.includes('Replying to')) {
+  const text = (article.innerText || '').toLowerCase();
+
+  const replyPhrases = [
+    'replying to',
+    'en respuesta a',
+    'respondiendo a',
+    'en réponse à',
+    'en reponse a',
+    'antwort an',
+    'em resposta a',
+    'risposta a',
+    'yanıt olarak',
+    'в ответ',
+    'ردًا على',
+    'への返信'
+  ];
+  if (replyPhrases.some(phrase => text.includes(phrase))) {
     return true;
   }
+
+  // Look for reply header blocks above the main tweet body
+  const userHeader = article.querySelector('div[data-testid="User-Name"]');
+  if (userHeader) {
+    const parent = userHeader.parentElement;
+    if (parent) {
+      const parentText = (parent.innerText || '').toLowerCase();
+      if (replyPhrases.some(p => parentText.includes(p))) return true;
+    }
+  }
+
+  // Check for vertical thread connector line (replies in conversation streams)
+  if (article.querySelector('div[style*="border-left"], div[style*="border-right"], [data-testid="Tweet-User-Avatar"] + div[style*="width: 2px"]')) {
+    return true;
+  }
+
   return false;
 }
 

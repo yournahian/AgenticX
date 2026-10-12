@@ -3803,8 +3803,8 @@ async function startHomeFeedEngagerWorkflow() {
   });
 
   const backendUrl = await getBackendUrl();
-  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
-  const tabId = activeTabs && activeTabs[0]?.id;
+  const twTab = await getActiveTwitterTab();
+  const tabId = twTab?.id;
 
   const tone = state.selectedTone || 'Bullish (5-10 words)';
   const tonePrompt = state.selectedTonePrompt || null;
@@ -3898,8 +3898,8 @@ async function startNicheSearchEngagerWorkflow() {
   });
 
   const backendUrl = await getBackendUrl();
-  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
-  const tabId = activeTabs && activeTabs[0]?.id;
+  const twTab = await getActiveTwitterTab();
+  const tabId = twTab?.id;
 
   const tone = state.selectedTone || 'Bullish (5-10 words)';
   const tonePrompt = state.selectedTonePrompt || null;

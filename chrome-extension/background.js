@@ -1425,10 +1425,16 @@ async function processAgentWorkflowStep() {
     await syncAgentHud(workflow, `Navigating to Home Timeline (x.com/home)...`, 'SCANNING', 5);
 
     try {
-      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, 'https://x.com/home');
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId || options.tabId, 'https://x.com/home');
       agentWorkflowWorkingTabId = tabId;
-      await waitForTabLoad(tabId, 15000);
-      await delay(2500);
+
+      const curTab = await chrome.tabs.get(tabId).catch(() => null);
+      if (!curTab?.url || !curTab.url.includes('/home')) {
+        await waitForTabLoad(tabId, 15000);
+        await delay(2000);
+      } else {
+        await delay(1000);
+      }
 
       // Account Lock Check
       const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
@@ -1581,15 +1587,16 @@ async function processAgentWorkflowStep() {
     const localData = await chrome.storage.local.get(['backendUrl', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}));
     const backendUrl = (options.backendUrl || localData.backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
 
-    // Twitter search query with -filter:retweets to guarantee only original posts
+    // Twitter search query with -filter:retweets AND -filter:replies to guarantee 100% original root posts only
+    const cleanKw = keyword.trim();
     const searchUrl = options.feedMode === 'top'
-      ? `https://x.com/search?q=${encodeURIComponent(keyword)} -filter:retweets&src=typed_query`
-      : `https://x.com/search?q=${encodeURIComponent(keyword)} -filter:retweets&f=live`;
+      ? `https://x.com/search?q=${encodeURIComponent(cleanKw)} -filter:retweets -filter:replies&src=typed_query`
+      : `https://x.com/search?q=${encodeURIComponent(cleanKw)} -filter:retweets -filter:replies&f=live`;
 
-    await syncAgentHud(workflow, `Searching X for "${keyword}"...`, 'SCANNING', 5);
+    await syncAgentHud(workflow, `Searching X for "${cleanKw}"...`, 'SCANNING', 5);
 
     try {
-      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, searchUrl);
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId || options.tabId, searchUrl);
       agentWorkflowWorkingTabId = tabId;
       await waitForTabLoad(tabId, 15000);
       await delay(2500);
