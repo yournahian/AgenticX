@@ -1325,6 +1325,15 @@ async function typeTextHumanLike(editor, text) {
       }
 
       const char = text[i];
+      try {
+        editor.dispatchEvent(new InputEvent('beforeinput', {
+          inputType: 'insertText',
+          data: char,
+          bubbles: true,
+          cancelable: true,
+          composed: true
+        }));
+      } catch (e) {}
       const ok = document.execCommand('insertText', false, char);
       if (!ok) {
         throw new Error('execCommand insertText failed');
@@ -1353,19 +1362,31 @@ async function typeTextHumanLike(editor, text) {
   }
 
   // 4. Robust Fallback via ClipboardEvent (Paste) if editor is still empty
-  // Twitter's DraftJS handles native paste events cleanly without corrupting the backspace tree
+  // Twitter's DraftJS / Lexical handles native paste events cleanly without corrupting the backspace tree
   if (!typedOk || !(editor.innerText || editor.textContent || '').trim()) {
     console.log('[ATOMX] Fallback to ClipboardEvent paste for DraftJS editor...');
     try {
       editor.focus({ preventScroll: true });
       const dt = new DataTransfer();
       dt.setData('text/plain', text);
+      try {
+        editor.dispatchEvent(new InputEvent('beforeinput', {
+          inputType: 'insertFromPaste',
+          dataTransfer: dt,
+          bubbles: true,
+          cancelable: true,
+          composed: true
+        }));
+      } catch (e) {}
       const pasteEvt = new ClipboardEvent('paste', {
         bubbles: true,
         cancelable: true,
+        composed: true,
         clipboardData: dt
       });
       editor.dispatchEvent(pasteEvt);
+      editor.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      editor.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
       await sleep(250);
       if ((editor.innerText || editor.textContent || '').trim().length > 0) {
         typedOk = true;
@@ -1579,22 +1600,32 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   let submitBtn = getSubmitBtn();
 
-  // If button is still disabled or missing, force state update via native paste
+  // If button is still disabled or missing, wake up Twitter React state via W3C beforeinput & clipboard paste
   if (!submitBtn || submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled) {
     try {
       textarea.focus({ preventScroll: true });
       const dt = new DataTransfer();
       dt.setData('text/plain', commentText);
+      try {
+        textarea.dispatchEvent(new InputEvent('beforeinput', {
+          inputType: 'insertFromPaste',
+          dataTransfer: dt,
+          bubbles: true,
+          cancelable: true,
+          composed: true
+        }));
+      } catch (ie) {}
       const pasteEvt = new ClipboardEvent('paste', {
         bubbles: true,
         cancelable: true,
+        composed: true,
         clipboardData: dt
       });
       textarea.dispatchEvent(pasteEvt);
-      await sleep(300);
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      textarea.dispatchEvent(new Event('change', { bubbles: true }));
-      await sleep(300);
+      await sleep(250);
+      textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      await sleep(250);
     } catch (e) {
       console.warn('[ATOMX COMMENT ENGINE] Editor paste activation warning:', e);
     }
@@ -1603,20 +1634,24 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   if (!submitBtn) {
     console.warn('[ATOMX COMMENT ENGINE] Submit reply button not found!');
+    await clearAnyDraftComment();
+    await closeAnyOpenTwitterDialog();
     return { success: false, error: 'Submit button not found' };
   }
 
   // Pre-submit verification: If comment section hydrated during typing, abort submission
   if (curHandle && hasUserAlreadyCommented(curHandle)) {
     console.warn(`[ATOMX COMMENT ENGINE] User @${curHandle} comment appeared before submit. Aborting submission.`);
-    clearAnyDraftComment();
+    await clearAnyDraftComment();
+    await closeAnyOpenTwitterDialog();
     return { success: true, ignored: true, commentSkipped: true, reason: 'Already commented on this post previously.' };
   }
 
-  // Wait briefly if aria-disabled is still true to let React state catch up
+  // Wait briefly for React internal editorState to sync and enable the submit button
   let waitCount = 0;
-  while ((submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled) && waitCount < 12) {
-    await sleep(200);
+  while ((submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled) && waitCount < 15) {
+    await sleep(150);
+    submitBtn = getSubmitBtn() || submitBtn;
     waitCount++;
   }
 
@@ -1626,21 +1661,17 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     console.warn('[ATOMX COMMENT ENGINE] Textarea is completely empty before submit! Re-attempting text entry...');
     await typeTextHumanLike(textarea, commentText);
     await sleep(350);
+    submitBtn = getSubmitBtn() || submitBtn;
   }
 
-  // If submit button is still strictly disabled after retries and editor is empty, abort cleanly without sending invalid payload
+  // If submit button is still strictly disabled in React state, DO NOT force-click (prevents "content of your post is invalid" rejection)
   const isStillDisabled = submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled;
-  if (isStillDisabled && !(textarea.innerText || textarea.textContent || '').trim()) {
-    console.warn('[ATOMX COMMENT ENGINE] Submit button is disabled and editor is empty. Aborting submission to avoid invalid content error.');
+  if (isStillDisabled) {
+    console.warn('[ATOMX COMMENT ENGINE] Submit button remained disabled by Twitter React state. Discarding cleanly to avoid invalid post content error.');
     await clearAnyDraftComment();
     await closeAnyOpenTwitterDialog();
-    return { success: false, skipped: true, error: 'Editor empty and submit button disabled' };
+    return { success: false, skipped: true, error: 'Twitter submit button remained disabled in React state' };
   }
-
-  // Force-enable button attributes if React is still lagging but content is present
-  submitBtn.removeAttribute('disabled');
-  submitBtn.setAttribute('aria-disabled', 'false');
-  await sleep(150);
 
   // 6. Click Submit EXACTLY ONCE with human pointer events (No double tap, avoids duplicate error)
   await simulateHumanSubmitClick(submitBtn);
@@ -2709,21 +2740,25 @@ function suppressBeforeUnloadPrompt() {
 }
 suppressBeforeUnloadPrompt();
 
-// Helper: Finds Twitter's "Save post? -> Discard" button across testids, roles, and languages
+// Helper: Finds Twitter's "Save post? -> Discard" button across testids, roles, classes, and languages
 function findTwitterDiscardButton() {
-  const directBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"]');
+  // 1. Direct Twitter testid selectors
+  const directBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"], [data-testid="confirmationSheetConfirm"]');
   if (directBtn) return directBtn;
 
-  const candidateButtons = Array.from(document.querySelectorAll(
-    'div[role="alertdialog"] button, div[role="alertdialog"] div[role="button"], div[role="dialog"] button, div[role="dialog"] div[role="button"], div[aria-modal="true"] button, div[aria-modal="true"] div[role="button"]'
-  ));
-  for (const btn of candidateButtons) {
-    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-    if (text === 'discard' || text.includes('discard') || text === 'descartar' || text === 'abandonner') {
-      return btn;
+  // 2. Button inside confirmationSheetDialog container
+  const sheetDialog = document.querySelector('div[data-testid="confirmationSheetDialog"], div[role="alertdialog"], div[aria-modal="true"]');
+  if (sheetDialog) {
+    const sheetBtns = Array.from(sheetDialog.querySelectorAll('button, div[role="button"]'));
+    for (const btn of sheetBtns) {
+      const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+      if (text === 'discard' || text.includes('discard') || text === 'descartar' || text === 'abandonner') {
+        return btn;
+      }
     }
   }
 
+  // 3. Fallback: Search all interactive buttons for discard label
   const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
   for (const btn of allBtns) {
     const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
@@ -2739,46 +2774,66 @@ function findTwitterDiscardButton() {
 async function executeHumanDiscardClick(discardBtn) {
   if (!discardBtn) return false;
   try {
-    const strategy = await getActiveExecutionStrategy();
-    if (strategy === 'debugger') {
-      console.log('[ATOMX CDP] Clicking Discard button via Debugger API...');
-      const rect = discardBtn.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        const targetX = rect.left + rect.width / 2;
-        const targetY = rect.top + rect.height / 2;
-        const cdpRes = await chrome.runtime.sendMessage({
-          type: 'CDP_DISPATCH_MOUSE_CLICK',
-          x: targetX,
-          y: targetY
-        });
-        if (cdpRes && cdpRes.ok) {
-          await sleep(150);
-          return true;
+    const rect = discardBtn.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      const targetX = rect.left + rect.width / 2;
+      const targetY = rect.top + rect.height / 2;
+
+      // Animate virtual cursor to Discard button so user/video visibly witnesses the discard
+      if (typeof animateVirtualCursorTo === 'function') {
+        await animateVirtualCursorTo(targetX, targetY, 200).catch(() => null);
+        if (typeof triggerVirtualCursorClickEffect === 'function') {
+          triggerVirtualCursorClickEffect();
         }
       }
+
+      // Mode A: Chrome DevTools Protocol (CDP) Hardware-level Click if debugger active
+      const strategy = await getActiveExecutionStrategy();
+      if (strategy === 'debugger') {
+        try {
+          console.log('[ATOMX CDP] Clicking Discard button via Debugger API at (' + Math.round(targetX) + ', ' + Math.round(targetY) + ')...');
+          const cdpRes = await chrome.runtime.sendMessage({
+            type: 'CDP_DISPATCH_MOUSE_CLICK',
+            x: targetX,
+            y: targetY
+          });
+          if (cdpRes && cdpRes.ok) {
+            await sleep(150);
+          }
+        } catch (cdpErr) {}
+      }
+
+      // Mode B: Standard DOM Pointer/Mouse event chain (works seamlessly on Kiwi & Desktop)
+      const evOpts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: targetX, clientY: targetY };
+      discardBtn.dispatchEvent(new PointerEvent('pointerdown', evOpts));
+      discardBtn.dispatchEvent(new MouseEvent('mousedown', evOpts));
+      await sleep(40);
+      discardBtn.dispatchEvent(new PointerEvent('pointerup', evOpts));
+      discardBtn.dispatchEvent(new MouseEvent('mouseup', evOpts));
+      discardBtn.click();
+      return true;
     }
   } catch (e) {}
 
   try {
-    dispatchEnhancedHumanEvents(discardBtn);
     discardBtn.click();
     return true;
   } catch (e) {
-    discardBtn.click();
-    return true;
+    return false;
   }
 }
 
 // Helper: Discards any unsaved draft comment in editor to prevent browser navigation locks
 async function clearAnyDraftComment() {
   try {
+    // 1. If "Save post? -> Discard" confirmation sheet is already visible, click Discard first!
     const discardBtn = findTwitterDiscardButton();
     if (discardBtn) {
       await executeHumanDiscardClick(discardBtn);
       await sleep(250);
-      return;
     }
 
+    // 2. Clear any lingering text from composer editor
     const textarea = document.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
     if (textarea && (textarea.innerText || textarea.textContent || '').trim()) {
       textarea.focus({ preventScroll: true });
@@ -2789,41 +2844,47 @@ async function clearAnyDraftComment() {
       sel.addRange(range);
       document.execCommand('delete', false, null);
     }
+
+    // 3. Close open modal dialogs
     await closeAnyOpenTwitterDialog();
   } catch (e) {}
 }
 
-// Helper: Closes any open modal/compose dialog and automatically clicks "Discard" on Twitter confirmation sheet
+// Helper: Closes any open modal/compose dialog and reliably dismisses Twitter confirmation sheets
 async function closeAnyOpenTwitterDialog() {
   try {
-    // 1. If "Save post? -> Discard" confirmation sheet is already visible, click Discard immediately!
-    const existingDiscardBtn = findTwitterDiscardButton();
-    if (existingDiscardBtn) {
-      await executeHumanDiscardClick(existingDiscardBtn);
-      await sleep(250);
-      return;
-    }
-
-    // 2. Locate any open compose modal dialog or alertdialog
-    const dialog = document.querySelector('div[role="alertdialog"], div[role="dialog"], div[aria-modal="true"]');
-    if (dialog) {
-      const closeBtn = dialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"], button[data-testid="app-bar-close"]');
-      if (closeBtn) {
-        closeBtn.click();
-      } else {
-        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-      }
-    }
-
-    // 3. Continuously watch for Twitter's "Save post? -> Discard" sheet and auto-click Discard
-    for (let c = 0; c < 20; c++) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      // 1. First Priority: Check if "Save post? -> Discard" confirmation sheet is visible
       const discardBtn = findTwitterDiscardButton();
       if (discardBtn) {
+        console.log('[ATOMX] Active Discard button detected. Clicking Discard to dismiss sheet...');
         await executeHumanDiscardClick(discardBtn);
-        await sleep(150);
+        await sleep(250);
+        if (!findTwitterDiscardButton() && !document.querySelector('div[data-testid="confirmationSheetDialog"]')) {
+          break;
+        }
+      }
+
+      // 2. Second Priority: Close main compose dialog if open
+      const dialog = document.querySelector('div[role="alertdialog"], div[role="dialog"], div[aria-modal="true"]');
+      if (dialog) {
+        const closeBtn = dialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"], button[data-testid="app-bar-close"]');
+        if (closeBtn) {
+          closeBtn.click();
+        } else {
+          // If no close button, re-check discard button or dispatch Escape key
+          const dBtn = findTwitterDiscardButton();
+          if (dBtn) {
+            await executeHumanDiscardClick(dBtn);
+          } else {
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+          }
+        }
+      } else if (!findTwitterDiscardButton()) {
+        // All dialogs and confirmation sheets are completely closed!
         break;
       }
-      await sleep(75);
+      await sleep(150);
     }
   } catch (e) {}
 }
