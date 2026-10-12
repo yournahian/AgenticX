@@ -5,12 +5,26 @@
 
 console.log('ATOMX ENGAGE content script active on Twitter/X.');
 
+function isExtensionValid() {
+  try {
+    return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Observe DOM changes to inject ATOMX buttons into tweet action toolbars
 const observer = new MutationObserver(() => {
+  if (!isExtensionValid()) {
+    try { observer.disconnect(); } catch (e) {}
+    return;
+  }
   injectAtomXButtons();
 });
 
-observer.observe(document.body, { childList: true, subtree: true });
+if (isExtensionValid()) {
+  observer.observe(document.body, { childList: true, subtree: true });
+}
 
 function injectAtomXButtons() {
   // Find tweet action bars (like, retweet, reply bars)
@@ -1848,15 +1862,17 @@ function ensureFloatingHud() {
 
     updateFloatingHud(stoppedHud);
 
-    await chrome.storage.local.set({
-      atomx_active_hud: stoppedHud,
-      atomx_agent_workflow: stoppedWf,
-      atomx_workflow_paused: false,
-      atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true }
-    }).catch(() => null);
+    if (isExtensionValid()) {
+      await chrome.storage.local.set({
+        atomx_active_hud: stoppedHud,
+        atomx_agent_workflow: stoppedWf,
+        atomx_workflow_paused: false,
+        atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true }
+      }).catch(() => null);
 
-    chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
-    chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
+      chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
+      chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
+    }
   });
 
   // Minimize / Expand toggle
@@ -1873,7 +1889,9 @@ function ensureFloatingHud() {
   const handleDismissHud = () => {
     isHudDismissedLocally = true;
     hud.style.display = 'none';
-    chrome.storage.local.set({ atomx_hud_dismissed: true }).catch(() => null);
+    if (isExtensionValid()) {
+      chrome.storage.local.set({ atomx_hud_dismissed: true }).catch(() => null);
+    }
   };
 
   hud.querySelector('#hud-close-btn')?.addEventListener('click', (e) => {
@@ -2127,7 +2145,7 @@ if (typeof chrome !== 'undefined' && chrome.storage?.local) {
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
+    if (!isExtensionValid() || area !== 'local') return;
 
     if (changes.atomx_popup_open !== undefined) {
       isPopupOpenLocally = Boolean(changes.atomx_popup_open.newValue);

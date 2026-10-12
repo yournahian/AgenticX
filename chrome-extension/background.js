@@ -1232,6 +1232,12 @@ async function processAgentWorkflowStep() {
         const stopChk2 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
         if (stopChk2?.atomx_agent_workflow?.isStopped || !stopChk2?.atomx_agent_workflow?.active) return;
 
+        if (commentRes?.error) {
+          console.warn('[ATOMX BG] Notice from tab in comment scan:', commentRes.error);
+          await delay(2000);
+          continue;
+        }
+
         if (!commentRes || !commentRes.found) {
           console.log('[ATOMX BG] All comments on post processed or exhausted.');
           break; // Done with all found commenters!
@@ -2285,8 +2291,8 @@ async function waitForTabLoad(tabId, initialTimeout = 15000) {
   return false;
 }
 
-function sendMessageToTab(tabId, message, timeout = 30000) {
-  return new Promise((resolve) => {
+async function sendMessageToTab(tabId, message, timeout = 30000) {
+  const trySend = () => new Promise((resolve) => {
     const timer = setTimeout(() => resolve({ success: false, error: 'timeout' }), timeout);
     try {
       chrome.tabs.sendMessage(tabId, message, (response) => {
@@ -2302,4 +2308,39 @@ function sendMessageToTab(tabId, message, timeout = 30000) {
       resolve({ success: false, error: err.message });
     }
   });
+
+  let res = await trySend();
+  if (res && res.error && (res.error.includes('Receiving end does not exist') || res.error.includes('Could not establish connection'))) {
+    console.log(`[ATOMX BG] Content script disconnected in tab ${tabId}. Attempting auto-injection...`);
+    try {
+      if (chrome.scripting) {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['content.js']
+        }).catch(() => null);
+        await chrome.scripting.insertCSS({
+          target: { tabId },
+          files: ['content.css']
+        }).catch(() => null);
+        await delay(800);
+        res = await trySend();
+      }
+    } catch (injectErr) {
+      console.warn('[ATOMX BG] Auto-injection failed:', injectErr);
+    }
+
+    // If still disconnected, refresh tab and retry
+    if (res && res.error && (res.error.includes('Receiving end does not exist') || res.error.includes('Could not establish connection'))) {
+      console.log(`[ATOMX BG] Tab ${tabId} requires reload to reconnect content script. Reloading tab...`);
+      try {
+        await chrome.tabs.reload(tabId).catch(() => null);
+        await waitForTabLoad(tabId, 15000);
+        await delay(2500);
+        res = await trySend();
+      } catch (reloadErr) {
+        console.warn('[ATOMX BG] Tab reload recovery error:', reloadErr);
+      }
+    }
+  }
+  return res;
 }
