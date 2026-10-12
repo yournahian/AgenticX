@@ -4897,7 +4897,7 @@ async function executeHomeFeedEngagementStep(params = {}) {
   if (isWorkflowAborted) return { success: false, aborted: true };
 
   // Dismiss any lingering dialog before starting new post scan
-  closeAnyOpenTwitterDialog();
+  await closeAnyOpenTwitterDialog();
 
   const actions = params.actions || { like: true, comment: true, repost: false, follow: false };
   const verifiedHandle = (params.verifiedXHandle || '').toLowerCase().replace(/^@/, '').trim();
@@ -5040,7 +5040,7 @@ async function executeHomeFeedEngagementStep(params = {}) {
     }
 
     // Ensure dialog is closed and any floating tooltips ("Reply", "Unlike") are dismissed
-    closeAnyOpenTwitterDialog();
+    await closeAnyOpenTwitterDialog();
     dismissLingeringTwitterTooltips();
     await sleep(300);
 

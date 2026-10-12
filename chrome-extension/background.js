@@ -1528,7 +1528,7 @@ async function processAgentWorkflowStep() {
           backendUrl,
           verifiedXHandle,
           alreadyEngagedIds: stopChk?.engagedTweetIds || []
-        }, 60000);
+        }, 90000);
 
         const stopChk2 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
         if (stopChk2?.atomx_agent_workflow?.isStopped || !stopChk2?.atomx_agent_workflow?.active) return;
@@ -1538,15 +1538,36 @@ async function processAgentWorkflowStep() {
           return;
         }
 
+        // Explicit abort check (user pressed Stop)
+        if (feedRes?.aborted && stopChk2?.atomx_agent_workflow?.isStopped) {
+          await finishAgentWorkflow(workflow);
+          return;
+        }
+
+        // Timeout / content-script disconnect: do NOT hang — scroll and retry
+        if (!feedRes || feedRes?.error === 'timeout' || feedRes?.error?.includes('Receiving end')) {
+          console.warn('[ATOMX BG] feedengager: sendMessageToTab timed out or disconnected. Scrolling and retrying...');
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] ⚠️ Page not responding. Waiting to retry...`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
+          await delay(3000);
+          await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
+          await delay(2000);
+          continue;
+        }
+
+        // User skip: advance counter and move on without aborting
         if (feedRes?.skipped || (feedRes?.aborted && !stopChk2?.atomx_agent_workflow?.isStopped)) {
-          // USER CLICKED SKIP: Do not abort! Advance ignored count and continue smoothly to next post
           await chrome.storage.local.set({ atomx_skip_current: false });
           workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
           workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
           await chrome.storage.local.set({ atomx_agent_workflow: workflow });
           await syncAgentHud(
             workflow,
-            `[${workflow.successCount || 0}/${targetCount}] ⏭️ Skipped current item. Moving to next post...`,
+            `[${workflow.successCount || 0}/${targetCount}] ⏭️ Skipped. Moving to next post...`,
             'SCANNING',
             Math.round(((workflow.successCount || 0) / targetCount) * 100)
           );
@@ -1610,9 +1631,15 @@ async function processAgentWorkflowStep() {
           await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
           await delay(1500);
         } else {
-          // No fresh post in current screen, scroll down to hydrate more posts
+          // No fresh post found in current viewport — scroll to hydrate new posts
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] 🔍 No fresh post found. Scrolling for more...`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
           await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
-          await delay(1500);
+          await delay(2000);
         }
       }
 
@@ -2734,7 +2761,7 @@ async function sendMessageToTab(tabId, message, timeout = 30000) {
         if (chrome.runtime?.lastError) {
           resolve({ success: false, error: chrome.runtime.lastError.message });
         } else {
-          resolve(response || { success: true });
+          resolve(response ?? { success: true });
         }
       });
     } catch (err) {
@@ -2744,37 +2771,36 @@ async function sendMessageToTab(tabId, message, timeout = 30000) {
   });
 
   let res = await trySend();
-  if (res && res.error && (res.error.includes('Receiving end does not exist') || res.error.includes('Could not establish connection'))) {
+
+  // If content script is disconnected, try re-injection first (no page reload)
+  if (res?.error && (res.error.includes('Receiving end does not exist') || res.error.includes('Could not establish connection') || res.error.includes('no tab'))) {
     console.log(`[ATOMX BG] Content script disconnected in tab ${tabId}. Attempting auto-injection...`);
     try {
       if (chrome.scripting) {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['content.js']
-        }).catch(() => null);
-        await chrome.scripting.insertCSS({
-          target: { tabId },
-          files: ['content.css']
-        }).catch(() => null);
-        await delay(800);
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }).catch(() => null);
+        await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] }).catch(() => null);
+        await delay(1000);
         res = await trySend();
       }
     } catch (injectErr) {
       console.warn('[ATOMX BG] Auto-injection failed:', injectErr);
     }
 
-    // If still disconnected, refresh tab and retry
-    if (res && res.error && (res.error.includes('Receiving end does not exist') || res.error.includes('Could not establish connection'))) {
-      console.log(`[ATOMX BG] Tab ${tabId} requires reload to reconnect content script. Reloading tab...`);
+    // Still disconnected: navigate back to x.com/home (safer than tab reload — preserves the window)
+    if (res?.error && (res.error.includes('Receiving end does not exist') || res.error.includes('Could not establish connection'))) {
+      console.warn(`[ATOMX BG] Still disconnected after injection. Navigating tab ${tabId} back to x.com/home...`);
       try {
-        await chrome.tabs.reload(tabId).catch(() => null);
-        await waitForTabLoad(tabId, 15000);
-        await delay(2500);
+        await chrome.tabs.update(tabId, { url: 'https://x.com/home', active: true }).catch(() => null);
+        await waitForTabLoad(tabId, 12000);
+        await delay(2000);
         res = await trySend();
-      } catch (reloadErr) {
-        console.warn('[ATOMX BG] Tab reload recovery error:', reloadErr);
+      } catch (navErr) {
+        console.warn('[ATOMX BG] Tab navigation recovery error:', navErr);
       }
     }
   }
-  return res;
+
+  // Normalize null/undefined response to an error object so callers never get null
+  return res ?? { success: false, error: 'timeout' };
 }
+
