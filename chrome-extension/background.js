@@ -1226,7 +1226,8 @@ async function processAgentWorkflowStep() {
         const commentRes = await sendMessageToTab(tabId, {
           type: 'FIND_AND_LIKE_NEXT_UNPROCESSED_COMMENT',
           verifiedXHandle,
-          mainAuthor: verifiedXHandle
+          mainAuthor: verifiedXHandle,
+          ignoreEngagedHistory: true
         }, 45000);
 
         const stopChk2 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));

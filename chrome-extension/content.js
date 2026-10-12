@@ -100,6 +100,16 @@ function extractTweetData(article) {
     authorHandle = handleMatch ? handleMatch[0] : '';
   }
 
+  if (!authorHandle) {
+    const userLink = article.querySelector('div[data-testid="User-Name"] a[role="link"], div[data-testid*="UserAvatar"] a[href^="/"], a[role="link"][href^="/"]');
+    if (userLink) {
+      const href = (userLink.getAttribute('href') || '').replace(/^\//, '').split('/')[0].split('?')[0];
+      if (href && !['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(href.toLowerCase())) {
+        authorHandle = `@${href}`;
+      }
+    }
+  }
+
   let tweetUrl = '';
   let tweetId = '';
   const statusLink = article.querySelector('a[href*="/status/"]');
@@ -1026,12 +1036,13 @@ function isPostAlreadyLiked(targetArticle) {
   if (targetArticle.querySelector('button[data-testid="unlike"], div[data-testid="unlike"], [data-testid="unlike"]')) {
     return true;
   }
-  const buttons = Array.from(targetArticle.querySelectorAll('button, div[role="button"]'));
-  return buttons.some(b => {
-    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-    const testId = (b.getAttribute('data-testid') || '').toLowerCase();
-    return testId.includes('unlike') || aria.includes('unlike') || aria.startsWith('liked');
-  });
+  const likeBtn = targetArticle.querySelector('button[data-testid="like"], div[data-testid="like"]');
+  if (likeBtn) {
+    const aria = (likeBtn.getAttribute('aria-label') || '').toLowerCase();
+    if (aria.includes('unlike') || aria.endsWith('liked') || aria === 'liked') return true;
+    return false; // Confirmed unliked
+  }
+  return false;
 }
 
 /**
@@ -1304,25 +1315,27 @@ function isTargetRestrictedOrCommentsLocked(targetArticle = null) {
   try {
     const pageText = (document.body ? document.body.innerText : '') || '';
 
-    // 1. Check if profile account is locked/protected
+    // 1. Check if profile account is locked/protected (strictly scoped to user profile header/name)
     const isProtected = pageText.includes('These posts are protected') ||
                         pageText.includes('Only confirmed followers have access') ||
-                        !!document.querySelector('svg[data-testid="icon-lock"], [aria-label*="Protected account" i], [aria-label*="Private account" i]');
+                        !!document.querySelector('div[data-testid="UserName"] svg[data-testid="icon-lock"], div[data-testid="UserProfileHeader_Items"] svg[data-testid="icon-lock"], div[data-testid="UserProfileHeader_Items"] [aria-label*="Protected" i]');
     if (isProtected) {
       return { restricted: true, reason: 'Profile account is locked/protected' };
     }
 
-    // 2. Check inline composer restriction box
-    const inlineBox = document.querySelector('div[data-testid="inline_reply"]');
-    const inlineText = (inlineBox?.innerText || '').toLowerCase();
-    if (
-      inlineText.includes('who can reply') ||
-      inlineText.includes('replies to this post are disabled') ||
-      inlineText.includes('replies are restricted') ||
-      inlineText.includes('accounts the author mentioned') ||
-      inlineText.includes('people the author follows')
-    ) {
-      return { restricted: true, reason: 'Comments/replies are restricted on this post' };
+    // 2. Check inline composer restriction box (only on tweet status pages)
+    if (window.location.pathname.includes('/status/')) {
+      const inlineBox = document.querySelector('div[data-testid="inline_reply"]');
+      const inlineText = (inlineBox?.innerText || '').toLowerCase();
+      if (
+        inlineText.includes('who can reply') ||
+        inlineText.includes('replies to this post are disabled') ||
+        inlineText.includes('replies are restricted') ||
+        inlineText.includes('accounts the author mentioned') ||
+        inlineText.includes('people the author follows')
+      ) {
+        return { restricted: true, reason: 'Comments/replies are restricted on this post' };
+      }
     }
 
     // 3. Check reply button on target article
@@ -3299,6 +3312,20 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
   };
 }
 
+function isCommentAlreadyLiked(art) {
+  if (!art) return false;
+  if (art.querySelector('button[data-testid="unlike"], div[data-testid="unlike"], [data-testid="unlike"]')) {
+    return true;
+  }
+  const likeBtn = art.querySelector('button[data-testid="like"], div[data-testid="like"]');
+  if (likeBtn) {
+    const aria = (likeBtn.getAttribute('aria-label') || '').toLowerCase();
+    if (aria.includes('unlike') || aria.endsWith('liked') || aria === 'liked') return true;
+    return false; // Confirmed unliked
+  }
+  return false;
+}
+
 /**
  * Agent 1: Audience Builder In-Thread Comment Scanner & Marker
  * Inspects comments on the current tweet status post directly.
@@ -3351,17 +3378,23 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
         continue;
       }
 
+      // Check if this article has a like/unlike button (confirming it is an actionable comment)
+      const hasActionButtons = art.querySelector('button[data-testid="like"], button[data-testid="unlike"], div[data-testid="like"], div[data-testid="unlike"]');
+      if (!hasActionButtons) continue;
+
       // CRITICAL: Check if this comment is ALREADY liked (already processed & tracked!)
-      const isAlreadyLiked = !!art.querySelector('button[data-testid="unlike"]');
+      const isAlreadyLiked = isCommentAlreadyLiked(art);
       if (isAlreadyLiked) {
         // Already processed in this or previous session! Skip!
         continue;
       }
 
-      // 24h deduplication check
-      const lastTime = persistedHistory[cleanHandle];
-      if (lastTime && (Date.now() - lastTime < 24 * 3600 * 1000)) {
-        continue;
+      // 24h deduplication check (only when not explicitly told to ignore history)
+      if (!options.ignoreEngagedHistory) {
+        const lastTime = persistedHistory[cleanHandle];
+        if (lastTime && (Date.now() - lastTime < 24 * 3600 * 1000)) {
+          continue;
+        }
       }
 
       if (seenHandlesInThisScan.has(cleanHandle)) continue;
@@ -3717,36 +3750,45 @@ async function engageAndFollowProfile(options = {}) {
     // Step 3: Wait for timeline posts to hydrate with retry scrolling
     let allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     if (allArticles.length === 0) {
-      for (let retries = 0; retries < 4 && allArticles.length === 0; retries++) {
+      for (let retries = 0; retries < 6 && allArticles.length === 0; retries++) {
         if (isWorkflowItemSkipped || isWorkflowAborted) break;
-        await smoothScrollAndHydrate(400, 1000);
+        await sleep(500);
+        await humanSmoothScroll(350, { settlePause: 350 });
         allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
       }
+    }
+
+    if (allArticles.length === 0) {
+      console.log(`[ATOMX] No tweets found on profile timeline for @${targetHandle}.`);
+      return { success: true, skipped: true, ignored: true, reason: 'No tweets found on profile' };
     }
 
     if (isWorkflowItemSkipped || isWorkflowAborted) {
       return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
     }
 
-    // Global Rule for Increase Sorsa Score & Audience Builder:
-    // Filter out pinned posts and any posts that are already liked!
+    // Filter out pinned posts and any posts that are already liked
     const validRecentArticles = allArticles.filter(art => {
       const socialCtx = art.querySelector('div[data-testid="socialContext"]')?.innerText?.toLowerCase() || '';
       const isPinned = socialCtx.includes('pinned') || socialCtx.includes('pin');
       return !isPinned && !isPostAlreadyLiked(art);
     });
 
-    const candidatePosts = validRecentArticles.length > 0
-      ? validRecentArticles
-      : allArticles.filter(art => !isPostAlreadyLiked(art));
-
-    // If all posts on this target profile are already liked, auto-skip the profile immediately!
+    let candidatePosts = validRecentArticles;
     if (candidatePosts.length === 0) {
-      console.log(`[ATOMX] Recent posts for @${targetHandle} are already liked. Auto-skipping profile as per global rule.`);
-      return { success: true, skipped: true, ignored: true, reason: 'Recent posts already liked' };
+      // If no unliked posts found:
+      // If commenting or reposting is enabled, we can still comment/repost on recent non-pinned posts!
+      if (replyPosts || repostPosts) {
+        candidatePosts = allArticles.filter(art => {
+          const socialCtx = art.querySelector('div[data-testid="socialContext"]')?.innerText?.toLowerCase() || '';
+          return !socialCtx.includes('pinned') && !socialCtx.includes('pin');
+        });
+        if (candidatePosts.length === 0) candidatePosts = allArticles;
+      } else {
+        console.log(`[ATOMX] Recent posts for @${targetHandle} are already liked. Auto-skipping profile as per global rule.`);
+        return { success: true, skipped: true, ignored: true, reason: 'Recent posts already liked' };
+      }
     }
-
-    const targetRecentPost = candidatePosts[0];
 
     // Determine how many posts to engage
     let numPostsToEngage = 1;
@@ -3755,6 +3797,8 @@ async function engageAndFollowProfile(options = {}) {
     } else {
       numPostsToEngage = Math.max(1, Number(postsCountSetting) || 1);
     }
+    const postsSlice = candidatePosts.slice(0, numPostsToEngage);
+
     // Step 4: Engage each post in postsSlice with all selected actions (Like, Repost, Comment)
     // Runs sequentially down the timeline without needing to scroll back up!
     for (let pIdx = 0; pIdx < postsSlice.length; pIdx++) {
