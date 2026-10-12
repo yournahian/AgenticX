@@ -1285,9 +1285,34 @@ async function typeTextHumanLike(editor, text) {
 
   let typedOk = false;
 
+  // Mode B: If Debugger Mode is active, dispatch native hardware text insertion via CDP (Input.insertText)
+  const strategy = await getActiveExecutionStrategy();
+  if (strategy === 'debugger') {
+    try {
+      console.log('[ATOMX CDP] Inserting text via Chrome Debugger API (Input.insertText)...');
+      editor.focus({ preventScroll: true });
+      const cdpRes = await chrome.runtime.sendMessage({
+        type: 'CDP_INSERT_TEXT',
+        text: text
+      });
+      if (cdpRes && cdpRes.ok) {
+        await sleep(250);
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        editor.dispatchEvent(new Event('change', { bubbles: true }));
+        if ((editor.innerText || editor.textContent || '').trim().length > 0) {
+          typedOk = true;
+          console.log('[ATOMX CDP] Native text insertion succeeded via Debugger API!');
+        }
+      }
+    } catch (cdpErr) {
+      console.warn('[ATOMX CDP] CDP insertText warning, falling back to human typing:', cdpErr);
+    }
+  }
+
   // 3. Type character-by-character using realistic human cadence (slow & natural)
   // execCommand natively maintains DraftJS's internal ContentState, block offset keys, and backspace handling.
-  try {
+  if (!typedOk) {
+    try {
     for (let i = 0; i < text.length; i++) {
       if (isWorkflowAborted || isWorkflowItemSkipped) {
         console.log('[ATOMX] Typing aborted or skipped by user.');
@@ -1324,6 +1349,7 @@ async function typeTextHumanLike(editor, text) {
     }
   } catch (err) {
     console.warn('[ATOMX] Letter typing warning, using ClipboardEvent paste fallback:', err);
+  }
   }
 
   // 4. Robust Fallback via ClipboardEvent (Paste) if editor is still empty
@@ -1594,7 +1620,24 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     waitCount++;
   }
 
-  // Force-enable button attributes if React is still lagging
+  // Pre-submit check: Ensure textarea actually contains content before attempting submit
+  const currentEditorContent = (textarea.innerText || textarea.textContent || '').trim();
+  if (!currentEditorContent) {
+    console.warn('[ATOMX COMMENT ENGINE] Textarea is completely empty before submit! Re-attempting text entry...');
+    await typeTextHumanLike(textarea, commentText);
+    await sleep(350);
+  }
+
+  // If submit button is still strictly disabled after retries and editor is empty, abort cleanly without sending invalid payload
+  const isStillDisabled = submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled;
+  if (isStillDisabled && !(textarea.innerText || textarea.textContent || '').trim()) {
+    console.warn('[ATOMX COMMENT ENGINE] Submit button is disabled and editor is empty. Aborting submission to avoid invalid content error.');
+    await clearAnyDraftComment();
+    await closeAnyOpenTwitterDialog();
+    return { success: false, skipped: true, error: 'Editor empty and submit button disabled' };
+  }
+
+  // Force-enable button attributes if React is still lagging but content is present
   submitBtn.removeAttribute('disabled');
   submitBtn.setAttribute('aria-disabled', 'false');
   await sleep(150);
@@ -1603,7 +1646,17 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   await simulateHumanSubmitClick(submitBtn);
 
   console.log('[ATOMX COMMENT ENGINE] Clicked Submit button once successfully!');
-  await sleep(1500);
+  await sleep(1200);
+
+  // Check immediately if Twitter responded with a content rejection error banner or toast
+  const postErr = checkTwitterPostError();
+  if (postErr) {
+    console.warn('[ATOMX COMMENT ENGINE] Twitter rejected post content:', postErr);
+    // Immediately clear/discard draft sheet so it does not block subsequent actions
+    await clearAnyDraftComment();
+    await closeAnyOpenTwitterDialog();
+    return { success: false, skipped: true, postInvalid: true, error: `Twitter post rejected: ${postErr}` };
+  }
 
   // Check immediately if Twitter responded with a rate limit error toast
   if (checkTwitterRateLimit()) {
@@ -1611,17 +1664,40 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     return { success: false, aborted: true, rateLimited: true, error: 'Twitter Rate Limit detected after posting' };
   }
 
-  await sleep(1000);
+  await sleep(800);
 
   // Ensure any dialog is completely dismissed so the next post can be scrolled and engaged
   for (let d = 0; d < 5; d++) {
-    const remainingDialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
+    const remainingDialog = document.querySelector('div[role="alertdialog"], div[role="dialog"], div[aria-modal="true"]');
     if (!remainingDialog) break;
-    closeAnyOpenTwitterDialog();
+    await closeAnyOpenTwitterDialog();
     await sleep(350);
   }
 
   return { success: true };
+}
+
+// Helper: Detects Twitter post validation errors (The content of your post is invalid, duplicates, etc.)
+function checkTwitterPostError() {
+  const elements = Array.from(document.querySelectorAll(
+    'div[data-testid="toast"], div[role="alert"], div[role="alertdialog"], div[data-testid="error-detail"], [data-testid="toast"] span, [role="alert"] span, [aria-live="assertive"], [aria-live="polite"]'
+  ));
+  for (const el of elements) {
+    const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+    if (
+      txt.includes('content of your post is invalid') ||
+      txt.includes('post is invalid') ||
+      txt.includes('whoops! you already said that') ||
+      txt.includes('you already sent that') ||
+      txt.includes('something went wrong') ||
+      txt.includes('cannot send') ||
+      txt.includes('tweet is unavailable') ||
+      txt.includes('post was deleted')
+    ) {
+      return txt;
+    }
+  }
+  return null;
 }
 
 // =========================================================================
@@ -2638,22 +2714,68 @@ function findTwitterDiscardButton() {
   const directBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"]');
   if (directBtn) return directBtn;
 
-  const candidateButtons = Array.from(document.querySelectorAll('div[role="dialog"] button, div[aria-modal="true"] button, div[role="dialog"] div[role="button"], div[aria-modal="true"] div[role="button"]'));
+  const candidateButtons = Array.from(document.querySelectorAll(
+    'div[role="alertdialog"] button, div[role="alertdialog"] div[role="button"], div[role="dialog"] button, div[role="dialog"] div[role="button"], div[aria-modal="true"] button, div[aria-modal="true"] div[role="button"]'
+  ));
   for (const btn of candidateButtons) {
     const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-    if (text === 'discard' || text === 'descartar' || text === 'abandonner') {
+    if (text === 'discard' || text.includes('discard') || text === 'descartar' || text === 'abandonner') {
       return btn;
     }
   }
+
+  const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+  for (const btn of allBtns) {
+    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+    if (text === 'discard') {
+      return btn;
+    }
+  }
+
   return null;
 }
 
+// Executes click on Discard button via CDP Debugger API (hardware click) or enhanced pointer events
+async function executeHumanDiscardClick(discardBtn) {
+  if (!discardBtn) return false;
+  try {
+    const strategy = await getActiveExecutionStrategy();
+    if (strategy === 'debugger') {
+      console.log('[ATOMX CDP] Clicking Discard button via Debugger API...');
+      const rect = discardBtn.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const targetX = rect.left + rect.width / 2;
+        const targetY = rect.top + rect.height / 2;
+        const cdpRes = await chrome.runtime.sendMessage({
+          type: 'CDP_DISPATCH_MOUSE_CLICK',
+          x: targetX,
+          y: targetY
+        });
+        if (cdpRes && cdpRes.ok) {
+          await sleep(150);
+          return true;
+        }
+      }
+    }
+  } catch (e) {}
+
+  try {
+    dispatchEnhancedHumanEvents(discardBtn);
+    discardBtn.click();
+    return true;
+  } catch (e) {
+    discardBtn.click();
+    return true;
+  }
+}
+
 // Helper: Discards any unsaved draft comment in editor to prevent browser navigation locks
-function clearAnyDraftComment() {
+async function clearAnyDraftComment() {
   try {
     const discardBtn = findTwitterDiscardButton();
     if (discardBtn) {
-      discardBtn.click();
+      await executeHumanDiscardClick(discardBtn);
+      await sleep(250);
       return;
     }
 
@@ -2667,22 +2789,23 @@ function clearAnyDraftComment() {
       sel.addRange(range);
       document.execCommand('delete', false, null);
     }
-    closeAnyOpenTwitterDialog();
+    await closeAnyOpenTwitterDialog();
   } catch (e) {}
 }
 
 // Helper: Closes any open modal/compose dialog and automatically clicks "Discard" on Twitter confirmation sheet
-function closeAnyOpenTwitterDialog() {
+async function closeAnyOpenTwitterDialog() {
   try {
     // 1. If "Save post? -> Discard" confirmation sheet is already visible, click Discard immediately!
     const existingDiscardBtn = findTwitterDiscardButton();
     if (existingDiscardBtn) {
-      existingDiscardBtn.click();
+      await executeHumanDiscardClick(existingDiscardBtn);
+      await sleep(250);
       return;
     }
 
-    // 2. Locate any open compose modal dialog
-    const dialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
+    // 2. Locate any open compose modal dialog or alertdialog
+    const dialog = document.querySelector('div[role="alertdialog"], div[role="dialog"], div[aria-modal="true"]');
     if (dialog) {
       const closeBtn = dialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"], button[data-testid="app-bar-close"]');
       if (closeBtn) {
@@ -2693,17 +2816,15 @@ function closeAnyOpenTwitterDialog() {
     }
 
     // 3. Continuously watch for Twitter's "Save post? -> Discard" sheet and auto-click Discard
-    let discardChecks = 0;
-    const discardPoll = setInterval(() => {
-      discardChecks++;
+    for (let c = 0; c < 20; c++) {
       const discardBtn = findTwitterDiscardButton();
       if (discardBtn) {
-        discardBtn.click();
-        clearInterval(discardPoll);
-      } else if (discardChecks >= 25) { // 25 * 60ms = 1.5s
-        clearInterval(discardPoll);
+        await executeHumanDiscardClick(discardBtn);
+        await sleep(150);
+        break;
       }
-    }, 60);
+      await sleep(75);
+    }
   } catch (e) {}
 }
 

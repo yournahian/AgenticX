@@ -120,6 +120,21 @@ async function dispatchCdpMouseClick(tabId, x, y) {
   }
 }
 
+async function dispatchCdpInsertText(tabId, text) {
+  const attached = await attachDebuggerSafely(tabId);
+  if (!attached) {
+    return { ok: false, fallback: true, error: 'Cannot attach debugger to tab' };
+  }
+
+  try {
+    await sendCdpCommand(tabId, 'Input.insertText', { text });
+    return { ok: true };
+  } catch (err) {
+    console.warn('[ATOMX CDP] Input.insertText error:', err);
+    return { ok: false, fallback: true, error: err?.message };
+  }
+}
+
 function safeRemoveTab(tabId) {
   // Safety rule: never close active browser tabs or windows automatically
   return;
@@ -299,6 +314,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     dispatchCdpMouseClick(tabId, request.x, request.y).then(res => {
+      sendResponse(res);
+    }).catch(err => {
+      sendResponse({ ok: false, fallback: true, error: err?.message });
+    });
+    return true;
+  }
+
+  if (request.type === 'CDP_INSERT_TEXT') {
+    const tabId = request.tabId || sender?.tab?.id;
+    if (!tabId) {
+      sendResponse({ ok: false, fallback: true, error: 'No tab ID available for CDP text insert' });
+      return true;
+    }
+    dispatchCdpInsertText(tabId, request.text || '').then(res => {
       sendResponse(res);
     }).catch(err => {
       sendResponse({ ok: false, fallback: true, error: err?.message });
