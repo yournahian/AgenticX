@@ -1162,74 +1162,180 @@ async function processAgentWorkflowStep() {
 
   const { agentId, items = [], options = {}, currentIndex = 0, total = 0, successCount = 0, ignoredCount = 0 } = workflow;
 
-  // Commenter Reciprocator initial scan phase (runs 100% in background if items not pre-collected)
-  if (agentId === 'reciprocator' && (!items || items.length === 0)) {
+  // =========================================================================
+  // AGENT 13: COMMENTER RECIPROCATOR IN-THREAD SEQUENTIAL WORKFLOW ENGINE
+  // 1. Opens post in reusable tab & checks account lock
+  // 2. Smoothly scrolls into comments, finds first unliked comment
+  // 3. Likes comment with virtual cursor, clicks avatar/handle to visit profile in SAME tab
+  // 4. Follows (if enabled), scrolls to posts, likes posts (per Posts per Profile), scrolls back up to non-pinned post, comments/reposts
+  // 5. Returns via browser back (chrome.tabs.goBack) to post, smoothly scrolls to next comment, repeats!
+  // =========================================================================
+  if (agentId === 'reciprocator') {
     if (!options.postUrl) {
       await finishAgentWorkflow(workflow);
       return;
     }
-    await syncAgentHud(workflow, `Opening post to scan commenters & auto-like unliked comments...`, 'COLLECTING', 10);
+
+    const postUrl = options.postUrl;
+    const targetCount = Number(options.maxCount || options.targetCount) || 10;
+    const isAllFound = targetCount >= 999;
+    const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
+
+    await syncAgentHud(workflow, `Opening post to reciprocate with commenters...`, 'SCANNING', 10);
     try {
-      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, options.postUrl);
+      const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, postUrl);
       agentWorkflowWorkingTabId = tabId;
       await waitForTabLoad(tabId, 15000);
-      await delay(3000);
+      await delay(2500);
 
       // Instant Account Lock Check
-      const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
       const lockCheck = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
       if (!lockCheck.ok) return;
 
-      const scanRes = await sendMessageToTab(tabId, {
-        type: 'COLLECT_RECIPROCATOR_COMMENTERS',
-        targetCount: options.maxCount || 10,
-        maxScrolls: Math.max(30, (options.maxCount || 10) * 4),
-        commentLikeDelayMs: options.commentLikeDelayMs || 4000
-      }, 90000);
+      const targetLimit = isAllFound ? Infinity : targetCount;
 
-      const rawCommenters = Array.isArray(scanRes?.commenters) ? scanRes.commenters : [];
-      const mainAuthor = (scanRes?.mainAuthor || '').toLowerCase();
+      while (((workflow.successCount || 0) + (workflow.ignoredCount || 0)) < targetLimit) {
+        const stopChk = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_skip_current']).catch(() => ({}));
+        if (stopChk?.atomx_agent_workflow?.isStopped || !stopChk?.atomx_agent_workflow?.active) return;
 
-      let persistedReciprocated = [];
-      try {
-        const storedRecip = await chrome.storage.local.get(['atomx_reciprocated_commenters']).catch(() => ({}));
-        if (Array.isArray(storedRecip?.atomx_reciprocated_commenters)) persistedReciprocated = storedRecip.atomx_reciprocated_commenters;
-      } catch (e) {}
-      const reciprocatedSet = new Set(persistedReciprocated.map(h => h.toLowerCase()));
+        if (stopChk?.atomx_skip_current) {
+          await chrome.storage.local.set({ atomx_skip_current: false });
+          workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+          workflow.currentIndex = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+          await syncAgentHud(
+            workflow,
+            `[${workflow.currentIndex}/${isAllFound ? 'All' : targetCount}] ⏭️ Skipped comment. Finding next...`,
+            'SCANNING',
+            isAllFound ? 50 : Math.round((workflow.currentIndex / targetCount) * 100)
+          );
+          continue;
+        }
 
-      const uniqueCommenters = [];
-      const seenHandles = new Set();
-      const maxCount = options.maxCount || 10;
+        const curIdx = (workflow.successCount || 0) + (workflow.ignoredCount || 0) + 1;
+        await syncAgentHud(
+          workflow,
+          `[${curIdx}/${isAllFound ? 'All' : targetCount}] Finding next unliked comment on your post...`,
+          'SCANNING',
+          isAllFound ? 50 : Math.round(((curIdx - 1) / targetCount) * 100)
+        );
 
-      for (const raw of rawCommenters) {
-        const clean = (raw || '').toLowerCase().trim().replace(/^@/, '');
-        if (!clean || clean === mainAuthor || seenHandles.has(clean) || reciprocatedSet.has(clean)) continue;
-        seenHandles.add(clean);
-        uniqueCommenters.push(clean);
-        if (uniqueCommenters.length >= maxCount) break;
+        const commentRes = await sendMessageToTab(tabId, {
+          type: 'FIND_AND_LIKE_NEXT_UNPROCESSED_COMMENT',
+          verifiedXHandle,
+          mainAuthor: verifiedXHandle
+        }, 45000);
+
+        const stopChk2 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+        if (stopChk2?.atomx_agent_workflow?.isStopped || !stopChk2?.atomx_agent_workflow?.active) return;
+
+        if (!commentRes || !commentRes.found) {
+          console.log('[ATOMX BG] All comments on post processed or exhausted.');
+          break; // Done with all found commenters!
+        }
+
+        const cleanHandle = commentRes.cleanHandle;
+        const profileUrl = `https://x.com/${cleanHandle}`;
+
+        await syncAgentHud(
+          workflow,
+          `[${curIdx}/${isAllFound ? 'All' : targetCount}] Liked comment by @${cleanHandle}! Visiting profile in same tab...`,
+          'ENGAGING',
+          isAllFound ? 60 : Math.round(((curIdx - 1) / targetCount) * 100)
+        );
+
+        // Visit commenter profile in the SAME tab!
+        await getOrCreateReusedTab(tabId, profileUrl);
+        await waitForTabLoad(tabId, 15000);
+        await delay(2500);
+
+        const lockCheck2 = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
+        if (!lockCheck2.ok) return;
+
+        // Engage on commenter profile with user-selected actions:
+        // follow, like, comment, repost, and postsCount!
+        const engageRes = await sendMessageToTab(tabId, {
+          type: 'AUDIENCE_ENGAGE_AND_FOLLOW',
+          handle: cleanHandle,
+          likePosts: options.likePosts !== false && options.likeRecent !== false,
+          replyPosts: options.replyPosts !== false && options.commentRecent !== false,
+          repostPosts: options.repostPosts === true,
+          followPosts: options.followPosts === true || options.followUser === true,
+          postsCount: options.postsCount || options.postsPerProfile || 'random',
+          style: options.style || 'Bullish (5-10 words)',
+          stylePrompt: options.stylePrompt || null,
+          backendUrl: options.backendUrl || DEFAULT_BACKEND_URL,
+          verifiedXHandle
+        }, 65000);
+
+        const stopChk3 = await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({}));
+        if (stopChk3?.atomx_agent_workflow?.isStopped || !stopChk3?.atomx_agent_workflow?.active) return;
+
+        const isIgnored = engageRes?.ignored || engageRes?.skipped || engageRes?.alreadyDone;
+        const isSuccess = Boolean(engageRes?.success && !isIgnored);
+
+        if (isSuccess) {
+          workflow.successCount = (workflow.successCount || 0) + 1;
+          chrome.storage.local.get(['credits'], (c) => {
+            const curCredits = c?.credits || 0;
+            if (curCredits > 0) chrome.storage.local.set({ credits: curCredits - 1 });
+          });
+        } else {
+          const curWf = (await chrome.storage.local.get(['atomx_agent_workflow']).catch(() => ({})))?.atomx_agent_workflow;
+          workflow.ignoredCount = Math.max((workflow.ignoredCount || 0) + 1, curWf?.ignoredCount || 0);
+        }
+
+        // Clear skip flag
+        await chrome.storage.local.set({ atomx_skip_current: false });
+
+        // Record history so this commenter is tracked
+        chrome.storage.local.get(['atomx_reciprocated_commenters', 'atomx_audience_engaged_history'], (r) => {
+          const recip = Array.isArray(r?.atomx_reciprocated_commenters) ? r.atomx_reciprocated_commenters : [];
+          if (!recip.includes(cleanHandle)) recip.push(cleanHandle);
+          const hist = (r?.atomx_audience_engaged_history && typeof r.atomx_audience_engaged_history === 'object') ? r.atomx_audience_engaged_history : {};
+          hist[cleanHandle.toLowerCase()] = Date.now();
+          chrome.storage.local.set({ atomx_reciprocated_commenters: recip, atomx_audience_engaged_history: hist }).catch(() => null);
+        });
+
+        const currentTotalDone = (workflow.successCount || 0) + (workflow.ignoredCount || 0);
+        workflow.currentIndex = currentTotalDone;
+        workflow.total = isAllFound ? currentTotalDone + 1 : targetCount;
+        await chrome.storage.local.set({ atomx_agent_workflow: workflow });
+
+        await syncAgentHud(
+          workflow,
+          isIgnored
+            ? `[${workflow.successCount}/${isAllFound ? currentTotalDone : targetCount}] ⏭️ Skipped @${cleanHandle}! Returning back to post in same tab...`
+            : `[${workflow.successCount}/${isAllFound ? currentTotalDone : targetCount}] ✓ Reciprocated @${cleanHandle}! Returning back to post in same tab...`,
+          'ENGAGING',
+          isAllFound ? 70 : Math.round((currentTotalDone / targetCount) * 100)
+        );
+
+        // Return back to post in the EXACT SAME tab!
+        await chrome.tabs.goBack(tabId).catch(() => null);
+        await delay(1500);
+        try {
+          const curTab = await chrome.tabs.get(tabId);
+          if (!curTab?.url || !curTab.url.includes('/status/')) {
+            await getOrCreateReusedTab(tabId, postUrl);
+            await waitForTabLoad(tabId, 12000);
+          }
+        } catch (e) {}
+        await delay(2500);
+
+        if (!isIgnored) {
+          const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+          const profileWait = Number(safetyRes?.atomx_safety_settings?.profileWait) || 15;
+          const delaySec = Math.max(5, profileWait + Math.floor(Math.random() * 5 - 2));
+          await scheduleAgentPacingCountdown(delaySec, workflow, workflow.successCount, isAllFound ? currentTotalDone : targetCount, `Next commenter from your post`);
+        }
       }
 
-      if (uniqueCommenters.length === 0) {
-        workflow.active = false;
-        await syncAgentHud(workflow, `No new unliked commenters found on post.`, 'DONE', 100);
-        await finishAgentWorkflow(workflow);
-        return;
-      }
-
-      const newItems = uniqueCommenters.map(h => ({ cleanHandle: h, handle: `@${h}` }));
-      const updatedWorkflow = {
-        ...workflow,
-        items: newItems,
-        total: newItems.length,
-        currentIndex: 0,
-        statusText: `Liked comments & collected ${newItems.length} profiles. Beginning reciprocation...`
-      };
-      await chrome.storage.local.set({ atomx_agent_workflow: updatedWorkflow });
-      await syncAgentHud(updatedWorkflow, updatedWorkflow.statusText, 'ENGAGING', 15);
-      setTimeout(() => processAgentWorkflowStep(), 1000);
+      workflow.active = false;
+      await syncAgentHud(workflow, `✓ Reciprocation complete! Engaged ${workflow.successCount || 0} commenters.`, 'DONE', 100);
+      await finishAgentWorkflow(workflow);
       return;
-    } catch (auditErr) {
-      console.warn('[ATOMX BG] Error scanning commenters:', auditErr);
+    } catch (err) {
+      console.warn('[ATOMX BG] Error in reciprocator workflow:', err);
       agentWorkflowWorkingTabId = null;
       await finishAgentWorkflow(workflow);
       return;

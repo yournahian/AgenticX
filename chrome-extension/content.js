@@ -422,14 +422,14 @@ async function humanSmoothScroll(distance, options = {}) {
   const absDist = Math.abs(distance);
   if (absDist < 6) return;
 
-  const flickBase = options.flickSize || (160 + Math.random() * 80);
+  const flickBase = options.flickSize || (110 + Math.random() * 45);
   const numFlicks = Math.max(1, Math.round(absDist / flickBase));
   const flickDist = absDist / numFlicks;
 
   for (let f = 0; f < numFlicks; f++) {
     if (isWorkflowAborted || isWorkflowItemSkipped) break;
 
-    const steps = 9 + Math.floor(Math.random() * 4); // 9-12 smooth micro-steps per stroke
+    const steps = 14 + Math.floor(Math.random() * 5); // 14-18 smooth micro-steps per stroke
     const thisFlickTarget = (f === numFlicks - 1) ? (absDist - f * flickDist) : flickDist;
 
     let traveled = 0;
@@ -445,15 +445,15 @@ async function humanSmoothScroll(distance, options = {}) {
       if (delta !== 0) {
         window.scrollBy(0, isUp ? -delta : delta);
       }
-      await sleep(16 + Math.floor(Math.random() * 12));
+      await sleep(22 + Math.floor(Math.random() * 14)); // 22-36ms per micro-step
     }
 
     if (f < numFlicks - 1) {
-      await sleep(70 + Math.floor(Math.random() * 90)); // Human pause between strokes
+      await sleep(180 + Math.floor(Math.random() * 140)); // Leisurely human pause between strokes
     }
   }
 
-  await sleep(options.settlePause || 180);
+  await sleep(options.settlePause || 250);
 }
 
 /**
@@ -752,8 +752,8 @@ async function animateVirtualCursorTo(targetX, targetY, durationMs = 220) {
     return;
   }
 
-  const animTime = Math.min(360, Math.max(140, Math.round(durationMs * (dist / 350))));
-  const steps = Math.min(20, Math.max(8, Math.round(animTime / 18)));
+  const animTime = Math.min(520, Math.max(260, Math.round(durationMs * (dist / 300))));
+  const steps = Math.min(26, Math.max(12, Math.round(animTime / 22)));
   const stepDelay = animTime / steps;
 
   // Organic curved Bezier control point with perpendicular offset
@@ -779,7 +779,7 @@ async function animateVirtualCursorTo(targetX, targetY, durationMs = 220) {
   currentCursorPos = { x: targetX, y: targetY };
   isCursorAnimating = false;
 
-  await sleep(40 + Math.random() * 40);
+  await sleep(60 + Math.random() * 50);
 }
 
 function triggerVirtualCursorClickEffect() {
@@ -963,16 +963,16 @@ async function performHumanClick(targetElement, options = {}) {
   ensureVirtualCursorActive();
 
   // 1. Visibly animate cursor from current position to target element FIRST
-  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 320);
+  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 400);
 
-  // 2. Human dwell pause (280-380ms) so user visibly sees the cursor resting ON the button before clicking
-  await sleep(options.hoverDwell || (280 + Math.random() * 80));
+  // 2. Human dwell pause (380-520ms) so user visibly sees the cursor resting ON the button before clicking
+  await sleep(options.hoverDwell || (380 + Math.random() * 140));
 
   // 3. Trigger click ripple effect and cursor press animation
   triggerVirtualCursorClickEffect();
 
-  // Press dwell: natural human finger hold duration before release
-  await sleep(90 + Math.random() * 30);
+  // Press dwell: natural human finger hold duration before release (130-180ms)
+  await sleep(130 + Math.random() * 50);
 
   // 4. Visual element pulse (button reacts to cursor click)
   triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
@@ -980,7 +980,7 @@ async function performHumanClick(targetElement, options = {}) {
   // 5. Dispatch single human event sequence (single click only)
   dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
 
-  await sleep(options.postPause || 280);
+  await sleep(options.postPause || 350);
   return true;
 }
 

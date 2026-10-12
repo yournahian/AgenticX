@@ -913,7 +913,7 @@ function updateAgentWorkflowProgressUI(wf) {
     },
     reciprocator: {
       card: 'reciprocatorProgressCard', badge: 'reciprocatorStateBadge', ind: 'reciprocatorQueueIndicator',
-      done: 'reciprocatorDoneCount', col: 'reciprocatorCollectedCount', skip: 'reciprocatorSkippedCount',
+      done: 'reciprocatorCountDone', col: 'reciprocatorCountQueue', skip: 'reciprocatorCountSkipped',
       bar: 'reciprocatorProgressBar', status: 'reciprocatorLiveStatusText', cd: 'reciprocatorCountdownText',
       startBtn: 'runReciprocatorBtn', stopBtn: 'stopReciprocatorBtn',
       pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn',
