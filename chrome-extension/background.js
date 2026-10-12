@@ -1417,7 +1417,8 @@ async function processAgentWorkflowStep() {
   if (agentId === 'feedengager') {
     const targetCount = Number(options.targetCount) || 10;
     const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
-    const pacingDelaySec = Math.max(5, Number(options.pacingDelaySec) || 10);
+    const safetyData = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+    const pacingDelaySec = Math.max(5, Number(safetyData?.atomx_safety_settings?.replyDelay) || Number(options.pacingDelaySec) || 10);
     const localData = await chrome.storage.local.get(['backendUrl', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}));
     const backendUrl = (options.backendUrl || localData.backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
 
@@ -1575,13 +1576,15 @@ async function processAgentWorkflowStep() {
     const keyword = (options.keyword || '').trim();
     const targetCount = Number(options.targetCount) || 10;
     const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
-    const pacingDelaySec = Math.max(5, Number(options.pacingDelaySec) || 10);
+    const safetyData = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+    const pacingDelaySec = Math.max(5, Number(safetyData?.atomx_safety_settings?.replyDelay) || Number(options.pacingDelaySec) || 10);
     const localData = await chrome.storage.local.get(['backendUrl', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}));
     const backendUrl = (options.backendUrl || localData.backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '');
 
+    // Twitter search query with -filter:retweets to guarantee only original posts
     const searchUrl = options.feedMode === 'top'
-      ? `https://x.com/search?q=${encodeURIComponent(keyword)}&src=typed_query`
-      : `https://x.com/search?q=${encodeURIComponent(keyword)}&f=live`;
+      ? `https://x.com/search?q=${encodeURIComponent(keyword)} -filter:retweets&src=typed_query`
+      : `https://x.com/search?q=${encodeURIComponent(keyword)} -filter:retweets&f=live`;
 
     await syncAgentHud(workflow, `Searching X for "${keyword}"...`, 'SCANNING', 5);
 
@@ -1642,6 +1645,7 @@ async function processAgentWorkflowStep() {
 
         const feedRes = await sendMessageToTab(tabId, {
           type: 'EXECUTE_HOME_FEED_ENGAGEMENT_STEP',
+          filterRepliesAndReposts: true,
           actions: {
             like: options.likePosts ?? true,
             comment: options.commentPosts ?? true,
@@ -1710,7 +1714,25 @@ async function processAgentWorkflowStep() {
             'SCANNING',
             Math.round(((workflow.successCount || 0) / targetCount) * 100)
           );
-          await delay(1000);
+          await delay(600);
+        } else if (feedRes?.skippedRepost) {
+          workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] 🛡️ Repost (Retweet) filtered out. Scanning original...`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
+          await delay(600);
+        } else if (feedRes?.skippedReply) {
+          workflow.ignoredCount = (workflow.ignoredCount || 0) + 1;
+          await syncAgentHud(
+            workflow,
+            `[${workflow.successCount || 0}/${targetCount}] 🛡️ Reply / Comment filtered out. Scanning original...`,
+            'SCANNING',
+            Math.round(((workflow.successCount || 0) / targetCount) * 100)
+          );
+          await delay(600);
         } else {
           // No fresh post in current screen, scroll down to hydrate more posts
           await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);

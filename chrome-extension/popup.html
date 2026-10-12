@@ -1419,31 +1419,20 @@
                 <strong>Home Feed Organic Engager:</strong> Automatically scrolls and engages on your X/Twitter Home Timeline (<code>x.com/home</code>). Filters out Promoted Ads, obeys your active AI voice, and executes selected actions with human-like safety pacing.
               </div>
 
-              <!-- Controls: Target count & Pacing -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <label class="opt-label" style="margin-bottom:0;">Target Posts to Engage</label>
-                    <span style="font-size:9.5px; color:var(--text-muted);">Custom or Preset</span>
-                  </div>
-                  <input type="number" id="feedTargetCountInput" class="ext-input" min="1" max="999" value="10" placeholder="e.g. 15">
-                  <div style="display:flex; gap:4px; margin-top:5px; flex-wrap:wrap;">
-                    <button type="button" class="badge-mini feed-preset-btn" data-count="5" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">5</button>
-                    <button type="button" class="badge-mini feed-preset-btn" data-count="10" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">10</button>
-                    <button type="button" class="badge-mini feed-preset-btn" data-count="15" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">15</button>
-                    <button type="button" class="badge-mini feed-preset-btn" data-count="25" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">25</button>
-                    <button type="button" class="badge-mini feed-preset-btn" data-count="50" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">50</button>
-                    <button type="button" class="badge-mini feed-preset-btn" data-count="100" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">100</button>
-                  </div>
+              <!-- Controls: Target count with High-Contrast Preset Pills -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Target Posts to Engage</label>
+                  <span style="font-size:9.5px; color:var(--text-muted);">Custom Count or Preset</span>
                 </div>
-                <div>
-                  <label class="opt-label">Anti-Ban Pacing Delay</label>
-                  <select id="feedPacingDelaySelect" class="ext-select">
-                    <option value="6">Fast (5 - 8s)</option>
-                    <option value="10" selected>🛡️ Recommended (8 - 14s)</option>
-                    <option value="18">Organic (15 - 22s)</option>
-                    <option value="30">Ultra Safe (25 - 35s)</option>
-                  </select>
+                <input type="number" id="feedTargetCountInput" class="ext-input" min="1" max="999" value="10" placeholder="e.g. 15">
+                <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                  <button type="button" class="preset-pill-btn feed-preset-btn" data-count="5" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">5</button>
+                  <button type="button" class="preset-pill-btn feed-preset-btn active" data-count="10" style="cursor:pointer; background:#2563EB; border:1px solid #3B82F6; color:#FFFFFF; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">10</button>
+                  <button type="button" class="preset-pill-btn feed-preset-btn" data-count="15" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">15</button>
+                  <button type="button" class="preset-pill-btn feed-preset-btn" data-count="25" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">25</button>
+                  <button type="button" class="preset-pill-btn feed-preset-btn" data-count="50" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">50</button>
+                  <button type="button" class="preset-pill-btn feed-preset-btn" data-count="100" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">100</button>
                 </div>
               </div>
 
@@ -1539,23 +1528,15 @@
                 <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">Searches live/latest posts matching this niche topic on X/Twitter.</div>
               </div>
 
-              <!-- Search Feed Mode & Delay -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Feed Filter</label>
-                  <select id="nicheFeedFilterSelect" class="ext-select">
-                    <option value="live" selected>⚡ Latest / Live Posts (Recommended)</option>
-                    <option value="top">🔥 Top Posts</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="opt-label">Anti-Ban Pacing Delay</label>
-                  <select id="nichePacingDelaySelect" class="ext-select">
-                    <option value="6">Fast (5 - 8s)</option>
-                    <option value="10" selected>🛡️ Recommended (8 - 14s)</option>
-                    <option value="18">Organic (15 - 22s)</option>
-                    <option value="30">Ultra Safe (25 - 35s)</option>
-                  </select>
+              <!-- Search Feed Mode & Safety Info -->
+              <div>
+                <label class="opt-label">Feed Filter</label>
+                <select id="nicheFeedFilterSelect" class="ext-select">
+                  <option value="live" selected>⚡ Latest / Live Posts (Recommended)</option>
+                  <option value="top">🔥 Top Posts</option>
+                </select>
+                <div style="font-size:10px; color:#10B981; margin-top:3px; display:flex; align-items:center; gap:4px; font-weight:600;">
+                  <span>🛡️ Reposts & comments auto-filtered • Pacing controlled by Safety Tab</span>
                 </div>
               </div>
 
@@ -1563,16 +1544,16 @@
               <div>
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                   <label class="opt-label" style="margin-bottom:0;">Target Posts to Engage</label>
-                  <span style="font-size:9.5px; color:var(--text-muted);">Custom or Preset</span>
+                  <span style="font-size:9.5px; color:var(--text-muted);">Custom Count or Preset</span>
                 </div>
                 <input type="number" id="nicheTargetCountInput" class="ext-input" min="1" max="999" value="10" placeholder="Enter post count (e.g. 15)">
-                <div style="display:flex; gap:4px; margin-top:5px; flex-wrap:wrap;">
-                  <button type="button" class="badge-mini niche-preset-btn" data-count="5" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">5</button>
-                  <button type="button" class="badge-mini niche-preset-btn" data-count="10" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">10</button>
-                  <button type="button" class="badge-mini niche-preset-btn" data-count="15" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">15</button>
-                  <button type="button" class="badge-mini niche-preset-btn" data-count="25" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">25</button>
-                  <button type="button" class="badge-mini niche-preset-btn" data-count="50" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">50</button>
-                  <button type="button" class="badge-mini niche-preset-btn" data-count="100" style="cursor:pointer; background:var(--bg-card); border:1px solid var(--border-subtle); padding:2px 7px;">100</button>
+                <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                  <button type="button" class="preset-pill-btn niche-preset-btn" data-count="5" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">5</button>
+                  <button type="button" class="preset-pill-btn niche-preset-btn active" data-count="10" style="cursor:pointer; background:#2563EB; border:1px solid #3B82F6; color:#FFFFFF; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">10</button>
+                  <button type="button" class="preset-pill-btn niche-preset-btn" data-count="15" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">15</button>
+                  <button type="button" class="preset-pill-btn niche-preset-btn" data-count="25" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">25</button>
+                  <button type="button" class="preset-pill-btn niche-preset-btn" data-count="50" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">50</button>
+                  <button type="button" class="preset-pill-btn niche-preset-btn" data-count="100" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">100</button>
                 </div>
               </div>
 
@@ -1583,7 +1564,7 @@
                   <span id="nicheActiveToneLabel" style="color:var(--blue-primary); font-weight:700;">Global Voice Active</span>
                 </div>
                 <div style="font-size:9.5px; color:#10B981; display:flex; align-items:center; gap:4px; font-weight:700;">
-                  <span>🛡️ Ad Skip Shield Active</span>
+                  <span>🛡️ Repost + Comment + Ad Shield</span>
                 </div>
               </div>
 
@@ -1612,7 +1593,7 @@
 
               <!-- Notice -->
               <div style="font-size:10.5px; color:var(--text-muted); background:var(--bg-canvas); padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle);">
-                🛡️ <strong>Safety & Protection:</strong> Promoted Ads in search results are detected & automatically skipped. Self posts and previously engaged tweets are never duplicated.
+                🛡️ <strong>Strict Anti-Spam Filtering:</strong> Reposts (Retweets), comments/replies to others, and Promoted Ads are strictly filtered out. Only 100% original, fresh niche posts are engaged.
               </div>
 
               <!-- Progress & State Machine Card -->

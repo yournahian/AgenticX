@@ -2491,13 +2491,39 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   document.querySelectorAll('.feed-preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const inp = document.getElementById('feedTargetCountInput');
-      if (inp) inp.value = btn.dataset.count;
+      if (inp) {
+        inp.value = btn.dataset.count;
+        inp.dispatchEvent(new Event('input'));
+      }
+      document.querySelectorAll('.feed-preset-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'rgba(59,130,246,0.15)';
+        b.style.borderColor = 'rgba(59,130,246,0.45)';
+        b.style.color = '#60A5FA';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#2563EB';
+      btn.style.borderColor = '#3B82F6';
+      btn.style.color = '#FFFFFF';
     });
   });
   document.querySelectorAll('.niche-preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const inp = document.getElementById('nicheTargetCountInput');
-      if (inp) inp.value = btn.dataset.count;
+      if (inp) {
+        inp.value = btn.dataset.count;
+        inp.dispatchEvent(new Event('input'));
+      }
+      document.querySelectorAll('.niche-preset-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'rgba(59,130,246,0.15)';
+        b.style.borderColor = 'rgba(59,130,246,0.45)';
+        b.style.color = '#60A5FA';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#2563EB';
+      btn.style.borderColor = '#3B82F6';
+      btn.style.color = '#FFFFFF';
     });
   });
 
@@ -3722,8 +3748,9 @@ async function startCommenterReciprocatorWorkflow() {
 async function startHomeFeedEngagerWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
 
-  const targetCount = Math.max(1, Number(document.getElementById('feedTargetCountInput')?.value || document.getElementById('feedTargetCountSelect')?.value || 10));
-  const pacingDelaySec = Number(document.getElementById('feedPacingDelaySelect')?.value || 10);
+  const targetCount = Math.max(1, Number(document.getElementById('feedTargetCountInput')?.value || 10));
+  const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+  const pacingDelaySec = Math.max(5, Number(safetyRes?.atomx_safety_settings?.replyDelay) || 10);
 
   const optLike = document.getElementById('feedOptLike')?.checked ?? true;
   const optComment = document.getElementById('feedOptComment')?.checked ?? true;
@@ -3817,7 +3844,8 @@ async function startNicheSearchEngagerWorkflow() {
 
   const targetCount = Math.max(1, Number(document.getElementById('nicheTargetCountInput')?.value || 10));
   const feedFilter = document.getElementById('nicheFeedFilterSelect')?.value || 'live';
-  const pacingDelaySec = Number(document.getElementById('nichePacingDelaySelect')?.value || 10);
+  const nicheSafetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+  const pacingDelaySec = Math.max(5, Number(nicheSafetyRes?.atomx_safety_settings?.replyDelay) || 10);
 
   const optLike = document.getElementById('nicheOptLike')?.checked ?? true;
   const optComment = document.getElementById('nicheOptComment')?.checked ?? true;

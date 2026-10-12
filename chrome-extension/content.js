@@ -1462,7 +1462,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
     // Wait for the editable textarea to mount in dialog, inline, or compose view
     textarea = await waitForElement(
-      'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[role="dialog"] div[role="textbox"][contenteditable="true"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"], div.public-DraftEditor-content',
+      'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[role="dialog"] [data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]',
       7000
     );
 
@@ -1517,7 +1517,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   let submitBtn = getSubmitBtn();
 
-  // If button is still disabled or missing, force DraftJS state update via native paste
+  // If button is still disabled or missing, force state update via native paste
   if (!submitBtn || submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled) {
     try {
       textarea.focus({ preventScroll: true });
@@ -1534,7 +1534,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
       textarea.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(300);
     } catch (e) {
-      console.warn('[ATOMX COMMENT ENGINE] DraftJS paste activation warning:', e);
+      console.warn('[ATOMX COMMENT ENGINE] Editor paste activation warning:', e);
     }
     submitBtn = getSubmitBtn();
   }
@@ -1577,14 +1577,12 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   await sleep(1000);
 
-  // Dismiss dialog if still hanging open after successful API send
-  const remainingDialog = document.querySelector('div[role="dialog"]');
-  if (remainingDialog) {
-    const closeBtn = remainingDialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"]');
-    if (closeBtn) {
-      try { closeBtn.click(); } catch (e) {}
-      await sleep(300);
-    }
+  // Ensure any dialog is completely dismissed so the next post can be scrolled and engaged
+  for (let d = 0; d < 5; d++) {
+    const remainingDialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
+    if (!remainingDialog) break;
+    closeAnyOpenTwitterDialog();
+    await sleep(350);
   }
 
   return { success: true };
@@ -2590,22 +2588,6 @@ function suppressBeforeUnloadPrompt() {
     window.addEventListener('beforeunload', (e) => {
       try { e.stopImmediatePropagation(); } catch (err) {}
     }, true);
-
-    const script = document.createElement('script');
-    script.textContent = `
-      try {
-        window.addEventListener('beforeunload', function(e) {
-          e.stopImmediatePropagation();
-        }, true);
-        window.onbeforeunload = null;
-        Object.defineProperty(window, 'onbeforeunload', {
-          get: () => null,
-          set: () => {}
-        });
-      } catch (e) {}
-    `;
-    (document.head || document.documentElement).appendChild(script);
-    script.remove();
   } catch (e) {}
 }
 suppressBeforeUnloadPrompt();
@@ -4569,8 +4551,38 @@ function isPromotedTweet(article) {
 }
 
 /**
- * Scans user's Home Timeline (x.com/home) for fresh unengaged posts.
+ * Detects whether an article is a Repost / Retweet.
+ */
+function isRetweetOrRepost(article) {
+  if (!article) return false;
+  const socialContext = article.querySelector('[data-testid="socialContext"]');
+  if (socialContext) {
+    const scText = (socialContext.innerText || '').toLowerCase();
+    if (scText.includes('repost') || scText.includes('retweet')) return true;
+  }
+  const raw = (article.innerText || '').trim();
+  if (raw.startsWith('Reposted') || raw.includes(' reposted\n') || raw.includes(' Retweeted\n')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Detects whether an article is a reply/comment to someone else rather than a root tweet.
+ */
+function isReplyOrCommentTweet(article) {
+  if (!article) return false;
+  const text = article.innerText || '';
+  if (text.includes('Replying to @') || text.includes('Replying to\n@') || text.includes('Replying to')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Scans user's Home Timeline (x.com/home) or Search Stream (x.com/search) for fresh unengaged posts.
  * Skips Promoted Ads automatically.
+ * Skips Reposts (Retweets) and Comments/Replies in Niche Search.
  * Skips user's own posts and already engaged tweets.
  * Executes requested actions (Like, Comment, Repost, Follow) with human pacing and AI voice.
  */
@@ -4578,10 +4590,14 @@ async function executeHomeFeedEngagementStep(params = {}) {
   isWorkflowItemSkipped = false;
   if (isWorkflowAborted) return { success: false, aborted: true };
 
+  // Dismiss any lingering dialog before starting new post scan
+  closeAnyOpenTwitterDialog();
+
   const actions = params.actions || { like: true, comment: true, repost: false, follow: false };
   const verifiedHandle = (params.verifiedXHandle || '').toLowerCase().replace(/^@/, '').trim();
   const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
   const alreadyEngagedSet = new Set((params.alreadyEngagedIds || []).map(String));
+  const filterRepAndCom = params.filterRepliesAndReposts || window.location.pathname.startsWith('/search');
 
   // Find timeline articles
   let articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
@@ -4602,20 +4618,32 @@ async function executeHomeFeedEngagementStep(params = {}) {
 
     // 1. Promoted Ad Check — Auto-skip 100% of Ads
     if (isPromotedTweet(art)) {
-      console.log('[ATOMX FEED ENGAGER] Promoted Ad detected. Auto-skipping...');
+      console.log('[ATOMX FEED/NICHE] Promoted Ad detected. Auto-skipping...');
       return { success: true, skippedAd: true, reason: 'Promoted Ad' };
+    }
+
+    // 2. Niche Search Filter: Strict auto-filter of Reposts and Comments/Replies
+    if (filterRepAndCom) {
+      if (isRetweetOrRepost(art)) {
+        console.log('[ATOMX NICHE ENGAGER] Repost / Retweet detected. Auto-skipping...');
+        return { success: true, skippedRepost: true, reason: 'Repost / Retweet filtered' };
+      }
+      if (isReplyOrCommentTweet(art)) {
+        console.log('[ATOMX NICHE ENGAGER] Reply / Comment detected. Auto-skipping...');
+        return { success: true, skippedReply: true, reason: 'Reply / Comment filtered' };
+      }
     }
 
     const data = extractTweetData(art);
     const cleanHandle = (data.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
     const tweetId = data.tweetId;
 
-    // 2. Skip user's own posts
+    // 3. Skip user's own posts
     if (cleanHandle && (cleanHandle === loggedInHandle || cleanHandle === verifiedHandle)) {
       continue;
     }
 
-    // 3. Skip already engaged
+    // 4. Skip already engaged
     const isAlreadyLiked = isPostAlreadyLiked(art);
     if (tweetId && alreadyEngagedSet.has(String(tweetId))) {
       continue;
@@ -4692,6 +4720,13 @@ async function executeHomeFeedEngagementStep(params = {}) {
         await sleep(400);
       }
     }
+
+    // Ensure dialog is closed so page isn't blocked
+    closeAnyOpenTwitterDialog();
+    await sleep(300);
+
+    // Scroll down past this engaged post so the next post is brought into viewport
+    await humanSmoothScroll(500, { settlePause: 350 });
 
     return {
       success: true,
