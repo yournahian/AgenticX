@@ -1099,11 +1099,17 @@ async function simulateHumanSubmitClick(btn) {
   lastSubmitClickTimestamp = now;
 
   try {
-    gentleScrollIntoView(btn);
-    await sleep(150);
+    await humanScrollElementIntoView(btn, 'nearest');
+    await sleep(250);
 
-    // Perform human click: Virtual cursor moves to submitBtn FIRST, hovers, pulses blue, then clicks single time!
-    await performHumanClick(btn, { pulseColor: '#3B82F6', scroll: false, postPause: 300 });
+    // Global rule: Cursor moves to Reply button, waits/hovers (420ms), and clicks
+    console.log('[ATOMX SUBMIT] Moving virtual cursor to Reply button, hovering, and submitting...');
+    await performHumanClick(btn, {
+      pulseColor: '#3B82F6',
+      scroll: false,
+      hoverDwell: 420,
+      postPause: 380
+    });
     return true;
   } catch (e) {
     btn.click();
@@ -3367,6 +3373,7 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
       }
 
       // 2. Visibly move Virtual Cursor to commenter's avatar/handle and click to open their profile!
+      let profileClicked = false;
       const profileLink = art.querySelector('div[data-testid="User-Name"] a[role="link"]') ||
                           art.querySelector(`a[href="/${cleanHandle}" i], a[href="/${cleanHandle}/" i]`) ||
                           art.querySelector('div[data-testid*="UserAvatar"]')?.closest('a');
@@ -3377,9 +3384,10 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
           await performHumanClick(profileLink, {
             pulseColor: '#38BDF8',
             scroll: false,
-            hoverDwell: 300,
-            postPause: 500
+            hoverDwell: 380,
+            postPause: 600
           });
+          profileClicked = true;
         } catch (pErr) {}
       }
 
@@ -3389,7 +3397,8 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
         handle: `@${cleanHandle}`,
         authorName: data.authorName || cleanHandle,
         commentText: (data.text || '').slice(0, 100),
-        commentLiked
+        commentLiked,
+        profileClicked
       };
     }
 
@@ -3728,131 +3737,121 @@ async function engageAndFollowProfile(options = {}) {
     } else {
       numPostsToEngage = Math.max(1, Number(postsCountSetting) || 1);
     }
-    const postsSlice = candidatePosts.slice(0, numPostsToEngage);
+    // Step 4: Engage each post in postsSlice with all selected actions (Like, Repost, Comment)
+    // Runs sequentially down the timeline without needing to scroll back up!
+    for (let pIdx = 0; pIdx < postsSlice.length; pIdx++) {
+      if (isWorkflowAborted || isWorkflowItemSkipped) break;
+      const art = postsSlice[pIdx];
 
-    // Global Rule: Scroll the primary post into center view before engaging so user sees it
-    await scrollElementIntoViewAndEnsureVisible(targetRecentPost, 'center');
-    if (isWorkflowItemSkipped || isWorkflowAborted) {
-      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
-    }
+      // Center this post comfortably on screen
+      await humanScrollElementIntoView(art, 'center');
+      await sleep(400);
 
-    // Step 4: Like selected posts (each post is smoothly scrolled & verified visible before click)
-    if (likePosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
-      for (const art of postsSlice) {
-        if (isWorkflowAborted || isWorkflowItemSkipped) break;
-        if (isPostAlreadyLiked(art)) {
-          console.log(`[ATOMX] Post already liked. Skipping.`);
-          continue;
-        }
-        const ok = await simulateHumanLikeClick(art);
-        if (ok) {
-          likesDone++;
-          await sleep(600);
+      // Action 1: Auto-Like
+      if (likePosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
+        if (!isPostAlreadyLiked(art)) {
+          const ok = await simulateHumanLikeClick(art);
+          if (ok) {
+            likesDone++;
+            await sleep(450);
+          }
+        } else {
+          console.log('[ATOMX] Post already liked. Skipping like.');
         }
       }
-    }
 
-    if (isWorkflowItemSkipped || isWorkflowAborted) {
-      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
-    }
-
-    // Step 5: Repost selected posts
-    if (repostPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
-      for (const art of postsSlice) {
-        if (isWorkflowAborted || isWorkflowItemSkipped) break;
+      // Action 2: Auto-Repost
+      if (repostPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
         const ok = await simulateHumanRepostClick(art);
         if (ok) {
           repostDone++;
-          await sleep(600);
+          await sleep(450);
         }
       }
-    }
 
-    if (isWorkflowItemSkipped || isWorkflowAborted) {
-      return { success: true, skipped: true, ignored: true, reason: 'Skipped by user' };
-    }
-
-    // Step 6: Generate AI Reply and comment on the primary recent post
-    if (replyPosts && targetRecentPost && !isWorkflowAborted && !isWorkflowItemSkipped) {
-      const postRestriction = isTargetRestrictedOrCommentsLocked(targetRecentPost);
-      if (postRestriction.restricted) {
-        console.log(`[ATOMX] Comments restricted on @${targetHandle}'s post: ${postRestriction.reason}. Auto-skipping profile.`);
-        return { success: true, skipped: true, ignored: true, reason: postRestriction.reason };
-      }
-      try {
-        const tweetData = extractTweetData(targetRecentPost);
-        const tweetText = tweetData.text || '';
-        const authorName = tweetData.authorName || targetHandle;
-        const authorHandle = tweetData.authorHandle || `@${targetHandle}`;
-
-        let commentToPost = '';
-        try {
-          const aiRes = await chrome.runtime.sendMessage({
-            type: 'GENERATE_INLINE_REPLY',
-            tweetText,
-            tweetAuthor: authorHandle,
-            tweetAuthorName: authorName,
-            style,
-            stylePrompt
-          });
-          if (aiRes?.reply) {
-            commentToPost = aiRes.reply.trim();
-          }
-        } catch (mErr) {
-          console.warn('[ATOMX] Background worker message error:', mErr);
-        }
-
-        // Direct fetch fallback if background worker failed
-        if (!commentToPost) {
+      // Action 3: Auto-Comment
+      if (replyPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
+        const postRestriction = isTargetRestrictedOrCommentsLocked(art);
+        if (postRestriction.restricted) {
+          console.log(`[ATOMX] Comments restricted on post ${pIdx + 1}: ${postRestriction.reason}. Skipping comment.`);
+        } else {
           try {
-            const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
-              ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}))
-              : {};
-            const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
-            const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
-            const uId = stored?.currentUser?.id || stored?.user?.id || null;
+            const tweetData = extractTweetData(art);
+            const tweetText = tweetData.text || '';
+            const authorName = tweetData.authorName || targetHandle;
+            const authorHandle = tweetData.authorHandle || `@${targetHandle}`;
 
-            const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-user-handle': uHandle,
-                'x-user-id': uId ? String(uId) : '1'
-              },
-              body: JSON.stringify({
+            let commentToPost = '';
+            try {
+              const aiRes = await chrome.runtime.sendMessage({
+                type: 'GENERATE_INLINE_REPLY',
                 tweetText,
                 tweetAuthor: authorHandle,
                 tweetAuthorName: authorName,
                 style,
-                stylePrompt,
-                userHandle: uHandle,
-                userEmail: uEmail,
-                userId: uId
-              })
-            });
-            if (directRes.ok) {
-              const dJson = await directRes.json();
-              commentToPost = dJson?.reply?.trim();
+                stylePrompt
+              });
+              if (aiRes?.reply) commentToPost = aiRes.reply.trim();
+            } catch (mErr) {
+              console.warn('[ATOMX] Background worker message error:', mErr);
             }
-          } catch (dErr) {
-            console.warn('[ATOMX] Direct fetch reply error:', dErr);
+
+            // Direct fetch fallback if background worker failed
+            if (!commentToPost) {
+              try {
+                const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
+                  ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}))
+                  : {};
+                const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
+                const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
+                const uId = stored?.currentUser?.id || stored?.user?.id || null;
+
+                const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
+                  method: 'POST',
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    'x-user-handle': uHandle,
+                    'x-user-id': uId ? String(uId) : '1'
+                  },
+                  body: JSON.stringify({
+                    tweetText,
+                    tweetAuthor: authorHandle,
+                    tweetAuthorName: authorName,
+                    style,
+                    stylePrompt,
+                    userHandle: uHandle,
+                    userEmail: uEmail,
+                    userId: uId
+                  })
+                });
+                if (directRes.ok) {
+                  const dJson = await directRes.json();
+                  commentToPost = dJson?.reply?.trim();
+                }
+              } catch (dErr) {}
+            }
+
+            if (!commentToPost) {
+              commentToPost = 'Spot on insight. Keep building!';
+            }
+
+            commentToPost = sanitizeClientComment(commentToPost, 10);
+            if (commentToPost) {
+              const commentRes = await postCommentOnTargetArticle(art, commentToPost);
+              if (commentRes && commentRes.success) {
+                replyDone++;
+                await sleep(800);
+              }
+            }
+          } catch (rErr) {
+            console.warn('[ATOMX] Could not post profile reply:', rErr);
           }
         }
+      }
 
-        if (!commentToPost) {
-          commentToPost = 'Spot on insight. Keep building!';
-        }
-
-        commentToPost = sanitizeClientComment(commentToPost, 10);
-        if (commentToPost) {
-          const commentRes = await postCommentOnTargetArticle(targetRecentPost, commentToPost);
-          if (commentRes && commentRes.success) {
-            replyDone++;
-            await sleep(1000);
-          }
-        }
-      } catch (rErr) {
-        console.warn('Could not post profile reply:', rErr);
+      // Smoothly scroll down to next post in postsSlice if multiple posts requested
+      if (pIdx < postsSlice.length - 1 && !isWorkflowAborted && !isWorkflowItemSkipped) {
+        await humanSmoothScroll(380 + Math.floor(Math.random() * 80), { settlePause: 350 });
       }
     }
 

@@ -132,7 +132,11 @@ async function getOrCreateReusedTab(existingTabId, targetUrl) {
     try {
       const existingTab = await chrome.tabs.get(existingTabId);
       if (existingTab && existingTab.id) {
-        await chrome.tabs.update(existingTab.id, { url: targetUrl, active: true });
+        const curNorm = (existingTab.url || '').split('?')[0].replace(/\/+$/, '').toLowerCase();
+        const tgtNorm = (targetUrl || '').split('?')[0].replace(/\/+$/, '').toLowerCase();
+        if (curNorm !== tgtNorm) {
+          await chrome.tabs.update(existingTab.id, { url: targetUrl, active: true });
+        }
         return existingTab.id;
       }
     } catch (e) {
@@ -1244,9 +1248,34 @@ async function processAgentWorkflowStep() {
         );
 
         // Visit commenter profile in the SAME tab!
-        await getOrCreateReusedTab(tabId, profileUrl);
-        await waitForTabLoad(tabId, 15000);
-        await delay(2500);
+        if (commentRes?.profileClicked) {
+          // Profile link was clicked directly via virtual cursor in-app!
+          // Wait for Twitter client-side router to mount profile without redundant full reload
+          console.log(`[ATOMX BG] Profile link was clicked via virtual cursor. Waiting for in-app navigation to @${cleanHandle}...`);
+          let inAppDone = false;
+          for (let w = 0; w < 12; w++) {
+            await delay(350);
+            try {
+              const curTab = await chrome.tabs.get(tabId);
+              const path = new URL(curTab.url).pathname.toLowerCase().replace(/^\//, '').split('/')[0];
+              if (path === cleanHandle.toLowerCase()) {
+                inAppDone = true;
+                break;
+              }
+            } catch (e) {}
+          }
+          if (!inAppDone) {
+            console.warn(`[ATOMX BG] In-app navigation fallback to URL load.`);
+            await getOrCreateReusedTab(tabId, profileUrl);
+            await waitForTabLoad(tabId, 12000);
+          } else {
+            await delay(1800); // Allow profile page components to mount smoothly
+          }
+        } else {
+          await getOrCreateReusedTab(tabId, profileUrl);
+          await waitForTabLoad(tabId, 15000);
+          await delay(2500);
+        }
 
         const lockCheck2 = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
         if (!lockCheck2.ok) return;
@@ -1643,9 +1672,32 @@ async function processAgentWorkflowStep() {
           );
 
           // Visit commenter profile in the SAME tab!
-          await getOrCreateReusedTab(tabId, profileUrl);
-          await waitForTabLoad(tabId, 15000);
-          await delay(2500);
+          if (commentRes?.profileClicked) {
+            console.log(`[ATOMX BG] Profile was clicked via virtual cursor. Waiting for in-app navigation to @${cleanHandle}...`);
+            let inAppDone = false;
+            for (let w = 0; w < 12; w++) {
+              await delay(350);
+              try {
+                const curTab = await chrome.tabs.get(tabId);
+                const path = new URL(curTab.url).pathname.toLowerCase().replace(/^\//, '').split('/')[0];
+                if (path === cleanHandle.toLowerCase()) {
+                  inAppDone = true;
+                  break;
+                }
+              } catch (e) {}
+            }
+            if (!inAppDone) {
+              console.warn(`[ATOMX BG] In-app navigation fallback to URL load.`);
+              await getOrCreateReusedTab(tabId, profileUrl);
+              await waitForTabLoad(tabId, 12000);
+            } else {
+              await delay(1800); // Allow profile page components to mount smoothly
+            }
+          } else {
+            await getOrCreateReusedTab(tabId, profileUrl);
+            await waitForTabLoad(tabId, 15000);
+            await delay(2500);
+          }
 
           const lockCheck2 = await verifyTabAccountLock(tabId, verifiedXHandle, workflow);
           if (!lockCheck2.ok) return;
