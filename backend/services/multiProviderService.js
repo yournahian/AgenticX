@@ -49,11 +49,10 @@ const DEFAULT_MODELS = {
     { id: 'gemini-1.5-flash-8b', name: 'Gemini 1.5 Flash 8B (Low Latency)', context: '1M' }
   ],
   groq: [
-    { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Groq LPU)', context: '128k' },
+    { id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B (Groq Fast & Smart)', context: '131k' },
+    { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Blazing Fast)', context: '128k' },
     { id: 'allam-2-7b', name: 'ALLaM 2 7B (SDAIA / Groq)', context: '4k' },
     { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B Instruct (Groq)', context: '128k' },
-    { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant (Blazing Fast)', context: '128k' },
-    { id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B (Groq)', context: '131k' },
     { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B', context: '128k' },
     { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B (MoE Architecture)', context: '32k' },
     { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT (Google on Groq)', context: '8k' }
@@ -668,8 +667,8 @@ async function getFailoverChain() {
   } catch (e) {}
 
   return [
-    { priority: 1, provider: 'groq', model: 'llama-3.3-70b-versatile', enabled: true },
-    { priority: 2, provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', enabled: true },
+    { priority: 1, provider: 'groq', model: 'qwen/qwen3.8-27b', enabled: true },
+    { priority: 2, provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct:free', enabled: true },
     { priority: 3, provider: 'openai', model: 'gpt-4o-mini', enabled: true },
     { priority: 4, provider: 'anthropic', model: 'claude-3-5-haiku-20241022', enabled: true },
     { priority: 5, provider: 'gemini', model: 'gemini-1.5-flash', enabled: true }
@@ -1024,7 +1023,7 @@ async function generateWithProvider({
 }
 
 function createSynthesizedReply(tweet, author, style, styleInstruction = '') {
-  const cleanSnippet = tweet.replace(/https?:\/\/\S+/g, '').slice(0, 42).trim();
+  const cleanSnippet = String(tweet || '').replace(/https?:\/\/\S+/g, '').slice(0, 42).trim();
   const lowerPrompt = (styleInstruction || '').toLowerCase();
 
   // Bullish variations (5-10 words, no banned chars)

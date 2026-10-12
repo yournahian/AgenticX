@@ -2625,12 +2625,27 @@ function suppressBeforeUnloadPrompt() {
 }
 suppressBeforeUnloadPrompt();
 
+// Helper: Finds Twitter's "Save post? -> Discard" button across testids, roles, and languages
+function findTwitterDiscardButton() {
+  const directBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"]');
+  if (directBtn) return directBtn;
+
+  const candidateButtons = Array.from(document.querySelectorAll('div[role="dialog"] button, div[aria-modal="true"] button, div[role="dialog"] div[role="button"], div[aria-modal="true"] div[role="button"]'));
+  for (const btn of candidateButtons) {
+    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+    if (text === 'discard' || text === 'descartar' || text === 'abandonner') {
+      return btn;
+    }
+  }
+  return null;
+}
+
 // Helper: Discards any unsaved draft comment in editor to prevent browser navigation locks
 function clearAnyDraftComment() {
   try {
-    const confirmDiscard = document.querySelector('button[data-testid="confirmationSheetConfirm"]');
-    if (confirmDiscard) {
-      confirmDiscard.click();
+    const discardBtn = findTwitterDiscardButton();
+    if (discardBtn) {
+      discardBtn.click();
       return;
     }
 
@@ -2648,14 +2663,17 @@ function clearAnyDraftComment() {
   } catch (e) {}
 }
 
-// Helper: Closes any open modal/compose dialog or discard confirmation on Twitter
+// Helper: Closes any open modal/compose dialog and automatically clicks "Discard" on Twitter confirmation sheet
 function closeAnyOpenTwitterDialog() {
   try {
-    const discardBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"]');
-    if (discardBtn) {
-      discardBtn.click();
+    // 1. If "Save post? -> Discard" confirmation sheet is already visible, click Discard immediately!
+    const existingDiscardBtn = findTwitterDiscardButton();
+    if (existingDiscardBtn) {
+      existingDiscardBtn.click();
       return;
     }
+
+    // 2. Locate any open compose modal dialog
     const dialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
     if (dialog) {
       const closeBtn = dialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"], button[data-testid="app-bar-close"]');
@@ -2664,11 +2682,20 @@ function closeAnyOpenTwitterDialog() {
       } else {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
       }
-      setTimeout(() => {
-        const confirmDiscard = document.querySelector('button[data-testid="confirmationSheetConfirm"]');
-        if (confirmDiscard) confirmDiscard.click();
-      }, 150);
     }
+
+    // 3. Continuously watch for Twitter's "Save post? -> Discard" sheet and auto-click Discard
+    let discardChecks = 0;
+    const discardPoll = setInterval(() => {
+      discardChecks++;
+      const discardBtn = findTwitterDiscardButton();
+      if (discardBtn) {
+        discardBtn.click();
+        clearInterval(discardPoll);
+      } else if (discardChecks >= 25) { // 25 * 60ms = 1.5s
+        clearInterval(discardPoll);
+      }
+    }, 60);
   } catch (e) {}
 }
 
