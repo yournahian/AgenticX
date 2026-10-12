@@ -4681,21 +4681,21 @@ async function executeHomeFeedEngagementStep(params = {}) {
   for (const art of articles) {
     if (isWorkflowAborted || isWorkflowItemSkipped) return { success: false, aborted: true };
 
-    // 1. Promoted Ad Check — Auto-skip 100% of Ads
+    // 1. Promoted Ad Check — Auto-skip 100% of Ads and continue to next tweet
     if (isPromotedTweet(art)) {
-      console.log('[ATOMX FEED/NICHE] Promoted Ad detected. Auto-skipping...');
-      return { success: true, skippedAd: true, reason: 'Promoted Ad' };
+      console.log('[ATOMX FEED/NICHE] Promoted Ad detected. Auto-skipping to next post...');
+      continue;
     }
 
     // 2. Niche Search Filter: Strict auto-filter of Reposts and Comments/Replies
     if (filterRepAndCom) {
       if (isRetweetOrRepost(art)) {
-        console.log('[ATOMX NICHE ENGAGER] Repost / Retweet detected. Auto-skipping...');
-        return { success: true, skippedRepost: true, reason: 'Repost / Retweet filtered' };
+        console.log('[ATOMX NICHE ENGAGER] Repost / Retweet detected. Auto-skipping to next post...');
+        continue;
       }
       if (isReplyOrCommentTweet(art)) {
-        console.log('[ATOMX NICHE ENGAGER] Reply / Comment detected. Auto-skipping...');
-        return { success: true, skippedReply: true, reason: 'Reply / Comment filtered' };
+        console.log('[ATOMX NICHE ENGAGER] Reply / Comment detected. Auto-skipping to next post...');
+        continue;
       }
     }
 

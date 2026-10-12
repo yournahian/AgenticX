@@ -1555,7 +1555,8 @@ async function processAgentWorkflowStep() {
             'SCANNING',
             Math.round(((workflow.successCount || 0) / targetCount) * 100)
           );
-          await delay(1000);
+          await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
+          await delay(1500);
         } else {
           // No fresh post in current screen, scroll down to hydrate more posts
           await sendMessageToTab(tabId, { type: 'SCROLL_FEED_DOWN' }, 5000).catch(() => null);
