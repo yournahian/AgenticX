@@ -1217,7 +1217,7 @@ async function smoothScrollAndHydrate(totalDelta = 650, pauseAfter = 900) {
 async function typeTextHumanLike(editor, text) {
   if (!editor || !text) return false;
 
-  // 1. Focus editor and place blinking cursor in comment box gently without jumping
+  // 1. Move Virtual Cursor to editor/comment box, hover and click to activate text cursor
   const vh = window.innerHeight || document.documentElement.clientHeight;
   const editorRect = editor.getBoundingClientRect();
   if (editorRect.top < 80 || editorRect.bottom > vh - 20) {
@@ -1225,8 +1225,17 @@ async function typeTextHumanLike(editor, text) {
     await sleep(350);
   }
 
+  // Visibly move virtual cursor to the comment box and click
+  console.log('[ATOMX] Moving virtual cursor to comment box and clicking...');
+  await performHumanClick(editor, {
+    pulseColor: '#38BDF8',
+    scroll: false,
+    hoverDwell: 380,
+    postPause: 450
+  });
+
   editor.focus({ preventScroll: true });
-  await sleep(100);
+  await sleep(150);
 
   // 2. Clear editor first using Selection range and delete
   try {
@@ -1237,12 +1246,11 @@ async function typeTextHumanLike(editor, text) {
     sel.addRange(range);
     document.execCommand('delete', false, null);
   } catch (e) {}
-  await sleep(120);
+  await sleep(180);
 
   let typedOk = false;
 
-  // 3. Type character-by-character using native execCommand('insertText')
-  // CRITICAL: Do NOT dispatch manual InputEvent or alter editor.textContent!
+  // 3. Type character-by-character using realistic human cadence (slow & natural)
   // execCommand natively maintains DraftJS's internal ContentState, block offset keys, and backspace handling.
   try {
     for (let i = 0; i < text.length; i++) {
@@ -1262,14 +1270,16 @@ async function typeTextHumanLike(editor, text) {
         throw new Error('execCommand insertText failed');
       }
 
-      // Realistic human cadence & natural punctuation pauses
-      let delay = Math.floor(Math.random() * 25) + 20;
+      // Slower, natural human typing cadence
+      let delay = Math.floor(Math.random() * 55) + 80; // 80ms - 135ms per character
       if (char === '.' || char === '!' || char === '?') {
-        delay += Math.floor(Math.random() * 80) + 120;
+        delay += Math.floor(Math.random() * 180) + 240; // 240ms - 420ms after sentences
       } else if (char === ',' || char === ';') {
-        delay += Math.floor(Math.random() * 40) + 60;
+        delay += Math.floor(Math.random() * 120) + 160; // 160ms - 280ms after commas
       } else if (char === ' ') {
-        delay += Math.floor(Math.random() * 20) + 20;
+        delay += Math.floor(Math.random() * 80) + 110;  // 110ms - 190ms between words
+      } else if (i > 0 && i % 15 === 0) {
+        delay += Math.floor(Math.random() * 150) + 120; // Occasional natural thinking pause
       }
       await sleep(delay);
     }
@@ -1402,28 +1412,29 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     if (!inlineBox && inlineContainer) {
       const placeholder = inlineContainer.querySelector('div[role="button"], div[contenteditable="true"], div[data-testid="tweetTextarea_0"], span');
       if (placeholder) {
-        const vh = window.innerHeight || document.documentElement.clientHeight;
-        const rect = placeholder.getBoundingClientRect();
-        if (rect.top < 80 || rect.bottom > vh - 20) {
-          placeholder.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          await sleep(450);
-        }
-        placeholder.click();
+        await humanScrollElementIntoView(placeholder, 'center');
+        await sleep(350);
+        await performHumanClick(placeholder, {
+          pulseColor: '#38BDF8',
+          scroll: false,
+          hoverDwell: 380,
+          postPause: 400
+        });
         await sleep(350);
         inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
       }
     }
 
     if (inlineBox) {
-      console.log('[ATOMX COMMENT ENGINE] Direct inline reply box detected, smoothly activating without jump...');
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      const rect = inlineBox.getBoundingClientRect();
-      if (rect.top < 80 || rect.bottom > vh - 20) {
-        inlineBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await sleep(450);
-      }
-      inlineBox.focus({ preventScroll: true });
-      inlineBox.click();
+      console.log('[ATOMX COMMENT ENGINE] Direct inline reply box detected, activating via virtual cursor...');
+      await humanScrollElementIntoView(inlineBox, 'center');
+      await sleep(350);
+      await performHumanClick(inlineBox, {
+        pulseColor: '#38BDF8',
+        scroll: false,
+        hoverDwell: 380,
+        postPause: 400
+      });
       textarea = inlineBox;
       isDialog = false;
       await sleep(250);
