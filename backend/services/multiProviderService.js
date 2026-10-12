@@ -634,6 +634,7 @@ function buildPromptMessages(tweetText, styleInstruction) {
     "7. NO EXCLAMATION MARKS: Never use exclamation marks (!). Use periods (.) only.",
     "8. STRICT WORD COUNT: Your reply MUST be strictly between 5 and 10 words long. Never output long essays.",
     "9. NO PREAMBLE: Output ONLY the single reply text itself.",
+    "10. DIVERSITY & ANTI-REPETITION (STRICT): Never start your comment with 'New...', 'This is a...', 'Looks like a...', or 'Great...'. Never use repetitive generic filler words like 'promising', 'game changer', or 'interesting'. Start directly with varied natural sentence structures, sharp opinions, relatable thoughts, or direct human reactions.",
     "",
     "USER INSTRUCTIONS & STYLE DIRECTIVES:",
     styleInstruction || "Write a casual, highly human reply between 5 and 10 words."
@@ -851,7 +852,9 @@ async function executeProviderCall({
             { role: 'user', content: userContent }
           ],
           max_tokens: maxTokens,
-          temperature: 0.65
+          temperature: 0.85,
+          frequency_penalty: 0.35,
+          presence_penalty: 0.25
         })
       });
       const latencyMs = Date.now() - t0;
