@@ -1461,10 +1461,19 @@ async function processAgentWorkflowStep() {
         const mainAuthor = (t.author || '').toLowerCase().replace(/^@/, '').trim();
         await syncAgentHud(workflow, `Navigating to post by @${mainAuthor || 'creator'} to inspect comments...`, 'SCANNING', Math.round(((workflow.successCount || 0) / targetCount) * 100));
 
-        // Open top post in the EXACT SAME tab!
-        await getOrCreateReusedTab(tabId, t.url);
+        // Visibly move virtual cursor to top post on the page and click to enter!
+        const clickPostRes = await sendMessageToTab(tabId, {
+          type: 'CLICK_AND_OPEN_TARGET_POST',
+          postUrl: t.url,
+          author: mainAuthor
+        }, 5000).catch(() => null);
+
+        if (!clickPostRes || !clickPostRes.clicked) {
+          // Fallback tab navigation if not clicked via DOM
+          await getOrCreateReusedTab(tabId, t.url);
+        }
         await waitForTabLoad(tabId, 15000);
-        await delay(3000);
+        await delay(2500);
 
         // Inside this post: iteratively find unliked comment -> like comment -> visit profile in same tab -> engage -> go back -> repeat
         while ((workflow.successCount || 0) < targetCount) {

@@ -409,22 +409,95 @@ const QWERTY_NEIGHBORS = {
 };
 
 /**
- * Gentle scroll into view that never causes violent jumps or jarring snaps.
- * If element is already visible within comfortable viewport bounds, does not move the screen at all!
+ * Natural Human Smooth Scrolling Engine:
+ * Simulates genuine physical mousewheel / trackpad / touch strokes with:
+ * - Variable stroke flick distances (140px - 220px per stroke)
+ * - Cubic velocity deceleration curves (easing)
+ * - 60fps micro-steps (15-25ms intervals)
+ * - Organic human pauses between strokes (as a person scans reading material)
+ * NEVER violently jumps, snaps, or jerks the viewport ("akbae tan diya chole ashe na").
+ */
+async function humanSmoothScroll(distance, options = {}) {
+  const isUp = distance < 0;
+  const absDist = Math.abs(distance);
+  if (absDist < 6) return;
+
+  const flickBase = options.flickSize || (160 + Math.random() * 80);
+  const numFlicks = Math.max(1, Math.round(absDist / flickBase));
+  const flickDist = absDist / numFlicks;
+
+  for (let f = 0; f < numFlicks; f++) {
+    if (isWorkflowAborted || isWorkflowItemSkipped) break;
+
+    const steps = 9 + Math.floor(Math.random() * 4); // 9-12 smooth micro-steps per stroke
+    const thisFlickTarget = (f === numFlicks - 1) ? (absDist - f * flickDist) : flickDist;
+
+    let traveled = 0;
+    for (let s = 1; s <= steps; s++) {
+      if (isWorkflowAborted || isWorkflowItemSkipped) break;
+      const t = s / steps;
+      // Smooth cubic ease-out curve
+      const ease = 1 - Math.pow(1 - t, 3);
+      const stepTarget = Math.round(thisFlickTarget * ease);
+      const delta = stepTarget - traveled;
+      traveled = stepTarget;
+
+      if (delta !== 0) {
+        window.scrollBy(0, isUp ? -delta : delta);
+      }
+      await sleep(16 + Math.floor(Math.random() * 12));
+    }
+
+    if (f < numFlicks - 1) {
+      await sleep(70 + Math.floor(Math.random() * 90)); // Human pause between strokes
+    }
+  }
+
+  await sleep(options.settlePause || 180);
+}
+
+/**
+ * Human-like smooth alignment: scrolls the element into comfortable viewport position
+ * using natural human strokes without any violent instant snapping.
+ */
+async function humanScrollElementIntoView(element, position = 'center') {
+  if (!element || typeof element.getBoundingClientRect !== 'function') return false;
+  try {
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    let rect = element.getBoundingClientRect();
+
+    let targetY = 0;
+    if (position === 'center') {
+      targetY = rect.top - (vh / 2 - rect.height / 2);
+    } else if (position === 'top') {
+      targetY = rect.top - 100;
+    } else if (position === 'bottom') {
+      targetY = rect.bottom - (vh - 90);
+    } else {
+      if (rect.top >= 90 && rect.bottom <= vh - 70) return true; // Already comfortably in view
+      targetY = rect.top < 90 ? (rect.top - 110) : (rect.bottom - (vh - 90));
+    }
+
+    if (Math.abs(targetY) < 18) return true; // Already in comfortable position
+
+    await humanSmoothScroll(Math.round(targetY), { settlePause: 220 });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Non-blocking gentle scroll helper using human smooth scrolling
  */
 function gentleScrollIntoView(element) {
   if (!element) return;
   try {
     const rect = element.getBoundingClientRect();
     const vh = window.innerHeight || document.documentElement.clientHeight;
-    // Already nicely visible on screen
-    if (rect.top >= 60 && rect.bottom <= vh - 40) {
-      return;
-    }
-    element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  } catch (e) {
-    // Graceful fallback
-  }
+    if (rect.top >= 90 && rect.bottom <= vh - 60) return;
+    humanScrollElementIntoView(element, 'center');
+  } catch (e) {}
 }
 
 /**
@@ -432,34 +505,8 @@ function gentleScrollIntoView(element) {
  * wait for scroll animation to settle so the button is visibly shown on screen, and THEN engage.
  */
 async function scrollElementIntoViewAndEnsureVisible(element, blockPosition = 'center') {
-  if (!element || typeof element.getBoundingClientRect !== 'function') return false;
-  try {
-    const vh = window.innerHeight || document.documentElement.clientHeight;
-    let rect = element.getBoundingClientRect();
-
-    // If not comfortably within visible middle area of viewport, smoothly scroll
-    const isNicelyInView = (rect.top >= 100 && rect.bottom <= vh - 70);
-    if (!isNicelyInView) {
-      element.scrollIntoView({ behavior: 'smooth', block: blockPosition, inline: 'nearest' });
-      // Crucial: wait for browser smooth scroll to finish so the element is physically visible on screen
-      await sleep(650);
-    } else {
-      await sleep(200);
-    }
-
-    if (isWorkflowAborted || isWorkflowItemSkipped) return false;
-
-    // Safety check: if still offscreen, position directly
-    rect = element.getBoundingClientRect();
-    if (rect.top < 50 || rect.bottom > vh) {
-      element.scrollIntoView({ behavior: 'auto', block: blockPosition });
-      await sleep(150);
-    }
-    return true;
-  } catch (err) {
-    console.warn('[ATOMX] Scroll into view error:', err);
-    return false;
-  }
+  if (!element) return false;
+  return await humanScrollElementIntoView(element, blockPosition);
 }
 
 /**
@@ -505,23 +552,16 @@ async function ensurePostAndActionsInView(mainArticle, targetButton = null) {
 
       // Calculate target scroll position so the inline reply container sits comfortably at ~75% - 82% of viewport height.
       // This positions the Like button right above it at ~55% - 65% of viewport height (exact Screenshot 2 layout).
-      const targetY = window.scrollY + replyRect.bottom - (vh * 0.82);
-      const scrollPos = Math.max(0, Math.round(targetY));
-
-      if (Math.abs(scrollPos - window.scrollY) > 25) {
-        window.scrollTo({ top: scrollPos, behavior: 'smooth' });
-        await sleep(650); // Wait for smooth scroll animation to settle
+      const deltaY = targetY - window.scrollY;
+      if (Math.abs(deltaY) > 25) {
+        await humanSmoothScroll(Math.round(deltaY), { settlePause: 220 });
       }
       return;
     }
 
     // Fallback for feeds/timeline posts: ensure action button is centered
     if (btn) {
-      const rect = btn.getBoundingClientRect();
-      if (rect.top < 100 || rect.bottom > vh - 80) {
-        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await sleep(550);
-      }
+      await humanScrollElementIntoView(btn, 'center');
     }
   } catch (err) {
     console.warn('[ATOMX] ensurePostAndActionsInView error:', err);
@@ -923,13 +963,16 @@ async function performHumanClick(targetElement, options = {}) {
   ensureVirtualCursorActive();
 
   // 1. Visibly animate cursor from current position to target element FIRST
-  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 280);
+  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 320);
 
-  // 2. Human dwell pause (140-200ms) so user visibly sees the cursor resting ON the button
-  await sleep(150 + Math.random() * 50);
+  // 2. Human dwell pause (280-380ms) so user visibly sees the cursor resting ON the button before clicking
+  await sleep(options.hoverDwell || (280 + Math.random() * 80));
 
-  // 3. Trigger click ripple effect on cursor
+  // 3. Trigger click ripple effect and cursor press animation
   triggerVirtualCursorClickEffect();
+
+  // Press dwell: natural human finger hold duration before release
+  await sleep(90 + Math.random() * 30);
 
   // 4. Visual element pulse (button reacts to cursor click)
   triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
@@ -937,7 +980,7 @@ async function performHumanClick(targetElement, options = {}) {
   // 5. Dispatch single human event sequence (single click only)
   dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
 
-  await sleep(options.postPause || 250);
+  await sleep(options.postPause || 280);
   return true;
 }
 
@@ -2368,6 +2411,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Agent 1: Audience Builder — Click and open top post with virtual cursor
+  if (message.type === 'CLICK_AND_OPEN_TARGET_POST') {
+    clickAndOpenTargetPost(message.postUrl, message.author)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // Agent 1: Audience Builder — Find, mark/like, and extract next unvisited comment in thread
   if (message.type === 'FIND_AND_LIKE_NEXT_UNPROCESSED_COMMENT') {
     findAndLikeNextUnprocessedComment(message)
@@ -3293,21 +3344,43 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
       seenHandlesInThisScan.add(cleanHandle);
 
       // Found a fresh, unliked comment!
-      art.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(500);
+      await humanScrollElementIntoView(art, 'center');
+      await sleep(300);
 
-      // 1. LIKE the comment on the post to track it & notify commenter!
+      // 1. LIKE the comment on the post with Virtual Cursor (cursor moves, hovers, clicks)
       const likeBtn = art.querySelector('button[data-testid="like"]');
       let commentLiked = false;
       if (likeBtn) {
         try {
-          likeBtn.click();
+          await performHumanClick(likeBtn, {
+            pulseColor: '#F43F5E',
+            scroll: false,
+            hoverDwell: 300,
+            postPause: 350
+          });
           commentLiked = true;
-          console.log(`[ATOMX AUDIENCE] Successfully liked comment by @${cleanHandle} on post!`);
-          await sleep(600);
+          console.log(`[ATOMX AUDIENCE] Successfully liked comment by @${cleanHandle} with virtual cursor!`);
+          await sleep(350);
         } catch (likeErr) {
           console.warn('[ATOMX AUDIENCE] Like comment click notice:', likeErr);
         }
+      }
+
+      // 2. Visibly move Virtual Cursor to commenter's avatar/handle and click to open their profile!
+      const profileLink = art.querySelector('div[data-testid="User-Name"] a[role="link"]') ||
+                          art.querySelector(`a[href="/${cleanHandle}" i], a[href="/${cleanHandle}/" i]`) ||
+                          art.querySelector('div[data-testid*="UserAvatar"]')?.closest('a');
+      if (profileLink) {
+        try {
+          console.log(`[ATOMX AUDIENCE] Moving virtual cursor to @${cleanHandle}'s profile link and clicking to visit...`);
+          await sleep(250);
+          await performHumanClick(profileLink, {
+            pulseColor: '#38BDF8',
+            scroll: false,
+            hoverDwell: 300,
+            postPause: 500
+          });
+        } catch (pErr) {}
       }
 
       return {
@@ -3326,13 +3399,12 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
       return txt.includes('show replies') || txt.includes('show more replies') || txt.includes('show probability') || txt.includes('hidden replies');
     });
     if (showBtns.length > 0) {
-      showBtns[0].click();
-      await sleep(800);
+      await performHumanClick(showBtns[0], { scroll: false, hoverDwell: 250 });
+      await sleep(600);
     }
 
-    // Scroll down to reveal more comments
-    window.scrollBy({ top: 800, behavior: 'smooth' });
-    await sleep(850);
+    // Scroll down human-like to reveal more comments
+    await humanSmoothScroll(520 + Math.floor(Math.random() * 140), { settlePause: 400 });
   }
 
   return { found: false, exhausted: true };
@@ -4824,6 +4896,56 @@ async function discoverTopEngagedListTweets(params = {}) {
     topTweets: sorted,
     aborted: isWorkflowAborted
   };
+}
+
+/**
+ * Visibly moves virtual cursor to target tweet card and clicks to open its status thread
+ */
+async function clickAndOpenTargetPost(postUrl, targetAuthor) {
+  ensureVirtualCursorActive();
+  const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+  let targetArticle = null;
+
+  for (const art of articles) {
+    const links = Array.from(art.querySelectorAll('a[href*="/status/"]'));
+    if (links.some(a => a.href && postUrl && a.href.includes(postUrl.split('/status/')[1]))) {
+      targetArticle = art;
+      break;
+    }
+  }
+
+  if (!targetArticle && targetAuthor) {
+    for (const art of articles) {
+      const userEl = art.querySelector('div[data-testid="User-Name"]');
+      if (userEl && userEl.innerText.toLowerCase().includes(targetAuthor.toLowerCase())) {
+        targetArticle = art;
+        break;
+      }
+    }
+  }
+
+  if (!targetArticle && articles.length > 0) {
+    targetArticle = articles[0];
+  }
+
+  if (targetArticle) {
+    await humanScrollElementIntoView(targetArticle, 'center');
+    await sleep(250);
+
+    const statusLink = targetArticle.querySelector('a[href*="/status/"] time')?.closest('a') ||
+                       targetArticle.querySelector('a[href*="/status/"]') ||
+                       targetArticle;
+
+    console.log('[ATOMX] Moving virtual cursor to target post and clicking to open...');
+    await performHumanClick(statusLink, {
+      pulseColor: '#38BDF8',
+      scroll: false,
+      hoverDwell: 320,
+      postPause: 500
+    });
+    return { success: true, clicked: true };
+  }
+  return { success: false };
 }
 
 // =========================================================================
