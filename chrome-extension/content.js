@@ -4078,6 +4078,12 @@ async function engageAndFollowProfile(options = {}) {
             const authorName = tweetData.authorName || targetHandle;
             const authorHandle = tweetData.authorHandle || `@${targetHandle}`;
 
+            const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
+              ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}))
+              : {};
+            const effStyle = options.style || stored?.selectedTone || style || 'Bullish (5-10 words)';
+            const effPrompt = options.stylePrompt || stored?.selectedTonePrompt || stylePrompt || null;
+
             let commentToPost = '';
             try {
               const aiRes = await chrome.runtime.sendMessage({
@@ -4085,8 +4091,8 @@ async function engageAndFollowProfile(options = {}) {
                 tweetText,
                 tweetAuthor: authorHandle,
                 tweetAuthorName: authorName,
-                style,
-                stylePrompt
+                style: effStyle,
+                stylePrompt: effPrompt
               });
               if (aiRes?.reply) commentToPost = aiRes.reply.trim();
             } catch (mErr) {
@@ -4096,14 +4102,9 @@ async function engageAndFollowProfile(options = {}) {
             // Direct fetch fallback if background worker failed
             if (!commentToPost) {
               try {
-                const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
-                  ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}))
-                  : {};
                 const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
                 const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
                 const uId = stored?.currentUser?.id || stored?.user?.id || null;
-                const effStyle = stored?.selectedTone || style || 'Bullish (5-10 words)';
-                const effPrompt = stored?.selectedTonePrompt || stylePrompt || null;
 
                 const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
                   method: 'POST',
@@ -4134,7 +4135,7 @@ async function engageAndFollowProfile(options = {}) {
               commentToPost = 'Spot on insight. Keep building!';
             }
 
-            commentToPost = sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(stored?.selectedTonePrompt || stored?.selectedTone));
+            commentToPost = sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(effPrompt || effStyle));
             if (commentToPost) {
               const commentRes = await postCommentOnTargetArticle(art, commentToPost);
               if (commentRes && commentRes.success) {
