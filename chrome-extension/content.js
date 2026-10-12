@@ -2530,6 +2530,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Agent 14: Home Feed Engager — Scan home timeline, auto-skip Ads, and execute actions
+  if (message.type === 'EXECUTE_HOME_FEED_ENGAGEMENT_STEP') {
+    executeHomeFeedEngagementStep(message)
+      .then(res => sendResponse(res))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'SCROLL_FEED_DOWN') {
+    humanSmoothScroll(700, { settlePause: 300 }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   // Agent 13: Commenter Reciprocator — Engage on commenter profile
   if (message.type === 'RECIPROCAL_PROFILE_ENGAGEMENT') {
     engageAndFollowProfile(message)
@@ -4514,6 +4527,185 @@ async function collectReciprocatorCommenters(params = {}) {
     likesGiven,
     skippedAlreadyLiked
   };
+}
+
+// =========================================================================
+// AGENT 14: HOME FEED ENGAGER (x.com/home with Ad Skip & AI Voice)
+// =========================================================================
+
+/**
+ * Detects whether a tweet article is a Promoted Post / Sponsored Ad on Twitter/X.
+ * Checks placement tracking testids, icon-promoted SVGs, and text indicators.
+ */
+function isPromotedTweet(article) {
+  if (!article) return false;
+
+  // 1. Placement tracking / Promoted testids
+  if (article.querySelector('[data-testid="placementTracking"], [data-testid="promoted"], svg[data-testid="icon-promoted"]')) {
+    return true;
+  }
+
+  // 2. Direct text markers within badges, spans, or user name metadata
+  const textSpans = Array.from(article.querySelectorAll('span, div[dir="ltr"]'));
+  for (const el of textSpans) {
+    const txt = (el.innerText || '').trim();
+    if (txt === 'Ad' || txt === 'Promoted' || txt === 'Sponsored' || txt === 'Promoted Tweet') {
+      return true;
+    }
+  }
+
+  // 3. Twitter business / ads redirect links
+  if (article.querySelector('a[href*="/ads"], a[href*="/business"]')) {
+    return true;
+  }
+
+  // 4. Raw text content check for promoted indicators
+  const rawText = article.innerText || '';
+  if (rawText.includes('Promoted') || rawText.startsWith('Ad\n') || rawText.includes('\nAd\n')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Scans user's Home Timeline (x.com/home) for fresh unengaged posts.
+ * Skips Promoted Ads automatically.
+ * Skips user's own posts and already engaged tweets.
+ * Executes requested actions (Like, Comment, Repost, Follow) with human pacing and AI voice.
+ */
+async function executeHomeFeedEngagementStep(params = {}) {
+  isWorkflowItemSkipped = false;
+  if (isWorkflowAborted) return { success: false, aborted: true };
+
+  const actions = params.actions || { like: true, comment: true, repost: false, follow: false };
+  const verifiedHandle = (params.verifiedXHandle || '').toLowerCase().replace(/^@/, '').trim();
+  const loggedInHandle = (getLoggedInUserHandle() || '').toLowerCase();
+  const alreadyEngagedSet = new Set((params.alreadyEngagedIds || []).map(String));
+
+  // Find timeline articles
+  let articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+  if (articles.length === 0) {
+    for (let r = 0; r < 5 && articles.length === 0; r++) {
+      if (isWorkflowAborted || isWorkflowItemSkipped) return { success: false, aborted: true };
+      await humanSmoothScroll(400, { settlePause: 400 });
+      articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+    }
+  }
+
+  if (articles.length === 0) {
+    return { success: false, reason: 'No timeline tweets found' };
+  }
+
+  for (const art of articles) {
+    if (isWorkflowAborted || isWorkflowItemSkipped) return { success: false, aborted: true };
+
+    // 1. Promoted Ad Check — Auto-skip 100% of Ads
+    if (isPromotedTweet(art)) {
+      console.log('[ATOMX FEED ENGAGER] Promoted Ad detected. Auto-skipping...');
+      return { success: true, skippedAd: true, reason: 'Promoted Ad' };
+    }
+
+    const data = extractTweetData(art);
+    const cleanHandle = (data.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+    const tweetId = data.tweetId;
+
+    // 2. Skip user's own posts
+    if (cleanHandle && (cleanHandle === loggedInHandle || cleanHandle === verifiedHandle)) {
+      continue;
+    }
+
+    // 3. Skip already engaged
+    const isAlreadyLiked = isPostAlreadyLiked(art);
+    if (tweetId && alreadyEngagedSet.has(String(tweetId))) {
+      continue;
+    }
+    // If like is the only requested action and it's already liked, skip
+    if (actions.like && !actions.comment && !actions.repost && !actions.follow && isAlreadyLiked) {
+      continue;
+    }
+
+    // Check if article has action buttons
+    const hasButtons = art.querySelector('button[data-testid="like"], button[data-testid="unlike"], button[data-testid="reply"]');
+    if (!hasButtons) continue;
+
+    // Found fresh unengaged post! Bring comfortably to screen center
+    await humanScrollElementIntoView(art, 'center');
+    await sleep(400);
+
+    const performed = { like: false, comment: false, repost: false, follow: false };
+
+    // Action 1: Like
+    if (actions.like && !isAlreadyLiked && !isWorkflowAborted && !isWorkflowItemSkipped) {
+      const ok = await simulateHumanLikeClick(art);
+      if (ok) performed.like = true;
+      await sleep(400);
+    }
+
+    // Action 2: Repost
+    if (actions.repost && !isWorkflowAborted && !isWorkflowItemSkipped) {
+      const ok = await simulateHumanRepostClick(art);
+      if (ok) performed.repost = true;
+      await sleep(400);
+    }
+
+    // Action 3: Comment (with AI Voice)
+    if (actions.comment && !isWorkflowAborted && !isWorkflowItemSkipped) {
+      const liveTweetText = (data.text || '').trim();
+      const liveAuthor = data.authorHandle || '@user';
+
+      let commentToPost = '';
+      try {
+        const aiResp = await new Promise(resolve => {
+          chrome.runtime.sendMessage({
+            type: 'GENERATE_AI_REPLY',
+            tweetText: liveTweetText,
+            tweetAuthor: liveAuthor,
+            tweetAuthorName: data.authorName || '',
+            style: params.style || 'Bullish (5-10 words)',
+            stylePrompt: params.stylePrompt || null
+          }, resolve);
+        });
+        if (aiResp && aiResp.success && aiResp.reply) {
+          commentToPost = aiResp.reply;
+        }
+      } catch (e) {}
+
+      if (!commentToPost) {
+        commentToPost = 'Spot on insight. Keep building forward.';
+      }
+      commentToPost = sanitizeClientComment(commentToPost, 10);
+
+      const comRes = await postCommentOnTargetArticle(art, commentToPost);
+      if (comRes && comRes.success) {
+        performed.comment = true;
+      }
+      await sleep(500);
+    }
+
+    // Action 4: Follow
+    if (actions.follow && !isWorkflowAborted && !isWorkflowItemSkipped) {
+      const followBtn = art.querySelector('button[data-testid$="-follow"]');
+      if (followBtn) {
+        await simulateHumanFollowClick(followBtn);
+        performed.follow = true;
+        await sleep(400);
+      }
+    }
+
+    return {
+      success: true,
+      engaged: true,
+      tweetId: tweetId || null,
+      authorHandle: cleanHandle || 'creator',
+      performed,
+      commented: performed.comment
+    };
+  }
+
+  // If no fresh post in current viewport, smoothly scroll down
+  await humanSmoothScroll(700, { settlePause: 400 });
+  return { success: false, scrolledMore: true };
 }
 
 // =========================================================================

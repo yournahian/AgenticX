@@ -919,6 +919,14 @@ function updateAgentWorkflowProgressUI(wf) {
       pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn',
       resetBtn: 'resetReciprocatorQueueBtn'
     },
+    feedengager: {
+      card: 'feedEngagerProgressCard', badge: 'feedEngagerStateBadge', ind: 'feedEngagerQueueIndicator',
+      done: 'feedEngagerCountDone', col: 'feedEngagerCountQueue', skip: 'feedEngagerCountSkipped',
+      bar: 'feedEngagerProgressBar', status: 'feedEngagerLiveStatusText', cd: 'feedEngagerCountdownText',
+      startBtn: 'runFeedEngagerBtn', stopBtn: 'stopFeedEngagerBtn',
+      pauseBtn: 'pauseFeedEngagerBtn', skipBtn: 'skipFeedEngagerBtn',
+      resetBtn: 'resetFeedEngagerBtn'
+    },
     tg: {
       card: 'telegramProgressCard', badge: 'tgStateBadge', ind: null,
       done: 'tgDoneCount', col: 'tgTotalCount', skip: 'tgSkippedCount',
@@ -938,6 +946,7 @@ function updateAgentWorkflowProgressUI(wf) {
     else if (t.includes('reply')) agentId = 'replyback';
     else if (t.includes('unfollow')) agentId = 'unfollow';
     else if (t.includes('reciprocator')) agentId = 'reciprocator';
+    else if (t.includes('feed') || t.includes('home')) agentId = 'feedengager';
   }
   if (!agentId) {
     const activePanel = document.querySelector('.agent-panel-content:not([style*="display: none"])');
@@ -1569,10 +1578,12 @@ function renderTonePills() {
   const sorsaVoiceLabel = document.getElementById('sorsaActiveToneLabel');
   const followerVoiceLabel = document.getElementById('followerActiveToneLabel');
   const recipVoiceLabel = document.getElementById('reciprocatorActiveToneLabel');
+  const feedVoiceLabel = document.getElementById('feedActiveToneLabel');
   if (tgVoiceLabel) tgVoiceLabel.textContent = activeVoiceText;
   if (sorsaVoiceLabel) sorsaVoiceLabel.textContent = activeVoiceText;
   if (followerVoiceLabel) followerVoiceLabel.textContent = activeVoiceText;
   if (recipVoiceLabel) recipVoiceLabel.textContent = activeVoiceText;
+  if (feedVoiceLabel) feedVoiceLabel.textContent = activeVoiceText;
 
   // Update limit display in drawer
   state.maxCustomTemplates = getPlanMaxCustomTones(state.userPlan);
@@ -2044,7 +2055,8 @@ const AGENT_META = {
   creators: { title: 'Favorite Creators Radar', icon: '⭐', badge: 'RADAR', desc: 'Save favorite handles ➔ Instant top early comment spots' },
   defaulter: { title: 'Find Defaulters', icon: '🔍', badge: 'AUDIT POD', desc: 'Scan post comments & detect members who skipped commenting' },
   tgliveliker: { title: 'TG Live Liker (Proof Rec)', icon: '🔴', badge: 'PROOF REC', desc: 'Continuous raid liker — keeps tab open for screen record proof' },
-  reciprocator: { title: 'Commenter Reciprocator', icon: '🤝', badge: 'RECIPROCAL', desc: 'Visits accounts who commented on your post & comments back on their recent posts' }
+  reciprocator: { title: 'Commenter Reciprocator', icon: '🤝', badge: 'RECIPROCAL', desc: 'Visits accounts who commented on your post & comments back on their recent posts' },
+  feedengager: { title: 'Home Feed Engager', icon: '🏠', badge: 'FEED AI', desc: 'Autonomous engagement on your X Home Timeline with Ad skip & AI voice' }
 };
 
 function extractTwitterListUrl(text) {
@@ -2430,7 +2442,8 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     { id: 'stopFollowerIncreaseBtn', agentId: 'followers', title: 'Followers Increase' },
     { id: 'stopReplyBackBtn', agentId: 'replyback', title: 'Reply Back Loop' },
     { id: 'stopAutoUnfollowBtn', agentId: 'unfollow', title: 'Auto Unfollow' },
-    { id: 'stopReciprocatorBtn', agentId: 'reciprocator', title: 'Commenter Reciprocator' }
+    { id: 'stopReciprocatorBtn', agentId: 'reciprocator', title: 'Commenter Reciprocator' },
+    { id: 'stopFeedEngagerBtn', agentId: 'feedengager', title: 'Home Feed Engager' }
   ];
 
   stopButtonConfigs.forEach(({ id, agentId, title }) => {
@@ -2448,7 +2461,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   // Wire all Pause Buttons
   [
     'pauseTgEngageBtn', 'pauseAudienceBuilderBtn', 'pauseSorsaBoosterBtn', 'pauseFollowerIncreaseBtn',
-    'pauseReplyBackBtn', 'pauseAutoUnfollowBtn', 'pauseReciprocatorBtn'
+    'pauseReplyBackBtn', 'pauseAutoUnfollowBtn', 'pauseReciprocatorBtn', 'pauseFeedEngagerBtn'
   ].forEach(id => {
     document.getElementById(id)?.addEventListener('click', handleToggleWorkflowPause);
   });
@@ -2456,9 +2469,42 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   // Wire all Skip Buttons
   [
     'skipTgEngageBtn', 'skipAudienceBuilderBtn', 'skipSorsaBoosterBtn', 'skipFollowerIncreaseBtn',
-    'skipReplyBackBtn', 'skipAutoUnfollowBtn', 'skipReciprocatorBtn'
+    'skipReplyBackBtn', 'skipAutoUnfollowBtn', 'skipReciprocatorBtn', 'skipFeedEngagerBtn'
   ].forEach(id => {
     document.getElementById(id)?.addEventListener('click', handleSkipWorkflowItem);
+  });
+
+  // Home Feed Engager Launch & Reset Buttons
+  document.getElementById('runFeedEngagerBtn')?.addEventListener('click', startHomeFeedEngagerWorkflow);
+  document.getElementById('resetFeedEngagerBtn')?.addEventListener('click', () => {
+    const doneEl = document.getElementById('feedEngagerCountDone');
+    const queueEl = document.getElementById('feedEngagerCountQueue');
+    const skipEl = document.getElementById('feedEngagerCountSkipped');
+    const qInd = document.getElementById('feedEngagerQueueIndicator');
+    const bar = document.getElementById('feedEngagerProgressBar');
+    const status = document.getElementById('feedEngagerLiveStatusText');
+    const badge = document.getElementById('feedEngagerStateBadge');
+    const countdown = document.getElementById('feedEngagerCountdownText');
+    const card = document.getElementById('feedEngagerProgressCard');
+    const startBtn = document.getElementById('runFeedEngagerBtn');
+    const stopBtn = document.getElementById('stopFeedEngagerBtn');
+    const pauseBtn = document.getElementById('pauseFeedEngagerBtn');
+    const skipBtn = document.getElementById('skipFeedEngagerBtn');
+
+    if (doneEl) doneEl.textContent = '0';
+    if (queueEl) queueEl.textContent = '10';
+    if (skipEl) skipEl.textContent = '0';
+    if (qInd) qInd.textContent = 'Post 0/10';
+    if (bar) bar.style.width = '0%';
+    if (badge) { badge.textContent = 'IDLE'; badge.className = 'badge-mini'; }
+    if (status) status.textContent = 'Ready to engage feed...';
+    if (countdown) countdown.style.display = 'none';
+    if (card) card.style.display = 'none';
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    showExtToast('Home Feed Engager Reset', '🔄');
   });
 
   // Telegram Engage Reset Button
@@ -3598,6 +3644,93 @@ async function startCommenterReciprocatorWorkflow() {
       likeRecent: optLike,
       commentRecent: optComment,
       followUser: optFollow,
+      style: tone,
+      stylePrompt: tonePrompt,
+      backendUrl,
+      verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
+    }
+  });
+}
+
+// =========================================================================
+// AGENT 14: HOME FEED ENGAGER WORKFLOW ENGINE (x.com/home with Ad Skip)
+// =========================================================================
+async function startHomeFeedEngagerWorkflow() {
+  if (!(await ensureVerifiedAccountOrBlock())) return;
+
+  const targetCount = Number(document.getElementById('feedTargetCountSelect')?.value || 10);
+  const pacingDelaySec = Number(document.getElementById('feedPacingDelaySelect')?.value || 10);
+
+  const optLike = document.getElementById('feedOptLike')?.checked ?? true;
+  const optComment = document.getElementById('feedOptComment')?.checked ?? true;
+  const optRepost = document.getElementById('feedOptRepost')?.checked ?? false;
+  const optFollow = document.getElementById('feedOptFollow')?.checked ?? false;
+
+  if (!optLike && !optComment && !optRepost && !optFollow) {
+    showExtToast('Select at least one action (Like, Comment, Repost, or Follow)', '⚠️');
+    return;
+  }
+
+  const startBtn = document.getElementById('runFeedEngagerBtn');
+  const stopBtn = document.getElementById('stopFeedEngagerBtn');
+  const pauseBtn = document.getElementById('pauseFeedEngagerBtn');
+  const skipBtn = document.getElementById('skipFeedEngagerBtn');
+  const progressCard = document.getElementById('feedEngagerProgressCard');
+  const stateBadge = document.getElementById('feedEngagerStateBadge');
+  const queueIndicator = document.getElementById('feedEngagerQueueIndicator');
+  const barEl = document.getElementById('feedEngagerProgressBar');
+  const doneEl = document.getElementById('feedEngagerCountDone');
+  const queueEl = document.getElementById('feedEngagerCountQueue');
+  const skipEl = document.getElementById('feedEngagerCountSkipped');
+  const statusText = document.getElementById('feedEngagerLiveStatusText');
+  const countdownEl = document.getElementById('feedEngagerCountdownText');
+
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-flex';
+  if (pauseBtn) pauseBtn.style.display = 'inline-flex';
+  if (skipBtn) skipBtn.style.display = 'inline-flex';
+  if (progressCard) progressCard.style.display = 'block';
+
+  if (stateBadge) stateBadge.textContent = 'SCANNING';
+  if (doneEl) doneEl.textContent = '0';
+  if (queueEl) queueEl.textContent = String(targetCount);
+  if (skipEl) skipEl.textContent = '0';
+  if (barEl) barEl.style.width = '5%';
+  if (countdownEl) countdownEl.style.display = 'none';
+  if (queueIndicator) queueIndicator.textContent = `Post 0/${targetCount}`;
+  if (statusText) statusText.textContent = 'Opening Home Timeline (x.com/home)... Filtering Ads & scanning posts.';
+
+  syncFloatingHud(null, {
+    title: 'Home Feed Engager',
+    stateBadge: 'SCANNING',
+    indicator: `Post 0/${targetCount}`,
+    done: 0,
+    collected: targetCount,
+    skipped: 0,
+    progressPercent: 5,
+    statusText: 'Opening Home Timeline (x.com/home)... Filtering Ads & scanning posts.'
+  });
+
+  const backendUrl = await getBackendUrl();
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
+  const tone = state.selectedTone || 'Bullish (5-10 words)';
+  const tonePrompt = state.selectedTonePrompt || null;
+
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'feedengager',
+    title: 'Home Feed Engager',
+    tabId,
+    items: [],
+    options: {
+      targetCount,
+      pacingDelaySec,
+      likePosts: optLike,
+      commentPosts: optComment,
+      repostPosts: optRepost,
+      followPosts: optFollow,
       style: tone,
       stylePrompt: tonePrompt,
       backendUrl,
