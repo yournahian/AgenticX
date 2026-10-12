@@ -941,13 +941,19 @@ async function getActiveExecutionStrategy() {
 async function performHumanClick(targetElement, options = {}) {
   if (!targetElement) return false;
 
-  // Viewport scroll alignment if enabled
-  if (options.scroll !== false) {
-    gentleScrollIntoView(targetElement);
-    await sleep(options.prePause || 150);
+  // Viewport scroll alignment: Always ensure target element is comfortably inside the viewport!
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const vw = window.innerWidth || document.documentElement.clientWidth;
+  let rect = targetElement.getBoundingClientRect();
+  const isOffscreen = rect.top < 80 || rect.bottom > (vh - 60) || rect.left < 0 || rect.right > vw || rect.width === 0 || rect.height === 0;
+
+  if (isOffscreen || options.scroll === true) {
+    console.log('[ATOMX ACTION] Target element is off-screen. Smooth scrolling into viewport center first...');
+    await humanScrollElementIntoView(targetElement, 'center');
+    await sleep(350);
+    rect = targetElement.getBoundingClientRect();
   }
 
-  const rect = targetElement.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     targetElement.click();
     return true;
@@ -973,7 +979,7 @@ async function performHumanClick(targetElement, options = {}) {
 
       if (response && response.ok) {
         triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
-        await sleep(options.postPause || 250);
+        await sleep(options.postPause || 450);
         return true;
       }
       console.warn('[ATOMX ACTION] CDP click response not ok, falling back to Visual DOM mode:', response?.error);
@@ -986,17 +992,17 @@ async function performHumanClick(targetElement, options = {}) {
   // Mode A: Enhanced Visual DOM Simulation (Default & Safe Mode)
   ensureVirtualCursorActive();
 
-  // 1. Visibly animate cursor from current position to target element FIRST
-  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 400);
+  // 1. Visibly animate cursor from current position to target element FIRST (smooth, unhurried transit)
+  await animateVirtualCursorTo(targetX, targetY, options.animDuration || (550 + Math.random() * 150));
 
-  // 2. Human dwell pause (380-520ms) so user visibly sees the cursor resting ON the button before clicking
-  await sleep(options.hoverDwell || (380 + Math.random() * 140));
+  // 2. Human dwell pause (480-680ms) so user visibly sees the cursor resting ON the button before clicking
+  await sleep(options.hoverDwell || (480 + Math.random() * 200));
 
   // 3. Trigger click ripple effect and cursor press animation
   triggerVirtualCursorClickEffect();
 
-  // Press dwell: natural human finger hold duration before release (130-180ms)
-  await sleep(130 + Math.random() * 50);
+  // Press dwell: natural human finger hold duration before release (160-220ms)
+  await sleep(160 + Math.random() * 60);
 
   // 4. Visual element pulse (button reacts to cursor click)
   triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
@@ -1004,7 +1010,8 @@ async function performHumanClick(targetElement, options = {}) {
   // 5. Dispatch single human event sequence (single click only)
   dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
 
-  await sleep(options.postPause || 350);
+  // Post-click pause (450-650ms) to let action register visibly
+  await sleep(options.postPause || (450 + Math.random() * 200));
   return true;
 }
 
@@ -1270,16 +1277,16 @@ async function typeTextHumanLike(editor, text) {
         throw new Error('execCommand insertText failed');
       }
 
-      // Slower, natural human typing cadence
-      let delay = Math.floor(Math.random() * 55) + 80; // 80ms - 135ms per character
+      // Noticeably slower, natural human typing cadence
+      let delay = Math.floor(Math.random() * 60) + 110; // 110ms - 170ms per character
       if (char === '.' || char === '!' || char === '?') {
-        delay += Math.floor(Math.random() * 180) + 240; // 240ms - 420ms after sentences
+        delay += Math.floor(Math.random() * 250) + 350; // 350ms - 600ms after sentences
       } else if (char === ',' || char === ';') {
-        delay += Math.floor(Math.random() * 120) + 160; // 160ms - 280ms after commas
+        delay += Math.floor(Math.random() * 140) + 200; // 200ms - 340ms after commas
       } else if (char === ' ') {
-        delay += Math.floor(Math.random() * 80) + 110;  // 110ms - 190ms between words
-      } else if (i > 0 && i % 15 === 0) {
-        delay += Math.floor(Math.random() * 150) + 120; // Occasional natural thinking pause
+        delay += Math.floor(Math.random() * 100) + 140;  // 140ms - 240ms between words
+      } else if (i > 0 && i % 14 === 0) {
+        delay += Math.floor(Math.random() * 200) + 220; // Natural thinking pause every 14 chars
       }
       await sleep(delay);
     }
@@ -3498,6 +3505,7 @@ function findProfileFollowingButton() {
     return (
       txt === 'Following' ||
       txt.includes('Following') ||
+      testId.endsWith('-unfollow') ||
       testId.includes('unfollow') ||
       aria === 'following' ||
       aria.startsWith('following @') ||
@@ -3512,17 +3520,21 @@ function findProfileFollowingButton() {
   const subscribeBtn = allButtons.find(b => {
     const txt = (b.innerText || '').trim().toLowerCase();
     const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-    return txt === 'subscribe' || aria === 'subscribe' || aria.startsWith('subscribe to') || aria.includes('subscribe');
+    return txt.includes('subscribe');
   });
 
   if (subscribeBtn) {
     // Check siblings or preceding buttons within the same container
-    const parent = subscribeBtn.parentElement;
+    const parent = subscribeBtn.closest('div[role="group"]') || subscribeBtn.parentElement;
     if (parent) {
-      const containerBtns = Array.from(parent.querySelectorAll('button, div[role="button"]'));
-      const subIdx = containerBtns.indexOf(subscribeBtn);
-      if (subIdx > 0) {
-        return { button: containerBtns[subIdx - 1], isSubscribeLayout: true };
+      const containerBtns = Array.from(parent.querySelectorAll('button, div[role="button"]')).filter(b => b !== subscribeBtn);
+      for (const candidate of containerBtns) {
+        const testId = (candidate.getAttribute('data-testid') || '').toLowerCase();
+        const aria = (candidate.getAttribute('aria-label') || '').toLowerCase();
+        if (testId.includes('senddm') || testId.includes('notification') || testId.includes('useractions') || aria.includes('message') || aria.includes('notify') || aria.includes('more')) {
+          continue;
+        }
+        return { button: candidate, isSubscribeLayout: true };
       }
     }
 
@@ -3531,6 +3543,11 @@ function findProfileFollowingButton() {
     if (globalIdx > 0) {
       for (let i = globalIdx - 1; i >= Math.max(0, globalIdx - 4); i--) {
         const candidate = allButtons[i];
+        const testId = (candidate.getAttribute('data-testid') || '').toLowerCase();
+        const aria = (candidate.getAttribute('aria-label') || '').toLowerCase();
+        if (testId.includes('senddm') || testId.includes('notification') || testId.includes('useractions') || aria.includes('message') || aria.includes('notify') || aria.includes('more')) {
+          continue;
+        }
         const rect = candidate.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0 && rect.top < 650) {
           return { button: candidate, isSubscribeLayout: true };
@@ -3567,31 +3584,21 @@ function findProfileFollowButton() {
   const subscribeBtn = allButtons.find(b => {
     const txt = (b.innerText || '').trim().toLowerCase();
     const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-    return txt === 'subscribe' || aria === 'subscribe' || aria.startsWith('subscribe to') || aria.includes('subscribe');
+    return txt.includes('subscribe');
   });
 
   if (subscribeBtn) {
-    const parent = subscribeBtn.parentElement;
+    const parent = subscribeBtn.closest('div[role="group"]') || subscribeBtn.parentElement;
     if (parent) {
-      const containerBtns = Array.from(parent.querySelectorAll('button, div[role="button"]'));
-      const subIdx = containerBtns.indexOf(subscribeBtn);
-      if (subIdx > 0) {
-        const candidate = containerBtns[subIdx - 1];
-        const txt = (candidate.innerText || '').trim();
+      const containerBtns = Array.from(parent.querySelectorAll('button, div[role="button"]')).filter(b => b !== subscribeBtn);
+      for (const candidate of containerBtns) {
         const testId = (candidate.getAttribute('data-testid') || '').toLowerCase();
-        if (!txt.includes('Following') && !testId.includes('unfollow')) {
-          return candidate;
+        const aria = (candidate.getAttribute('aria-label') || '').toLowerCase();
+        const txt = (candidate.innerText || '').trim().toLowerCase();
+        if (testId.includes('senddm') || testId.includes('notification') || testId.includes('useractions') || aria.includes('message') || aria.includes('notify') || aria.includes('more')) {
+          continue;
         }
-      }
-    }
-    const globalIdx = allButtons.indexOf(subscribeBtn);
-    if (globalIdx > 0) {
-      for (let i = globalIdx - 1; i >= Math.max(0, globalIdx - 4); i--) {
-        const candidate = allButtons[i];
-        const txt = (candidate.innerText || '').trim();
-        const testId = (candidate.getAttribute('data-testid') || '').toLowerCase();
-        const rect = candidate.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0 && rect.top < 650 && !txt.includes('Following') && !testId.includes('unfollow')) {
+        if (txt === 'follow' || testId.includes('follow') || aria.includes('follow')) {
           return candidate;
         }
       }
@@ -3612,11 +3619,18 @@ async function executeProfileUnfollowAction(followingInfo, targetHandle = '') {
 
   console.log(`[ATOMX] Initiating unfollow on @${targetHandle} (Subscribe layout: ${followingInfo.isSubscribeLayout})...`);
 
-  // 1. Click following button or [👤✓] icon button
-  btn.click();
-  await sleep(550);
+  // 1. Ensure button is in viewport and click via Virtual Cursor
+  await humanScrollElementIntoView(btn, 'center');
+  await sleep(300);
+  await performHumanClick(btn, {
+    pulseColor: '#EF4444',
+    scroll: false,
+    hoverDwell: 450,
+    postPause: 500
+  });
 
   // 2. If it expanded/revealed an "Unfollow @username" option (as seen in Subscribe profiles):
+  await sleep(400);
   const findRevealedOption = () => {
     const items = Array.from(document.querySelectorAll('button, div[role="button"], div[role="menuitem"], span[role="button"]'));
     const cleanHandle = (targetHandle || '').replace(/^@/, '').toLowerCase();
@@ -3636,15 +3650,21 @@ async function executeProfileUnfollowAction(followingInfo, targetHandle = '') {
 
   const revealedBtn = findRevealedOption();
   if (revealedBtn && revealedBtn !== btn) {
-    console.log(`[ATOMX] Found expanded unfollow button ("${revealedBtn.innerText.trim()}"). Clicking...`);
-    revealedBtn.click();
-    await sleep(550);
+    console.log(`[ATOMX] Found expanded unfollow button ("${revealedBtn.innerText.trim()}"). Clicking via virtual cursor...`);
+    await humanScrollElementIntoView(revealedBtn, 'center');
+    await sleep(250);
+    await performHumanClick(revealedBtn, {
+      pulseColor: '#EF4444',
+      scroll: false,
+      hoverDwell: 420,
+      postPause: 500
+    });
   }
 
   // 3. Confirm Unfollow via Twitter confirmation dialog / sheet if presented
   const confirmBtn = await waitForElement(
     'button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"]',
-    2200
+    2500
   ) || Array.from(document.querySelectorAll('div[role="dialog"] button, div[role="alertdialog"] button, button')).find(b => {
     const txt = (b.innerText || '').trim().toLowerCase();
     const testId = (b.getAttribute('data-testid') || '').toLowerCase();
@@ -3652,8 +3672,15 @@ async function executeProfileUnfollowAction(followingInfo, targetHandle = '') {
   });
 
   if (confirmBtn) {
-    console.log('[ATOMX] Confirming unfollow modal...');
-    confirmBtn.click();
+    console.log('[ATOMX] Confirming unfollow modal via virtual cursor...');
+    await humanScrollElementIntoView(confirmBtn, 'center');
+    await sleep(250);
+    await performHumanClick(confirmBtn, {
+      pulseColor: '#EF4444',
+      scroll: false,
+      hoverDwell: 450,
+      postPause: 600
+    });
     await sleep(800);
     return true;
   }

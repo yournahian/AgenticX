@@ -398,6 +398,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'SKIP_WORKFLOW_ITEM') {
     chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud', 'atomx_tg_raid'], async (res) => {
       const wf = res?.atomx_agent_workflow;
+      const tg = res?.atomx_tg_raid;
       const activeHud = res?.atomx_active_hud;
       if (wf && wf.active) {
         const newSkipped = (wf.ignoredCount || 0) + 1;
@@ -418,6 +419,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         await chrome.storage.local.set({
           atomx_skip_current: true,
           atomx_agent_workflow: wf,
+          atomx_active_hud: updatedHud
+        });
+
+        broadcastHudToTabs(updatedHud);
+      } else if (tg && tg.active) {
+        const newSkipped = (tg.ignoredCount || 0) + 1;
+        const total = tg.total || tg.tweets?.length || 10;
+        const current = tg.currentIndex || 0;
+        const nextIdx = Math.min(total, current + 1);
+        tg.ignoredCount = newSkipped;
+        tg.statusText = '⏭️ Skipping current tweet...';
+
+        const updatedHud = {
+          ...(activeHud || {}),
+          skipped: newSkipped,
+          indicator: `Tweet ${nextIdx}/${total}`,
+          statusText: '⏭️ Skipping current tweet...'
+        };
+
+        await chrome.storage.local.set({
+          atomx_skip_current: true,
+          atomx_tg_raid: tg,
           atomx_active_hud: updatedHud
         });
 
@@ -651,7 +674,11 @@ async function processTgRaidStep() {
       console.log(`[ATOMX BG] TG Raid ${indexStr}: Skipped by user!`);
       const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1 };
       await chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
-      setTimeout(() => processTgRaidStep(), 150);
+      if (updatedRaid.currentIndex < total) {
+        await schedulePacingCountdown(Math.max(2, Math.min(4, options.delaySeconds || 3)), updatedRaid, currentIndex + 1, total, nextInfo);
+      } else {
+        await finishTgRaid(updatedRaid);
+      }
       return;
     }
 
