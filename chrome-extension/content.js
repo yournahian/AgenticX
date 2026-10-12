@@ -823,16 +823,17 @@ function dispatchEnhancedHumanEvents(element, clientX, clientY) {
     }
   } catch (e) {}
 
-  // 7. click
-  element.dispatchEvent(new MouseEvent('click', { ...mouseProps, buttons: 0 }));
+  // 7. pointerup
+  element.dispatchEvent(new PointerEvent('pointerup', { ...pointerProps, buttons: 0, pressure: 0 }));
+  // 8. mouseup
+  element.dispatchEvent(new MouseEvent('mouseup', { ...mouseProps, buttons: 0 }));
+
+  // 9. Single authentic click (NEVER dispatch both MouseEvent('click') AND element.click() to prevent duplicate submissions)
   try {
     element.click();
-  } catch (e) {}
-
-  // 8. pointerup
-  element.dispatchEvent(new PointerEvent('pointerup', { ...pointerProps, buttons: 0, pressure: 0 }));
-  // 9. mouseup
-  element.dispatchEvent(new MouseEvent('mouseup', { ...mouseProps, buttons: 0 }));
+  } catch (e) {
+    element.dispatchEvent(new MouseEvent('click', { ...mouseProps, buttons: 0 }));
+  }
 }
 
 async function getActiveExecutionStrategy() {
@@ -898,16 +899,19 @@ async function performHumanClick(targetElement, options = {}) {
   // Mode A: Enhanced Visual DOM Simulation (Default & Safe Mode)
   ensureVirtualCursorActive();
 
-  // Animate cursor smoothly from current position to target element
-  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 220);
+  // 1. Visibly animate cursor from current position to target element FIRST
+  await animateVirtualCursorTo(targetX, targetY, options.animDuration || 280);
 
-  // Trigger click ripple effect on cursor
+  // 2. Human dwell pause (140-200ms) so user visibly sees the cursor resting ON the button
+  await sleep(150 + Math.random() * 50);
+
+  // 3. Trigger click ripple effect on cursor
   triggerVirtualCursorClickEffect();
 
-  // Visual element pulse
+  // 4. Visual element pulse (button reacts to cursor click)
   triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
 
-  // Dispatch full 9-event human sequence
+  // 5. Dispatch single human event sequence (single click only)
   dispatchEnhancedHumanEvents(targetElement, targetX, targetY);
 
   await sleep(options.postPause || 250);
@@ -922,27 +926,10 @@ async function simulateHumanFollowClick(followBtn) {
   if (!followBtn) return false;
   try {
     gentleScrollIntoView(followBtn);
+    await sleep(150);
 
-    // Visual glowing indicator so user clearly sees the target button
-    const origOutline = followBtn.style.outline;
-    const origShadow = followBtn.style.boxShadow;
-    const origTrans = followBtn.style.transition;
-    const origScale = followBtn.style.transform;
-
-    followBtn.style.transition = 'box-shadow 0.25s ease, outline 0.25s ease, transform 0.2s ease';
-    followBtn.style.outline = '2px solid #10B981';
-    followBtn.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.7)';
-    followBtn.style.transform = 'scale(1.05)';
-    await sleep(250);
-
-    // Perform hybrid human click (Mode A: Virtual cursor + 9-event sequence, or Mode B: CDP Debugger)
+    // Perform human click: Virtual cursor moves to followBtn FIRST, hovers, pulses green, then clicks!
     await performHumanClick(followBtn, { pulseColor: '#10B981', scroll: false, postPause: 300 });
-
-    await sleep(350);
-    followBtn.style.transform = origScale || 'none';
-    followBtn.style.outline = origOutline || 'none';
-    followBtn.style.boxShadow = origShadow || 'none';
-    followBtn.style.transition = origTrans || 'none';
     return true;
   } catch (e) {
     followBtn.click();
@@ -968,8 +955,8 @@ function isPostAlreadyLiked(targetArticle) {
 }
 
 /**
- * 100% reliable Like Click with zero random skips.
- * Global Rule: First scrolls post and like button onto screen, waits until visible, then clicks.
+ * 100% reliable Like Click with zero random skips and no duplicate clicks.
+ * Global Rule: First scrolls post and like button onto screen, waits until visible, then moves cursor and clicks.
  */
 async function simulateHumanLikeClick(targetArticle) {
   if (!targetArticle) return false;
@@ -998,28 +985,12 @@ async function simulateHumanLikeClick(targetArticle) {
   if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
   // Natural human pause so the like button and post are visibly clear on screen before clicking
-  await sleep(400);
+  await sleep(300);
   if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
   try {
-    // Visual heart pulse effect
-    likeBtn.style.transition = 'transform 0.2s ease, filter 0.2s ease';
-    likeBtn.style.transform = 'scale(1.25)';
-    likeBtn.style.filter = 'drop-shadow(0 0 10px rgba(244, 63, 94, 0.85))';
-
+    // Perform human click: Virtual cursor moves to likeBtn FIRST, hovers, pulses rose, then clicks single time!
     await performHumanClick(likeBtn, { pulseColor: '#F43F5E', scroll: false, postPause: 250 });
-
-    await sleep(250);
-    likeBtn.style.transform = 'scale(1)';
-    likeBtn.style.filter = 'none';
-
-    // Verify if like took effect; if not, retry click once
-    await sleep(350);
-    const isNowLiked = isPostAlreadyLiked(targetArticle);
-    if (!isNowLiked && !isWorkflowAborted && !isWorkflowItemSkipped) {
-      await performHumanClick(likeBtn, { pulseColor: '#F43F5E', scroll: false, postPause: 200 });
-      await sleep(300);
-    }
     return true;
   } catch (e) {
     likeBtn.click();
@@ -1035,26 +1006,10 @@ async function simulateHumanReplyClick(replyBtn) {
   if (!replyBtn) return false;
   try {
     gentleScrollIntoView(replyBtn);
+    await sleep(150);
 
-    // Visual glowing indicator on reply button so action is clearly visible
-    const origOutline = replyBtn.style.outline;
-    const origShadow = replyBtn.style.boxShadow;
-    const origTrans = replyBtn.style.transition;
-    const origScale = replyBtn.style.transform;
-
-    replyBtn.style.transition = 'box-shadow 0.25s ease, outline 0.25s ease, transform 0.2s ease';
-    replyBtn.style.outline = '2px solid #10B981';
-    replyBtn.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.7)';
-    replyBtn.style.transform = 'scale(1.1)';
-    await sleep(200);
-
+    // Perform human click: Virtual cursor moves to replyBtn FIRST, hovers, pulses emerald, then clicks!
     await performHumanClick(replyBtn, { pulseColor: '#10B981', scroll: false, postPause: 250 });
-
-    await sleep(250);
-    replyBtn.style.transform = origScale || 'none';
-    replyBtn.style.outline = origOutline || 'none';
-    replyBtn.style.boxShadow = origShadow || 'none';
-    replyBtn.style.transition = origTrans || 'none';
     return true;
   } catch (e) {
     replyBtn.click();
@@ -1066,24 +1021,23 @@ async function simulateHumanReplyClick(replyBtn) {
  * 100% reliable single-click Submit with visual blue pulse & pointer events.
  * Submits the reply/comment without triggering duplicate submission warnings.
  */
+let lastSubmitClickTimestamp = 0;
 async function simulateHumanSubmitClick(btn) {
   if (!btn) return false;
+  // Debounce guard: Prevent duplicate click within 3 seconds
+  const now = Date.now();
+  if (now - lastSubmitClickTimestamp < 3000) {
+    console.warn('[ATOMX SUBMIT] Duplicate submit prevented by debounce guard.');
+    return true;
+  }
+  lastSubmitClickTimestamp = now;
+
   try {
     gentleScrollIntoView(btn);
     await sleep(150);
 
-    btn.style.transition = 'box-shadow 0.2s ease, outline 0.2s ease, transform 0.2s ease';
-    btn.style.outline = '2px solid #3B82F6';
-    btn.style.boxShadow = '0 0 14px rgba(59, 130, 246, 0.7)';
-    btn.style.transform = 'scale(1.05)';
-    await sleep(150);
-
-    await performHumanClick(btn, { pulseColor: '#3B82F6', scroll: false, postPause: 250 });
-
-    await sleep(200);
-    btn.style.transform = 'none';
-    btn.style.outline = 'none';
-    btn.style.boxShadow = 'none';
+    // Perform human click: Virtual cursor moves to submitBtn FIRST, hovers, pulses blue, then clicks single time!
+    await performHumanClick(btn, { pulseColor: '#3B82F6', scroll: false, postPause: 300 });
     return true;
   } catch (e) {
     btn.click();
@@ -1171,16 +1125,11 @@ async function typeTextHumanLike(editor, text) {
   const editorRect = editor.getBoundingClientRect();
   if (editorRect.top < 80 || editorRect.bottom > vh - 20) {
     editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    await sleep(400);
+    await sleep(350);
   }
 
-  editor.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-  editor.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
   editor.focus({ preventScroll: true });
-  editor.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
-  editor.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-  editor.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  await sleep(150);
+  await sleep(100);
 
   // 2. Clear editor first using Selection range and delete
   try {
@@ -1191,24 +1140,13 @@ async function typeTextHumanLike(editor, text) {
     sel.addRange(range);
     document.execCommand('delete', false, null);
   } catch (e) {}
-  await sleep(150);
-
-  // 3. Plan 1 intentional typo for realism (if text is long enough, e.g. > 15 chars)
-  let typoIndices = [];
-  if (text.length >= 15) {
-    const eligibleIndices = [];
-    for (let i = 5; i < text.length - 5; i++) {
-      const ch = text[i].toLowerCase();
-      if (QWERTY_NEIGHBORS[ch]) eligibleIndices.push(i);
-    }
-    if (eligibleIndices.length > 0) {
-      typoIndices.push(eligibleIndices[Math.floor(Math.random() * eligibleIndices.length)]);
-    }
-  }
+  await sleep(120);
 
   let typedOk = false;
 
-  // 4. Type character by character with realistic speed & typos
+  // 3. Type character-by-character using native execCommand('insertText')
+  // CRITICAL: Do NOT dispatch manual InputEvent or alter editor.textContent!
+  // execCommand natively maintains DraftJS's internal ContentState, block offset keys, and backspace handling.
   try {
     for (let i = 0; i < text.length; i++) {
       if (isWorkflowAborted || isWorkflowItemSkipped) {
@@ -1216,43 +1154,25 @@ async function typeTextHumanLike(editor, text) {
         return false;
       }
 
-      const char = text[i];
-      const lower = char.toLowerCase();
-
-      // Intentional typo simulation: type adjacent key, pause, backspace, type correct
-      if (typoIndices.includes(i) && QWERTY_NEIGHBORS[lower]) {
-        const neighbors = QWERTY_NEIGHBORS[lower];
-        const wrongChar = neighbors[Math.floor(Math.random() * neighbors.length)];
-        const isUpper = char !== lower;
-        const typoTyped = isUpper ? wrongChar.toUpperCase() : wrongChar;
-
-        document.execCommand('insertText', false, typoTyped);
-        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: typoTyped }));
-
-        const reactionDelay = Math.floor(Math.random() * 120) + 160;
-        await sleep(reactionDelay);
-        if (isWorkflowAborted || isWorkflowItemSkipped) return false;
-
-        document.execCommand('delete', false, null);
-        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }));
-        await sleep(Math.floor(Math.random() * 80) + 90);
-        if (isWorkflowAborted || isWorkflowItemSkipped) return false;
-
-        document.execCommand('insertText', false, char);
-        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: char }));
-      } else {
-        document.execCommand('insertText', false, char);
-        editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: char }));
+      // Respect user pause while typing
+      while (isHudWorkflowPaused && !isWorkflowAborted && !isWorkflowItemSkipped) {
+        await sleep(400);
       }
 
-      // Realistic human cadence & pauses
-      let delay = Math.floor(Math.random() * 30) + 25;
+      const char = text[i];
+      const ok = document.execCommand('insertText', false, char);
+      if (!ok) {
+        throw new Error('execCommand insertText failed');
+      }
+
+      // Realistic human cadence & natural punctuation pauses
+      let delay = Math.floor(Math.random() * 25) + 20;
       if (char === '.' || char === '!' || char === '?') {
-        delay += Math.floor(Math.random() * 120) + 150;
+        delay += Math.floor(Math.random() * 80) + 120;
       } else if (char === ',' || char === ';') {
-        delay += Math.floor(Math.random() * 60) + 80;
+        delay += Math.floor(Math.random() * 40) + 60;
       } else if (char === ' ') {
-        delay += Math.floor(Math.random() * 30) + 25;
+        delay += Math.floor(Math.random() * 20) + 20;
       }
       await sleep(delay);
     }
@@ -1261,10 +1181,11 @@ async function typeTextHumanLike(editor, text) {
       typedOk = true;
     }
   } catch (err) {
-    console.warn('[ATOMX] Letter typing warning:', err);
+    console.warn('[ATOMX] Letter typing warning, using ClipboardEvent paste fallback:', err);
   }
 
-  // 5. Robust Fallback via ClipboardEvent (Paste) if editor is still empty
+  // 4. Robust Fallback via ClipboardEvent (Paste) if editor is still empty
+  // Twitter's DraftJS handles native paste events cleanly without corrupting the backspace tree
   if (!typedOk || !(editor.innerText || editor.textContent || '').trim()) {
     console.log('[ATOMX] Fallback to ClipboardEvent paste for DraftJS editor...');
     try {
@@ -1286,19 +1207,7 @@ async function typeTextHumanLike(editor, text) {
     }
   }
 
-  // 6. Final fallback: direct assignment
-  if (!typedOk || !(editor.innerText || editor.textContent || '').trim()) {
-    try {
-      editor.focus({ preventScroll: true });
-      editor.textContent = text;
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }));
-      editor.dispatchEvent(new Event('change', { bubbles: true }));
-    } catch (e) {}
-  }
-
-  editor.dispatchEvent(new Event('input', { bubbles: true }));
-  editor.dispatchEvent(new Event('change', { bubbles: true }));
-  await sleep(300);
+  await sleep(250);
   return true;
 }
 
@@ -2331,6 +2240,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'INSERT_REPLY_TEXT') {
     insertIntoTwitterInput(message.text);
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'SYNC_WORKFLOW_OPTIONS') {
+    if (message.options) {
+      console.log('[ATOMX CONTENT] Synced live workflow options from popup:', message.options);
+    }
     sendResponse({ success: true });
     return true;
   }
@@ -5067,6 +4984,20 @@ async function executeFollowersListCycle(params = {}) {
       return;
     }
 
+    // DYNAMIC SYNC: Re-read latest user action toggles from storage in case user paused & changed settings in popup
+    const latestSync = await chrome.storage.local.get(['atomx_follower_settings', 'atomx_agent_workflow']).catch(() => ({}));
+    const dynamicOpts = latestSync?.atomx_agent_workflow?.options || latestSync?.atomx_follower_settings || {};
+    const actLike = typeof dynamicOpts.likePosts === 'boolean' ? dynamicOpts.likePosts : likePosts;
+    const actReply = typeof dynamicOpts.replyPosts === 'boolean' ? dynamicOpts.replyPosts : replyPosts;
+    const actRepost = typeof dynamicOpts.repostPosts === 'boolean' ? dynamicOpts.repostPosts : repostPosts;
+    const actFollow = typeof dynamicOpts.autoFollow === 'boolean' ? dynamicOpts.autoFollow : autoFollow;
+
+    // Respect pause before engaging
+    while (isHudWorkflowPaused && !isWorkflowAborted && !isWorkflowItemSkipped) {
+      await sleep(500);
+    }
+    if (isWorkflowAborted || isWorkflowItemSkipped) return;
+
     const statusMsg = `Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}...`;
     updateFloatingHud({
       title: 'Followers Increase',
@@ -5081,7 +5012,7 @@ async function executeFollowersListCycle(params = {}) {
     });
 
     // 1. ❤️ Like
-    if (likePosts && !isWorkflowAborted) {
+    if (actLike && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
         closeAnyOpenTwitterDialog();
@@ -5091,11 +5022,11 @@ async function executeFollowersListCycle(params = {}) {
         return;
       }
       await simulateHumanLikeClick(art);
-      await sleep(500);
+      await sleep(400);
     }
 
     // 2. 🔁 Repost
-    if (repostPosts && !isWorkflowAborted) {
+    if (actRepost && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
         closeAnyOpenTwitterDialog();
@@ -5105,11 +5036,11 @@ async function executeFollowersListCycle(params = {}) {
         return;
       }
       await simulateHumanRepostClick(art);
-      await sleep(500);
+      await sleep(400);
     }
 
     // 3. 💬 Comment
-    if (replyPosts && !isWorkflowAborted) {
+    if (actReply && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
         closeAnyOpenTwitterDialog();
@@ -5154,7 +5085,7 @@ async function executeFollowersListCycle(params = {}) {
     }
 
     // 4. ➕ Follow author
-    if (autoFollow && authorHandle && !isWorkflowAborted) {
+    if (actFollow && authorHandle && !isWorkflowAborted) {
       if (isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
         closeAnyOpenTwitterDialog();
@@ -5162,8 +5093,12 @@ async function executeFollowersListCycle(params = {}) {
         window.scrollBy({ top: 450, behavior: 'smooth' });
         return;
       }
-      const followBtn = art.querySelector('button[data-testid*="-follow"], div[data-testid*="-follow"]') ||
-        Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => (b.innerText || '').trim() === 'Follow');
+      const followBtn = art.querySelector('button[data-testid$="-follow"]:not([data-testid*="unfollow"]), div[data-testid$="-follow"]:not([data-testid*="unfollow"]') ||
+        Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => {
+          const t = (b.innerText || '').trim();
+          const tid = (b.getAttribute('data-testid') || '').toLowerCase();
+          return (t === 'Follow' || tid.includes('-follow')) && !t.includes('Following') && !tid.includes('unfollow');
+        });
       if (followBtn) {
         await simulateHumanFollowClick(followBtn);
         await sleep(500);
@@ -5238,8 +5173,8 @@ async function executeFollowersListCycle(params = {}) {
         break;
       }
 
-      while (isHudWorkflowPaused && !isWorkflowAborted) {
-        await sleep(1000);
+      while (isHudWorkflowPaused && !isWorkflowAborted && !isWorkflowItemSkipped) {
+        await sleep(500);
       }
 
       const initialCandidateCount = candidateMap.size;
@@ -5403,8 +5338,8 @@ async function executeFollowersListCycle(params = {}) {
         break;
       }
 
-      while (isHudWorkflowPaused && !isWorkflowAborted) {
-        await sleep(1000);
+      while (isHudWorkflowPaused && !isWorkflowAborted && !isWorkflowItemSkipped) {
+        await sleep(500);
       }
 
       const initialEngaged = engagedCount;

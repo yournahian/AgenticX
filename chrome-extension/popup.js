@@ -2281,6 +2281,50 @@ function initAgentListeners() {
     startAudienceBuilderWorkflow();
   });
 
+  // Live Options Syncing for Followers Increase & Audience Builder (picks up toggles while running/paused)
+  function syncLiveAgentOptions(agentId, updatedOptions) {
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+    chrome.storage.local.get(['atomx_agent_workflow', 'atomx_follower_settings', 'atomx_audience_settings'], (res) => {
+      const wf = res?.atomx_agent_workflow;
+      if (wf) {
+        wf.options = { ...(wf.options || {}), ...updatedOptions };
+        chrome.storage.local.set({ atomx_agent_workflow: wf });
+      }
+      if (agentId === 'followers') {
+        const prev = res?.atomx_follower_settings || {};
+        chrome.storage.local.set({ atomx_follower_settings: { ...prev, ...updatedOptions } });
+      } else if (agentId === 'audience') {
+        const prev = res?.atomx_audience_settings || {};
+        chrome.storage.local.set({ atomx_audience_settings: { ...prev, ...updatedOptions } });
+      }
+      broadcastToXTabs({ type: 'SYNC_WORKFLOW_OPTIONS', agentId, options: updatedOptions });
+    });
+  }
+
+  ['followerOptLike', 'followerOptComment', 'followerOptRepost', 'followerOptFollow'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      const opts = {
+        likePosts: document.getElementById('followerOptLike')?.checked ?? true,
+        replyPosts: document.getElementById('followerOptComment')?.checked ?? true,
+        repostPosts: document.getElementById('followerOptRepost')?.checked ?? false,
+        autoFollow: document.getElementById('followerOptFollow')?.checked ?? true
+      };
+      syncLiveAgentOptions('followers', opts);
+    });
+  });
+
+  ['audienceLikePostsToggle', 'audienceReplyPostsToggle', 'audienceRepostToggle', 'audienceAutoFollowToggle'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      const opts = {
+        likePosts: document.getElementById('audienceLikePostsToggle')?.checked ?? true,
+        replyPosts: document.getElementById('audienceReplyPostsToggle')?.checked ?? true,
+        repostPosts: document.getElementById('audienceRepostToggle')?.checked ?? false,
+        autoFollow: document.getElementById('audienceAutoFollowToggle')?.checked ?? false
+      };
+      syncLiveAgentOptions('audience', opts);
+    });
+  });
+
 async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   state.isAborted = true;
   state.isWorkflowRunning = false;
@@ -4508,6 +4552,7 @@ async function startAudienceBuilderWorkflow() {
   if (progressCard) progressCard.style.display = 'block';
   if (stateBadge) stateBadge.textContent = 'SCANNING';
   if (statusText) statusText.textContent = 'Opening Twitter List to discover top engaged posts & comments...';
+  updateAgentConsole('⚡ Running', 'Audience Builder active...');
 
   const doneEl = document.getElementById('audienceDoneCount');
   const colEl = document.getElementById('audienceCollectedCount');
@@ -4800,6 +4845,7 @@ async function startFollowersIncreaseWorkflow() {
   if (progressCard) progressCard.style.display = 'block';
   if (stateBadge) stateBadge.textContent = 'SCANNING';
   if (statusText) statusText.textContent = 'Opening Twitter List to engage recent posts...';
+  updateAgentConsole('⚡ Running', 'Followers Increase active...');
 
   const doneEl = document.getElementById('followerDoneCount');
   const colEl = document.getElementById('followerCollectedCount');
