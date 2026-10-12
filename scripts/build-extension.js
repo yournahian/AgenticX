@@ -119,7 +119,16 @@ async function build() {
     const obfStartTime = Date.now();
 
     try {
-      const obfuscationResult = JavaScriptObfuscator.obfuscate(originalCode, OBFUSCATOR_OPTIONS);
+      // Temporarily silence library promo notice for pristine CLI output
+      const origLog = console.log;
+      console.log = () => {};
+      let obfuscationResult;
+      try {
+        obfuscationResult = JavaScriptObfuscator.obfuscate(originalCode, OBFUSCATOR_OPTIONS);
+      } finally {
+        console.log = origLog;
+      }
+
       const obfuscatedCode = obfuscationResult.getObfuscatedCode();
       fs.writeFileSync(destPath, obfuscatedCode, 'utf8');
 
