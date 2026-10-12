@@ -1128,49 +1128,61 @@ let lastLogsFetchTime = 0;
 const LOGS_CACHE_TTL = 3000;
 
 async function getApiLogs() {
-  const now = Date.now();
-  if (recentApiLogs && recentApiLogs.length > 0 && (now - lastLogsFetchTime < LOGS_CACHE_TTL)) {
-    return recentApiLogs;
+  const map = new Map();
+
+  // 1. Prioritize freshest in-memory logs
+  if (Array.isArray(recentApiLogs)) {
+    for (const item of recentApiLogs) {
+      if (item && item.id) map.set(item.id, item);
+    }
   }
 
-  // 1. Fetch reliably from Supabase cloud (cross-instance source of truth)
+  // 2. Merge local file logs
   try {
-    const supabase = require('../config/supabase');
-    if (supabase) {
-      const { data } = await supabase.from('plans').select('features').eq('id', 'system_telemetry_logs').maybeSingle();
-      if (data && Array.isArray(data.features) && data.features.length > 0) {
-        recentApiLogs = data.features;
-        lastLogsFetchTime = now;
-        return recentApiLogs;
+    if (fs.existsSync(LOGS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item && item.id && !map.has(item.id)) map.set(item.id, item);
+        }
       }
     }
   } catch (e) {}
 
-  // 2. Check /tmp
-  if (fs.existsSync(tmpLogsPath)) {
-    try {
+  // 3. Merge /tmp file logs
+  try {
+    if (fs.existsSync(tmpLogsPath)) {
       const parsed = JSON.parse(fs.readFileSync(tmpLogsPath, 'utf8'));
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        recentApiLogs = parsed;
-        lastLogsFetchTime = now;
-        return recentApiLogs;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item && item.id && !map.has(item.id)) map.set(item.id, item);
+        }
       }
-    } catch (e) {}
-  }
+    }
+  } catch (e) {}
 
-  // 3. Fallback to local file
-  if (fs.existsSync(LOGS_FILE)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        recentApiLogs = parsed;
-        lastLogsFetchTime = now;
-        return recentApiLogs;
+  // 4. Merge Supabase cloud logs
+  try {
+    const supabase = require('../config/supabase');
+    if (supabase) {
+      const { data } = await supabase.from('plans').select('features').eq('id', 'system_telemetry_logs').maybeSingle();
+      if (data && Array.isArray(data.features)) {
+        for (const item of data.features) {
+          if (item && item.id && !map.has(item.id)) map.set(item.id, item);
+        }
       }
-    } catch (e) {}
-  }
+    }
+  } catch (e) {}
 
-  return recentApiLogs || [];
+  // Sort descending by created_at timestamp
+  const allLogs = Array.from(map.values()).sort((a, b) => {
+    const timeA = new Date(a.created_at || a.date || 0).getTime() || 0;
+    const timeB = new Date(b.created_at || b.date || 0).getTime() || 0;
+    return timeB - timeA;
+  });
+
+  recentApiLogs = allLogs.slice(0, 100);
+  return recentApiLogs;
 }
 
 async function testAllProviderKeys() {

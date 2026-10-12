@@ -508,8 +508,15 @@ async function handleAiReplyGeneration(request, sendResponse) {
     const tweetText    = request.tweetText || request.tweet?.text || '';
     const tweetAuthor  = request.tweetAuthor || request.tweet?.authorHandle || '@user';
     const tweetAuthorName = request.tweetAuthorName || request.tweet?.authorName || '';
-    const style        = request.style || storedLocal?.selectedTone || 'Bullish (5-10 words)';
-    const stylePrompt  = request.stylePrompt || storedLocal?.selectedTonePrompt || null;
+
+    // Enforce Active Global AI Voice: Always prioritize user's active global voice & custom prompt
+    const activeGlobalTone = storedLocal?.selectedTone || 'Bullish (5-10 words)';
+    const activeGlobalPrompt = storedLocal?.selectedTonePrompt || null;
+
+    // Use caller's explicit style ONLY if it's explicitly non-generic and has a custom stylePrompt
+    const isGenericFallback = !request.style || request.style === 'Natural & Concise' || request.style === 'Bullish (5-10 words)' || request.style === 'default';
+    const style = (isGenericFallback ? activeGlobalTone : request.style) || activeGlobalTone;
+    const stylePrompt = request.stylePrompt || (style === activeGlobalTone ? activeGlobalPrompt : null) || activeGlobalPrompt;
 
     const userStored = await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}));
     const userHandle = userStored?.verifiedXHandle || userStored?.currentUser?.handle || userStored?.user?.handle || '@user';

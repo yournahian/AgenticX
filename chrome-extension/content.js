@@ -3955,11 +3955,13 @@ async function engageAndFollowProfile(options = {}) {
             if (!commentToPost) {
               try {
                 const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
-                  ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle']).catch(() => ({}))
+                  ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}))
                   : {};
                 const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
                 const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
                 const uId = stored?.currentUser?.id || stored?.user?.id || null;
+                const effStyle = stored?.selectedTone || style || 'Bullish (5-10 words)';
+                const effPrompt = stored?.selectedTonePrompt || stylePrompt || null;
 
                 const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
                   method: 'POST',
@@ -3972,8 +3974,8 @@ async function engageAndFollowProfile(options = {}) {
                     tweetText,
                     tweetAuthor: authorHandle,
                     tweetAuthorName: authorName,
-                    style,
-                    stylePrompt,
+                    style: effStyle,
+                    stylePrompt: effPrompt,
                     userHandle: uHandle,
                     userEmail: uEmail,
                     userId: uId
