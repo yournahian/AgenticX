@@ -7763,22 +7763,44 @@ async function runAutonomousActionOnTweet(tweetUrl, actions, options = {}) {
     });
   });
 
-  return { targetTabId, shouldClose, result };
+  return { targetTabId, shouldClose: false, result };
 }
 
-function waitForTabComplete(tabId, timeout = 12000) {
+function waitForTabComplete(tabId, timeout = 10000) {
   return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        chrome.tabs?.onUpdated.removeListener(listener);
+        resolve(true);
+      }
+    }, timeout);
+
     function listener(id, changeInfo) {
       if (id === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve(true);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          chrome.tabs?.onUpdated.removeListener(listener);
+          resolve(true);
+        }
       }
     }
     chrome.tabs?.onUpdated.addListener(listener);
-    setTimeout(() => {
-      chrome.tabs?.onUpdated.removeListener(listener);
-      resolve(false);
-    }, timeout);
+
+    chrome.tabs?.get(tabId, (tab) => {
+      if (!resolved && tab?.status === 'complete') {
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            chrome.tabs?.onUpdated.removeListener(listener);
+            resolve(true);
+          }
+        }, 500);
+      }
+    });
   });
 }
 

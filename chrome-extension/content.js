@@ -2297,6 +2297,11 @@ async function insertIntoTwitterInput(text) {
 
 // Listen to commands from Extension Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'PING') {
+    sendResponse({ ok: true, active: true });
+    return true;
+  }
+
   if (message.type === 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' || message.type === 'GET_CURRENT_X_ACCOUNT') {
     (async () => {
       let handle = await waitForLoggedInUserHandle(1500);

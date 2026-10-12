@@ -2607,78 +2607,61 @@ async function delay(ms) {
   }
 }
 
-async function waitForTabLoad(tabId, initialTimeout = 15000) {
-  const startTime = Date.now();
-  const TWO_MINUTES_MS = 2 * 60 * 1000;
-  let warnedUser = false;
-  let attempt = 0;
-
-  while (Date.now() - startTime < 3 * 60 * 1000) {
-    attempt++;
-    const cycleTimeout = attempt === 1 ? initialTimeout : 18000;
-
-    const loaded = await new Promise((resolve) => {
-      let resolved = false;
-      function listener(id, changeInfo) {
-        if (id === tabId && changeInfo.status === 'complete') {
-          if (!resolved) {
-            resolved = true;
-            chrome.tabs.onUpdated.removeListener(listener);
-            resolve(true);
-          }
-        }
+async function waitForTabLoad(tabId, maxTimeout = 12000) {
+  // 1. Wait until tab.status === 'complete' or until maxTimeout
+  await new Promise((resolve) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (!finished) {
+        finished = true;
+        chrome.tabs.onUpdated.removeListener(updateListener);
+        resolve(true);
       }
-      chrome.tabs.onUpdated.addListener(listener);
+    }, maxTimeout);
 
-      // Check if tab is already complete
-      chrome.tabs.get(tabId, (tab) => {
-        if (!resolved && tab?.status === 'complete') {
-          resolved = true;
-          chrome.tabs.onUpdated.removeListener(listener);
+    function updateListener(id, changeInfo) {
+      if (id === tabId && changeInfo.status === 'complete') {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
+          chrome.tabs.onUpdated.removeListener(updateListener);
           resolve(true);
         }
-      });
+      }
+    }
+    chrome.tabs.onUpdated.addListener(updateListener);
 
-      setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve(false);
-        }
-      }, cycleTimeout);
+    // Initial check: if tab is already complete
+    chrome.tabs.get(tabId, (tab) => {
+      if (!finished && tab?.status === 'complete') {
+        setTimeout(() => {
+          if (!finished) {
+            finished = true;
+            clearTimeout(timer);
+            chrome.tabs.onUpdated.removeListener(updateListener);
+            resolve(true);
+          }
+        }, 500);
+      }
     });
+  });
 
-    if (loaded) {
-      await delay(1200);
+  // 2. Active content script ping verification (up to 4 attempts)
+  for (let p = 0; p < 4; p++) {
+    const isReady = await new Promise((res) => {
+      chrome.tabs.sendMessage(tabId, { type: 'PING' }, (resp) => {
+        if (chrome.runtime?.lastError || !resp?.ok) res(false);
+        else res(true);
+      });
+    });
+    if (isReady) {
+      await delay(400);
       return true;
     }
-
-    // Page taking time or stuck in error -> trigger refresh and wait
-    const elapsed = Date.now() - startTime;
-    if (elapsed >= TWO_MINUTES_MS && !warnedUser) {
-      warnedUser = true;
-      console.warn('[ATOMX BG] Page refresh has taken >2 minutes. Warning user.');
-      chrome.storage.local.get(['atomx_agent_workflow'], (res) => {
-        const wf = res?.atomx_agent_workflow;
-        if (wf && wf.active) {
-          syncAgentHud(
-            wf,
-            '⚠️ Page refresh is taking >2 min! Slow network or X error. Retrying...',
-            'WARNING',
-            wf.progressPercent || 10
-          );
-        }
-      });
-    }
-
-    console.log(`[ATOMX BG] Tab ${tabId} taking time to load (${Math.round(elapsed / 1000)}s elapsed). Refreshing and waiting...`);
-    try {
-      await chrome.tabs.reload(tabId).catch(() => null);
-    } catch (e) {}
-    await delay(2500);
+    await delay(500);
   }
 
-  return false;
+  return true;
 }
 
 async function sendMessageToTab(tabId, message, timeout = 30000) {
