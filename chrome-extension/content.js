@@ -5,6 +5,20 @@
 
 console.log('ATOMX ENGAGE content script active on Twitter/X.');
 
+// =========================================================================
+// ATOMX TAB SHIELD: Neutralization of window.close is safely handled via
+// prevent-tab-close.js (MAIN world content script) and background.js executeScript,
+// Proactively inject prevent-tab-close.js into DOM to ensure MAIN world protection is active immediately
+try {
+  if (typeof chrome !== 'undefined' && chrome.runtime?.getURL && !document.querySelector('script[data-atomx-shield]')) {
+    const shieldScript = document.createElement('script');
+    shieldScript.src = chrome.runtime.getURL('prevent-tab-close.js');
+    shieldScript.setAttribute('data-atomx-shield', 'true');
+    shieldScript.onload = () => shieldScript.remove();
+    (document.head || document.documentElement).appendChild(shieldScript);
+  }
+} catch (e) {}
+
 function isExtensionValid() {
   try {
     return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
@@ -23,6 +37,7 @@ var atomxDomObserver = new MutationObserver(() => {
     try { atomxDomObserver.disconnect(); } catch (e) {}
     return;
   }
+  try { autoDismissConfirmationSheetIfPresent(); } catch (e) {}
   injectAtomXButtons();
 });
 window.__atomx_observer = atomxDomObserver;
@@ -377,31 +392,21 @@ function hasUserAlreadyCommented(myHandle) {
   const comments = articles.filter(a => a !== mainArticle);
 
   return comments.some(c => {
-    // 1. Direct profile links in the comment author header (e.g. href="/KhanWg60464")
-    const links = Array.from(c.querySelectorAll('a[href]'));
-    const hasProfileLink = links.some(a => {
-      const href = (a.getAttribute('href') || '').toLowerCase().replace(/^\/+/, '').split('?')[0].split('/')[0];
-      return href === cleanHandle;
-    });
-    if (hasProfileLink) return true;
-
-    // 2. Avatar container testid: UserAvatar-Container-<handle>
-    const avatarEl = c.querySelector(`[data-testid*="${cleanHandle}" i]`);
-    if (avatarEl) return true;
-
-    // 3. User-Name testid text content (e.g. "Wg saim Khan @KhanWg60464")
     const userEl = c.querySelector('div[data-testid="User-Name"]');
-    if (userEl) {
-      const txt = userEl.innerText.toLowerCase();
-      const regex = new RegExp(`@${cleanHandle}(?:\\b|[^a-zA-Z0-9_]|$)`, 'i');
-      if (regex.test(txt)) return true;
+    if (!userEl) return false;
+
+    // 1. Author handle directly in User-Name text (e.g. "@myHandle")
+    const handleMatch = userEl.innerText.match(/@([\w_]+)/);
+    if (handleMatch && handleMatch[1].toLowerCase() === cleanHandle) {
+      return true;
     }
 
-    // 4. Comment author header area text
-    const fullText = (c.innerText || '').toLowerCase();
-    const commentHeader = fullText.slice(0, 300);
-    const regex = new RegExp(`@${cleanHandle}(?:\\b|[^a-zA-Z0-9_]|$)`, 'i');
-    if (regex.test(commentHeader)) return true;
+    // 2. Author profile link specifically in User-Name (e.g. href="/myHandle")
+    const authorLink = userEl.querySelector('a[href^="/"]');
+    if (authorLink) {
+      const href = (authorLink.getAttribute('href') || '').toLowerCase().replace(/^\/+/, '').split('?')[0].split('/')[0];
+      if (href === cleanHandle) return true;
+    }
 
     return false;
   });
@@ -446,10 +451,30 @@ var QWERTY_NEIGHBORS = {
  * - Organic human pauses between strokes (as a person scans reading material)
  * NEVER violently jumps, snaps, or jerks the viewport ("akbae tan diya chole ashe na").
  */
+var isCommentActive = false;
+
 async function humanSmoothScroll(distance, options = {}) {
   const isUp = distance < 0;
   const absDist = Math.abs(distance);
   if (absDist < 6) return;
+
+  // Guard: Never scroll background timeline while a modal compose sheet or confirmation dialog is active
+  // Per AGENTS_WORKFLOW_SPECIFICATION.md Section 3.1: Only freeze on actual modal dialogs, not regular in-page feeds
+  const activeModalDialog = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[aria-modal="true"] div[data-testid="tweetTextarea_0"], div[data-testid="confirmationSheetDialog"]');
+  if (!options.allowModalScroll && (isCommentActive && activeModalDialog)) {
+    console.log('[ATOMX SCROLL] Modal compose dialog is currently active. Skipping background scroll.');
+    return;
+  }
+
+  // Check user Cursor Movement Speed from safety settings:
+  // If user selected 0 ms (Instant) or fast, make scroll instant and skip delay!
+  const safetyRes = await chrome.storage?.local?.get(['atomx_safety_settings']).catch(() => ({}));
+  const userCursorSpeed = safetyRes?.atomx_safety_settings?.cursorSpeed !== undefined ? Number(safetyRes.atomx_safety_settings.cursorSpeed) : 450;
+  
+  if (userCursorSpeed === 0) {
+    window.scrollBy(0, isUp ? -absDist : absDist);
+    return;
+  }
 
   const flickBase = options.flickSize || (110 + Math.random() * 45);
   const numFlicks = Math.max(1, Math.round(absDist / flickBase));
@@ -460,6 +485,11 @@ async function humanSmoothScroll(distance, options = {}) {
 
     const steps = 14 + Math.floor(Math.random() * 5); // 14-18 smooth micro-steps per stroke
     const thisFlickTarget = (f === numFlicks - 1) ? (absDist - f * flickDist) : flickDist;
+
+    const speedFactor = Math.max(0.2, userCursorSpeed / 450);
+    const stepSleep = Math.max(8, Math.round((22 + Math.floor(Math.random() * 14)) * speedFactor));
+    const pauseBetweenFlicks = Math.max(30, Math.round((180 + Math.floor(Math.random() * 140)) * speedFactor));
+    const settle = options.settlePause !== undefined ? Math.round(options.settlePause * speedFactor) : Math.round(250 * speedFactor);
 
     let traveled = 0;
     for (let s = 1; s <= steps; s++) {
@@ -474,42 +504,60 @@ async function humanSmoothScroll(distance, options = {}) {
       if (delta !== 0) {
         window.scrollBy(0, isUp ? -delta : delta);
       }
-      await sleep(22 + Math.floor(Math.random() * 14)); // 22-36ms per micro-step
+      await sleep(stepSleep);
     }
 
     if (f < numFlicks - 1) {
-      await sleep(180 + Math.floor(Math.random() * 140)); // Leisurely human pause between strokes
+      await sleep(pauseBetweenFlicks);
     }
   }
 
-  await sleep(options.settlePause || 250);
+  await sleep(options.settlePause !== undefined ? Math.round(options.settlePause * Math.max(0.2, userCursorSpeed / 450)) : Math.round(250 * Math.max(0.2, userCursorSpeed / 450)));
 }
 
 /**
  * Human-like smooth alignment: scrolls the element into comfortable viewport position
  * using natural human strokes without any violent instant snapping.
  */
-async function humanScrollElementIntoView(element, position = 'center') {
+async function humanScrollElementIntoView(element, position = 'center', options = {}) {
   if (!element || typeof element.getBoundingClientRect !== 'function') return false;
+  // If element is inside a fixed/modal dialog, delegate to modal scroll helper without scrolling window
+  if (element.closest('div[role="dialog"], div[aria-modal="true"]')) {
+    return await ensureCommentBoxComfortablyVisible(element);
+  }
   try {
     const vh = window.innerHeight || document.documentElement.clientHeight;
     let rect = element.getBoundingClientRect();
+
+    // Sticky header clearance: Twitter/X top nav bar occupies ~53px - 110px
+    const topSafeMargin = 115;
+    const bottomSafeMargin = vh - 65;
 
     let targetY = 0;
     if (position === 'center') {
       targetY = rect.top - (vh / 2 - rect.height / 2);
     } else if (position === 'top') {
-      targetY = rect.top - 100;
+      targetY = rect.top - topSafeMargin;
     } else if (position === 'bottom') {
-      targetY = rect.bottom - (vh - 90);
+      targetY = rect.bottom - bottomSafeMargin;
     } else {
-      if (rect.top >= 90 && rect.bottom <= vh - 70) return true; // Already comfortably in view
-      targetY = rect.top < 90 ? (rect.top - 110) : (rect.bottom - (vh - 90));
+      if (rect.top >= topSafeMargin && rect.bottom <= bottomSafeMargin) return true; // Already comfortably in view
+      targetY = rect.top < topSafeMargin ? (rect.top - (topSafeMargin + 10)) : (rect.bottom - bottomSafeMargin);
     }
 
-    if (Math.abs(targetY) < 18) return true; // Already in comfortable position
+    // Already in comfortable position — skip redundant scroll pass
+    if (rect.top >= topSafeMargin && rect.bottom <= bottomSafeMargin && Math.abs(targetY) < 35) {
+      return true;
+    }
 
-    await humanSmoothScroll(Math.round(targetY), { settlePause: 220 });
+    // Prevent futile negative scroll when window is already at the very top
+    if ((window.scrollY || 0) <= 2 && targetY < 0) {
+      return true;
+    }
+
+    if (Math.abs(targetY) < 18) return true;
+
+    await humanSmoothScroll(Math.round(targetY), { settlePause: 220, allowModalScroll: options.allowModalScroll || false });
     return true;
   } catch (e) {
     return false;
@@ -517,16 +565,18 @@ async function humanScrollElementIntoView(element, position = 'center') {
 }
 
 /**
- * Non-blocking gentle scroll helper using human smooth scrolling
+ * Gentle scroll helper using human smooth scrolling (now fully async and awaited)
  */
-function gentleScrollIntoView(element) {
-  if (!element) return;
+async function gentleScrollIntoView(element) {
+  if (!element || typeof element.getBoundingClientRect !== 'function') return false;
   try {
     const rect = element.getBoundingClientRect();
     const vh = window.innerHeight || document.documentElement.clientHeight;
-    if (rect.top >= 90 && rect.bottom <= vh - 60) return;
-    humanScrollElementIntoView(element, 'center');
-  } catch (e) {}
+    if (rect.top >= 115 && rect.bottom <= vh - 60) return true;
+    return await humanScrollElementIntoView(element, 'center');
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -581,6 +631,7 @@ async function ensurePostAndActionsInView(mainArticle, targetButton = null) {
 
       // Calculate target scroll position so the inline reply container sits comfortably at ~75% - 82% of viewport height.
       // This positions the Like button right above it at ~55% - 65% of viewport height (exact Screenshot 2 layout).
+      const targetY = replyRect.top + window.scrollY - Math.round(vh * 0.78);
       const deltaY = targetY - window.scrollY;
       if (Math.abs(deltaY) > 25) {
         await humanSmoothScroll(Math.round(deltaY), { settlePause: 220 });
@@ -588,9 +639,12 @@ async function ensurePostAndActionsInView(mainArticle, targetButton = null) {
       return;
     }
 
-    // Fallback for feeds/timeline posts: ensure action button is centered
+    // Fallback for feeds/timeline posts: only scroll if action button is outside safe viewport bounds
     if (btn) {
-      await humanScrollElementIntoView(btn, 'center');
+      const btnRect = btn.getBoundingClientRect();
+      if (btnRect.top < 115 || btnRect.bottom > (vh - 60)) {
+        await humanScrollElementIntoView(btn, 'center');
+      }
     }
   } catch (err) {
     console.warn('[ATOMX] ensurePostAndActionsInView error:', err);
@@ -603,8 +657,7 @@ async function ensurePostAndActionsInView(mainArticle, targetButton = null) {
  */
 async function smoothScrollPostForReading(mainArticle) {
   if (!mainArticle) {
-    window.scrollBy({ top: 380, behavior: 'smooth' });
-    await sleep(800);
+    await humanSmoothScroll(380, { settlePause: 300 });
     return;
   }
   await ensurePostAndActionsInView(mainArticle);
@@ -635,7 +688,7 @@ function injectVirtualCursorStylesFallback() {
       gap: 6px !important;
       user-select: none !important;
       will-change: transform !important;
-      transition: transform 0.04s linear;
+
     }
     .atomx-cursor-icon-wrap {
       position: relative !important;
@@ -766,9 +819,15 @@ async function animateVirtualCursorTo(targetX, targetY, durationMs = 220) {
   const cursor = ensureVirtualCursorActive();
   if (!cursor) return;
 
+  const vw = window.innerWidth || 1000;
+  const vh = window.innerHeight || 800;
+
+  targetX = Math.max(15, Math.min(vw - 25, targetX));
+  targetY = Math.max(15, Math.min(vh - 25, targetY));
+
   isCursorAnimating = true;
-  const startX = currentCursorPos.x;
-  const startY = currentCursorPos.y;
+  const startX = Math.max(15, Math.min(vw - 25, currentCursorPos.x || Math.round(vw * 0.5)));
+  const startY = Math.max(15, Math.min(vh - 25, currentCursorPos.y || Math.round(vh * 0.5)));
 
   const dx = targetX - startX;
   const dy = targetY - startY;
@@ -788,17 +847,19 @@ async function animateVirtualCursorTo(targetX, targetY, durationMs = 220) {
   // Organic curved Bezier control point with perpendicular offset
   const perpX = -dy / dist;
   const perpY = dx / dist;
-  const curveMagnitude = (Math.random() - 0.5) * Math.min(50, dist * 0.22);
-  const ctrlX = startX + dx * 0.5 + perpX * curveMagnitude;
-  const ctrlY = startY + dy * 0.5 + perpY * curveMagnitude;
+  const curveMagnitude = (Math.random() - 0.5) * Math.min(35, dist * 0.18);
+  const ctrlX = Math.max(15, Math.min(vw - 25, startX + dx * 0.5 + perpX * curveMagnitude));
+  const ctrlY = Math.max(15, Math.min(vh - 25, startY + dy * 0.5 + perpY * curveMagnitude));
 
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     const easeT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 
     const u = 1 - easeT;
-    const curX = u * u * startX + 2 * u * easeT * ctrlX + easeT * easeT * targetX;
-    const curY = u * u * startY + 2 * u * easeT * ctrlY + easeT * easeT * targetY;
+    const rawX = u * u * startX + 2 * u * easeT * ctrlX + easeT * easeT * targetX;
+    const rawY = u * u * startY + 2 * u * easeT * ctrlY + easeT * easeT * targetY;
+    const curX = Math.max(12, Math.min(vw - 20, rawX));
+    const curY = Math.max(12, Math.min(vh - 20, rawY));
 
     cursor.style.transform = `translate3d(${Math.round(curX)}px, ${Math.round(curY)}px, 0)`;
     await sleep(stepDelay);
@@ -920,22 +981,17 @@ function dispatchEnhancedHumanEvents(element, clientX, clientY) {
   // 8. mouseup
   element.dispatchEvent(new MouseEvent('mouseup', { ...mouseProps, buttons: 0 }));
 
-  // 9. Single authentic click (NEVER dispatch both MouseEvent('click') AND element.click() to prevent duplicate submissions)
+  // 9. Single authentic click with real client coordinates for React Native for Web
+  const clickProps = { ...mouseProps, buttons: 0 };
   try {
-    element.click();
+    if (typeof element.click === 'function') {
+      element.click();
+    } else {
+      element.dispatchEvent(new MouseEvent('click', clickProps));
+    }
   } catch (e) {
-    element.dispatchEvent(new MouseEvent('click', { ...mouseProps, buttons: 0 }));
+    try { element.dispatchEvent(new MouseEvent('click', clickProps)); } catch (err) {}
   }
-
-  // 10. Release hover state so Twitter automatically removes lingering tooltips ("Reply", "Unlike", "Like")
-  try {
-    element.dispatchEvent(new MouseEvent('mouseout', { ...mouseProps, buttons: 0 }));
-    element.dispatchEvent(new MouseEvent('mouseleave', { ...mouseProps, buttons: 0 }));
-    element.dispatchEvent(new PointerEvent('pointerout', { ...pointerProps, buttons: 0, pressure: 0 }));
-    element.dispatchEvent(new PointerEvent('pointerleave', { ...pointerProps, buttons: 0, pressure: 0 }));
-  } catch (e) {}
-
-  dismissLingeringTwitterTooltips();
 }
 
 /**
@@ -972,9 +1028,10 @@ async function performHumanClick(targetElement, options = {}) {
   const vh = window.innerHeight || document.documentElement.clientHeight;
   const vw = window.innerWidth || document.documentElement.clientWidth;
   let rect = targetElement.getBoundingClientRect();
-  const isOffscreen = rect.top < 80 || rect.bottom > (vh - 60) || rect.left < 0 || rect.right > vw || rect.width === 0 || rect.height === 0;
+  const isInDialog = Boolean(targetElement.closest && targetElement.closest('div[role="dialog"], div[role="alertdialog"], div[aria-modal="true"], #atomx-floating-hud'));
+  const isOffscreen = !isInDialog && (rect.top < 80 || rect.bottom > (vh - 60) || rect.left < 0 || rect.right > vw || rect.width === 0 || rect.height === 0);
 
-  if (isOffscreen || options.scroll === true) {
+  if (options.scroll !== false && (isOffscreen || options.scroll === true)) {
     console.log('[ATOMX ACTION] Target element is off-screen. Smooth scrolling into viewport center first...');
     await humanScrollElementIntoView(targetElement, 'center');
     await sleep(350);
@@ -986,27 +1043,55 @@ async function performHumanClick(targetElement, options = {}) {
     return true;
   }
 
-  // Calculate randomized coordinate inside element bounding box (inward padding 15-25%)
-  const padX = Math.min(rect.width * 0.25, 10);
-  const padY = Math.min(rect.height * 0.25, 10);
-  const targetX = rect.left + padX + Math.random() * Math.max(1, rect.width - padX * 2);
-  const targetY = rect.top + padY + Math.random() * Math.max(1, rect.height - padY * 2);
+  // Calculate coordinate inside element bounding box
+  let targetX, targetY;
+  if (options.exactCenter || isInDialog) {
+    // For dialog buttons (e.g. Unfollow confirm), aim directly at the center of the button with tiny ±2px micro-jitter
+    targetX = rect.left + rect.width / 2 + (Math.random() * 4 - 2);
+    targetY = rect.top + rect.height / 2 + (Math.random() * 4 - 2);
+  } else {
+    const padX = Math.min(rect.width * 0.25, 10);
+    const padY = Math.min(rect.height * 0.25, 10);
+    targetX = rect.left + padX + Math.random() * Math.max(1, rect.width - padX * 2);
+    targetY = rect.top + padY + Math.random() * Math.max(1, rect.height - padY * 2);
+  }
 
   // Global Cursor Rules (Applied Identically to BOTH DOM Mode and Debugger Mode):
   // 1. Ensure Virtual Cursor is active and visible
   ensureVirtualCursorActive();
 
   // 2. Visibly animate cursor from current position to target element with organic Bezier transit
-  await animateVirtualCursorTo(targetX, targetY, options.animDuration || (550 + Math.random() * 150));
+  // Read custom Cursor Speed from Global Safety Settings (0ms instant – 1500ms human)
+  const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+  const userCursorSpeed = safetyRes?.atomx_safety_settings?.cursorSpeed !== undefined ? Number(safetyRes.atomx_safety_settings.cursorSpeed) : 450;
+  const transitDuration = (userCursorSpeed === 0) ? 0 : (options.animDuration || Math.max(50, userCursorSpeed + Math.floor(Math.random() * 80 - 40)));
 
-  // 3. Human dwell pause (480-680ms) so cursor visibly rests on the button before clicking
-  await sleep(options.hoverDwell || (480 + Math.random() * 200));
+  if (transitDuration > 0) {
+    await animateVirtualCursorTo(targetX, targetY, transitDuration);
+  } else {
+    const cursor = document.getElementById('atomx-virtual-cursor') || ensureVirtualCursorActive();
+    if (cursor) {
+      cursor.style.transform = `translate3d(${Math.round(targetX)}px, ${Math.round(targetY)}px, 0)`;
+      cursor.style.display = 'flex';
+      cursor.style.opacity = '1';
+    }
+    currentCursorPos = { x: targetX, y: targetY };
+  }
+
+  // 3. Human dwell pause: if 0ms speed selected, skip dwell pause for instant click!
+  if (userCursorSpeed > 0) {
+    const dwellFactor = Math.max(0.2, userCursorSpeed / 450);
+    await sleep(options.hoverDwell !== undefined ? Math.round(options.hoverDwell * dwellFactor) : Math.round((480 + Math.random() * 200) * dwellFactor));
+  }
 
   // 4. Trigger cursor press animation and click ripple effect
   triggerVirtualCursorClickEffect();
 
-  // Press dwell: natural human finger hold duration before release (160-220ms)
-  await sleep(160 + Math.random() * 60);
+  // Press dwell: natural human finger hold duration before release
+  if (userCursorSpeed > 0) {
+    const pressFactor = Math.max(0.2, userCursorSpeed / 450);
+    await sleep(Math.round((160 + Math.random() * 60) * pressFactor));
+  }
 
   // 5. Visual element pulse (button glows with action color)
   triggerElementClickPulse(targetElement, options.pulseColor || '#38BDF8');
@@ -1044,8 +1129,11 @@ async function performHumanClick(targetElement, options = {}) {
     dispatchEnhancedHumanEvents(targetElement, finalClickX, finalClickY);
   }
 
-  // 7. Post-click pause (450-650ms) to let action register visibly
-  await sleep(options.postPause || (450 + Math.random() * 200));
+  // 7. Post-click pause: if 0ms speed selected, skip pause for instant execution!
+  if (userCursorSpeed > 0) {
+    const pauseFactor = Math.max(0.2, userCursorSpeed / 450);
+    await sleep(options.postPause !== undefined ? Math.round(options.postPause * pauseFactor) : Math.round((450 + Math.random() * 200) * pauseFactor));
+  }
   dismissLingeringTwitterTooltips();
   return true;
 }
@@ -1057,7 +1145,7 @@ async function performHumanClick(targetElement, options = {}) {
 async function simulateHumanFollowClick(followBtn) {
   if (!followBtn) return false;
   try {
-    gentleScrollIntoView(followBtn);
+    await gentleScrollIntoView(followBtn);
     await sleep(150);
 
     // Perform human click: Virtual cursor moves to followBtn FIRST, hovers, pulses green, then clicks!
@@ -1067,6 +1155,186 @@ async function simulateHumanFollowClick(followBtn) {
     followBtn.click();
     return true;
   }
+}
+
+/**
+ * Safely dismisses blocking Twitter popups like "Who can reply?", "Got It" alerts, HoverCards, etc.
+ */
+function dismissAnyTwitterModal() {
+  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], div[aria-modal="true"]'));
+  for (const d of dialogs) {
+    const text = (d.innerText || '').toLowerCase();
+    if (text.includes('who can reply') || text.includes('only some accounts can reply') || text.includes('got it')) {
+      console.log('[ATOMX] Dismissing "Who can reply?" modal...');
+      const gotItBtn = Array.from(d.querySelectorAll('button, div[role="button"]')).find(b => {
+        const t = (b.innerText || '').trim().toLowerCase();
+        return t === 'got it' || t === 'close' || b.getAttribute('aria-label') === 'Close';
+      });
+      if (gotItBtn) {
+        try { gotItBtn.click(); } catch (e) {}
+      }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      if (d.isConnected) {
+        try { d.remove(); } catch (e) {}
+      }
+    }
+  }
+  const mask = document.querySelector('div[data-testid="mask"]');
+  if (mask && !document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"]')) {
+    try { mask.remove(); } catch (e) {}
+  }
+
+  // Also remove any lingering floating user HoverCard
+  const hoverCard = document.querySelector('div[data-testid="HoverCard"]');
+  if (hoverCard && hoverCard.isConnected) {
+    try { hoverCard.remove(); } catch (e) {}
+  }
+}
+
+/**
+ * Follows the author of a tweet on the timeline.
+ * Handles timeline tweets where no direct follow button exists by:
+ * 1. Direct follow button on art (if present, e.g. promoted tweets)
+ * 2. Opening the Tweet Caret (...) menu and clicking "Follow @handle" (or detecting if already following)
+ * 3. Falling back to hovering avatar/user-name to open Twitter HoverCard and clicking "Follow"
+ */
+async function performFollowOnTweetAuthor(art, authorHandle) {
+  if (!art || isWorkflowAborted) return false;
+
+  // Dismiss any lingering Twitter modal (like "Who can reply?") before interacting with the tweet
+  dismissAnyTwitterModal();
+
+  const cleanHandle = (authorHandle || '').replace(/^@/, '').toLowerCase().trim();
+
+  // Ensure tweet is smoothly in view so header & caret are visible and clickable
+  try {
+    await gentleScrollIntoView(art);
+    await sleep(250);
+  } catch (e) {}
+
+  // 1. Direct follow button inside the article (e.g. sponsored / promoted tweets)
+  let directBtn = art.querySelector('button[data-testid$="-follow"]:not([data-testid*="unfollow"]), div[data-testid$="-follow"]:not([data-testid*="unfollow"])');
+  if (!directBtn) {
+    directBtn = Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => {
+      const t = (b.innerText || '').trim();
+      const tid = (b.getAttribute('data-testid') || '').toLowerCase();
+      return (t === 'Follow' || tid.endsWith('-follow')) && !t.includes('Following') && !tid.includes('unfollow');
+    });
+  }
+  if (directBtn) {
+    console.log(`[ATOMX FOLLOW] Found direct follow button on tweet for @${cleanHandle}`);
+    await simulateHumanFollowClick(directBtn);
+    await sleep(400);
+    return true;
+  }
+
+  // 2. Tweet Caret (...) menu strategy
+  // In Twitter/X, clicking the caret button on another user's tweet opens a menu containing:
+  // "Follow @handle" (if not followed) OR "Unfollow @handle" (if already followed).
+  const caretBtn = art.querySelector('button[data-testid="caret"], div[data-testid="caret"], [data-testid="caret"], button[aria-label="More"], [aria-label="More"]');
+  if (caretBtn && !isWorkflowAborted) {
+    try {
+      caretBtn.click();
+      await sleep(350);
+
+      const menu = document.querySelector('div[role="menu"], div[data-testid="Dropdown"]');
+      if (menu) {
+        const menuItems = Array.from(menu.querySelectorAll('div[role="menuitem"], [role="menuitem"]'));
+
+        // Check if already following
+        const isUnfollowItem = menuItems.find(it => {
+          const txt = (it.innerText || '').trim().toLowerCase();
+          return txt.startsWith('unfollow') || txt.includes('unfollow @');
+        });
+
+        if (isUnfollowItem) {
+          console.log(`[ATOMX FOLLOW] Already following @${cleanHandle} (detected via Caret menu).`);
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+          await sleep(200);
+          return true;
+        }
+
+        // Look for Follow item
+        const followItem = menuItems.find(it => {
+          const txt = (it.innerText || '').trim().toLowerCase();
+          return txt.startsWith('follow @') || txt === 'follow' || (cleanHandle && txt.includes(`follow @${cleanHandle}`));
+        });
+
+        if (followItem) {
+          console.log(`[ATOMX FOLLOW] Clicking "Follow @${cleanHandle}" in Caret menu...`);
+          await performHumanClick(followItem, { pulseColor: '#10B981', scroll: false, postPause: 300 });
+          await sleep(450);
+          if (document.querySelector('div[role="menu"], div[data-testid="Dropdown"]')) {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+          }
+          return true;
+        }
+
+        // Close menu if neither found
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+        await sleep(200);
+      }
+    } catch (err) {
+      console.warn('[ATOMX FOLLOW] Caret menu follow error:', err);
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+  }
+
+  if (isWorkflowAborted) return false;
+
+  // 3. HoverCard strategy fallback (hovering user avatar or username)
+  try {
+    const authorTarget = art.querySelector('div[data-testid="User-Name"] a, div[data-testid="Tweet-User-Avatar"] a, div[data-testid="Tweet-User-Avatar"]');
+    if (authorTarget) {
+      authorTarget.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+      authorTarget.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      authorTarget.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      await sleep(650);
+
+      const hoverCard = document.querySelector('div[data-testid="HoverCard"]');
+      let followedViaCard = false;
+      if (hoverCard) {
+        const hoverFollowBtn = Array.from(hoverCard.querySelectorAll('button, div[role="button"]')).find(b => {
+          const txt = (b.innerText || '').trim();
+          const tid = (b.getAttribute('data-testid') || '').toLowerCase();
+          return (txt === 'Follow' || tid.endsWith('-follow')) && !txt.includes('Following') && !tid.includes('unfollow');
+        });
+
+        if (hoverFollowBtn) {
+          console.log(`[ATOMX FOLLOW] Clicking Follow button in HoverCard for @${cleanHandle}...`);
+          await simulateHumanFollowClick(hoverFollowBtn);
+          await sleep(400);
+          followedViaCard = true;
+        } else {
+          const isAlreadyFollowing = Array.from(hoverCard.querySelectorAll('button, div[role="button"]')).some(b => {
+            const txt = (b.innerText || '').trim();
+            return txt.includes('Following');
+          });
+          if (isAlreadyFollowing) {
+            followedViaCard = true;
+          }
+        }
+      }
+
+      // Cleanly dismiss the HoverCard so it never lingers on screen
+      authorTarget.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+      authorTarget.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      authorTarget.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }));
+      authorTarget.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      
+      const lingeringCard = document.querySelector('div[data-testid="HoverCard"]');
+      if (lingeringCard && lingeringCard.isConnected) {
+        try { lingeringCard.remove(); } catch (e) {}
+      }
+      dismissLingeringTwitterTooltips();
+      return followedViaCard;
+    }
+  } catch (e) {
+    console.warn('[ATOMX FOLLOW] HoverCard follow fallback error:', e);
+  }
+
+  return false;
 }
 
 /**
@@ -1117,16 +1385,43 @@ async function simulateHumanLikeClick(targetArticle) {
   await ensurePostAndActionsInView(targetArticle, likeBtn);
   if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
+  const safetyResLike = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+  const uSpeedLike = safetyResLike?.atomx_safety_settings?.cursorSpeed !== undefined ? Number(safetyResLike.atomx_safety_settings.cursorSpeed) : 450;
+  const isInstantLike = (uSpeedLike === 0);
+
   // Natural human pause so the like button and post are visibly clear on screen before clicking
-  await sleep(300);
+  if (!isInstantLike) {
+    await sleep(Math.round(300 * Math.max(0.2, uSpeedLike / 450)));
+  }
   if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
   try {
-    // Perform human click: Virtual cursor moves to likeBtn FIRST, hovers, pulses rose, then clicks single time!
-    await performHumanClick(likeBtn, { pulseColor: '#F43F5E', scroll: false, postPause: 250 });
+    // Ensure likeBtn target is the actual button element (not an inner svg or div)
+    const buttonTarget = likeBtn.closest('button, [role="button"]') || likeBtn;
+    
+    // Perform human click: Virtual cursor moves to likeBtn FIRST, hovers, pulses rose, then dispatches pointer & click events!
+    await performHumanClick(buttonTarget, { pulseColor: '#F43F5E', scroll: false, postPause: isInstantLike ? 0 : 250 });
+
+    // Verify if like registered on Twitter DOM without triggering accidental un-likes
+    let isLikedConfirmed = isPostAlreadyLiked(targetArticle);
+    if (!isLikedConfirmed && !isInstantLike) {
+      for (let w = 0; w < 6; w++) {
+        await sleep(100);
+        if (isPostAlreadyLiked(targetArticle)) {
+          isLikedConfirmed = true;
+          break;
+        }
+      }
+    }
+    // Only if confirmed unliked after polling, apply a single fallback click
+    if (!isLikedConfirmed) {
+      console.log('[ATOMX LIKE] Like not reflected yet after wait. Applying single fallback click...');
+      try { buttonTarget.click(); } catch (err) {}
+    }
     return true;
   } catch (e) {
-    likeBtn.click();
+    const buttonTarget = likeBtn.closest('button, [role="button"]') || likeBtn;
+    buttonTarget.click();
     return true;
   }
 }
@@ -1138,14 +1433,20 @@ async function simulateHumanLikeClick(targetArticle) {
 async function simulateHumanReplyClick(replyBtn) {
   if (!replyBtn) return false;
   try {
-    gentleScrollIntoView(replyBtn);
-    await sleep(150);
+    const target = replyBtn.closest('button, [role="button"]') || replyBtn;
+    await gentleScrollIntoView(target);
+    await sleep(200);
 
     // Perform human click: Virtual cursor moves to replyBtn FIRST, hovers, pulses emerald, then clicks!
-    await performHumanClick(replyBtn, { pulseColor: '#10B981', scroll: false, postPause: 250 });
+    await performHumanClick(target, { pulseColor: '#10B981', scroll: false, postPause: 250 });
     return true;
   } catch (e) {
-    replyBtn.click();
+    try {
+      const target = replyBtn.closest('button, [role="button"]') || replyBtn;
+      target.click();
+    } catch (err) {
+      replyBtn.click();
+    }
     return true;
   }
 }
@@ -1157,17 +1458,28 @@ async function simulateHumanReplyClick(replyBtn) {
 var lastSubmitClickTimestamp = 0;
 async function simulateHumanSubmitClick(btn) {
   if (!btn) return false;
-  // Debounce guard: Prevent duplicate click within 3 seconds
+  // Guard against submitting an already-submitted button
+  if (btn.getAttribute('data-atomx-submitted') === 'true') {
+    console.warn('[ATOMX SUBMIT] Submit button already clicked for this comment. Preventing duplicate submit.');
+    return true;
+  }
+  // Debounce guard: Prevent duplicate click within 4 seconds
   const now = Date.now();
-  if (now - lastSubmitClickTimestamp < 3000) {
+  if (now - lastSubmitClickTimestamp < 4000) {
     console.warn('[ATOMX SUBMIT] Duplicate submit prevented by debounce guard.');
     return true;
   }
   lastSubmitClickTimestamp = now;
+  btn.setAttribute('data-atomx-submitted', 'true');
 
   try {
-    await humanScrollElementIntoView(btn, 'nearest');
-    await sleep(250);
+    const isInDialog = !!btn.closest('div[role="dialog"], div[aria-modal="true"]');
+    const rect = btn.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    if (!isInDialog && (rect.top < 60 || rect.bottom > vh - 40)) {
+      await humanScrollElementIntoView(btn, 'nearest');
+      await sleep(200);
+    }
 
     // Global rule: Cursor moves to Reply button, waits/hovers (420ms), and clicks
     console.log('[ATOMX SUBMIT] Moving virtual cursor to Reply button, hovering, and submitting...');
@@ -1177,9 +1489,14 @@ async function simulateHumanSubmitClick(btn) {
       hoverDwell: 420,
       postPause: 380
     });
+    // Immediately disable pointer events to prevent any duplicate physical/synthetic click
+    try {
+      btn.style.pointerEvents = 'none';
+      btn.disabled = true;
+    } catch (err) {}
     return true;
   } catch (e) {
-    btn.click();
+    try { btn.click(); } catch (err) {}
     return true;
   }
 }
@@ -1193,9 +1510,13 @@ async function simulateHumanRepostClick(targetArticle) {
     return true; // Already reposted
   }
 
-  // Scroll article into view first
-  await scrollElementIntoViewAndEnsureVisible(targetArticle, 'center');
-  if (isWorkflowAborted || isWorkflowItemSkipped) return false;
+  // Only scroll article if outside safe viewport bounds
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const artRect = targetArticle.getBoundingClientRect();
+  if (artRect.top < 115 || artRect.bottom > vh - 60) {
+    await scrollElementIntoViewAndEnsureVisible(targetArticle, 'center');
+    if (isWorkflowAborted || isWorkflowItemSkipped) return false;
+  }
 
   const rtBtn = targetArticle.querySelector('button[data-testid="retweet"], div[data-testid="retweet"]') ||
                 Array.from(targetArticle.querySelectorAll('button, div[role="button"]')).find(b => {
@@ -1205,8 +1526,11 @@ async function simulateHumanRepostClick(targetArticle) {
   if (!rtBtn) return false;
 
   try {
-    await scrollElementIntoViewAndEnsureVisible(rtBtn, 'nearest');
-    await sleep(300);
+    const rtRect = rtBtn.getBoundingClientRect();
+    if (rtRect.top < 115 || rtRect.bottom > vh - 60) {
+      await scrollElementIntoViewAndEnsureVisible(rtBtn, 'nearest');
+      await sleep(250);
+    }
     if (isWorkflowAborted || isWorkflowItemSkipped) return false;
 
     rtBtn.style.transition = 'transform 0.2s ease, filter 0.2s ease';
@@ -1241,15 +1565,89 @@ async function simulateHumanRepostClick(targetArticle) {
  * Natural human-like smooth scrolling with micro-steps allowing Twitter React virtual DOM to hydrate.
  */
 async function smoothScrollAndHydrate(totalDelta = 650, pauseAfter = 900) {
-  const steps = 4;
-  const stepDelta = Math.round(totalDelta / steps);
-  for (let s = 0; s < steps; s++) {
-    if (isWorkflowAborted) break;
-    const randomized = stepDelta + Math.floor(Math.random() * 40 - 20);
-    window.scrollBy({ top: randomized, behavior: 'smooth' });
-    await sleep(120 + Math.floor(Math.random() * 80));
+  const activeModalDialog = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[aria-modal="true"] div[data-testid="tweetTextarea_0"], div[data-testid="confirmationSheetDialog"]');
+  if (isCommentActive && activeModalDialog) {
+    console.log('[ATOMX SCROLL] Modal compose dialog is currently active. Skipping smoothScrollAndHydrate.');
+    return;
   }
-  await sleep(pauseAfter);
+  await humanSmoothScroll(totalDelta, { settlePause: pauseAfter });
+}
+
+/**
+ * Ensures the comment box (editor / textarea) is comfortably visible in the viewport or modal
+ * BEFORE typing begins.
+ * Specifically detects long posts (with lots of text or quote tweets) where the comment box
+ * is pushed down near or below the bottom edge, and performs a gentle smooth scroll
+ * so the user can clearly see what comment is being typed.
+ */
+async function ensureCommentBoxComfortablyVisible(editor) {
+  if (!editor || !editor.isConnected) return false;
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const rect = editor.getBoundingClientRect();
+
+  // 1. Check if inside a Twitter Modal Dialog
+  const modalDialog = editor.closest('div[role="dialog"], div[aria-modal="true"]');
+
+  if (modalDialog) {
+    // In a modal dialog, find the scrollable container holding the tweet and composer
+    let scrollContainer = null;
+    let curr = editor.parentElement;
+    while (curr && curr !== modalDialog.parentElement) {
+      const style = window.getComputedStyle(curr);
+      const ov = style.overflowY;
+      if ((ov === 'auto' || ov === 'scroll') && curr.scrollHeight > curr.clientHeight) {
+        scrollContainer = curr;
+        break;
+      }
+      if (curr === modalDialog) break;
+      curr = curr.parentElement;
+    }
+
+    const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : modalDialog.getBoundingClientRect();
+    const isPushedDownInContainer = scrollContainer
+      ? (rect.bottom > containerRect.bottom - 70 || rect.top > containerRect.bottom - 130)
+      : false;
+    const isPushedDownInViewport = (rect.bottom > vh - 170 || rect.top > vh - 130);
+
+    // ONLY when such a long post pushes the comment box down near the bottom:
+    if (isPushedDownInContainer || isPushedDownInViewport || rect.top < 80) {
+      console.log('[ATOMX] Long post in modal detected! Comment box is pushed down. Performing gentle scroll to bring into clear view...');
+      const initialWinY = window.scrollY;
+
+      if (scrollContainer) {
+        const targetScrollDelta = rect.top - (containerRect.top + Math.round(containerRect.height * 0.38));
+        if (Math.abs(targetScrollDelta) > 15) {
+          scrollContainer.scrollBy({ top: Math.round(targetScrollDelta), behavior: 'smooth' });
+          await sleep(380);
+        }
+      } else {
+        editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await sleep(380);
+      }
+
+      // Safeguard: Ensure modal scroll never shifts the background window
+      if (window.scrollY !== initialWinY) {
+        window.scrollTo(0, initialWinY);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // 2. Non-modal: Status page or Timeline inline composer
+  if (rect.bottom > vh - 170 || rect.top < 90) {
+    console.log('[ATOMX] Comment box not comfortably visible in viewport. Gently scrolling into view...');
+    const targetScroll = Math.round(rect.top - (vh * 0.42));
+    if (Math.abs(targetScroll) > 25) {
+      await humanSmoothScroll(targetScroll, { settlePause: 250, allowModalScroll: true });
+    } else {
+      editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await sleep(350);
+    }
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -1259,13 +1657,8 @@ async function smoothScrollAndHydrate(totalDelta = 650, pauseAfter = 900) {
 async function typeTextHumanLike(editor, text) {
   if (!editor || !text) return false;
 
-  // 1. Move Virtual Cursor to editor/comment box, hover and click to activate text cursor
-  const vh = window.innerHeight || document.documentElement.clientHeight;
-  const editorRect = editor.getBoundingClientRect();
-  if (editorRect.top < 80 || editorRect.bottom > vh - 20) {
-    editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    await sleep(350);
-  }
+  // 1. Ensure comment box is comfortably visible on screen (especially for long posts / quote tweets in modal)
+  await ensureCommentBoxComfortablyVisible(editor);
 
   // Visibly move virtual cursor to the comment box and click
   console.log('[ATOMX] Moving virtual cursor to comment box and clicking...');
@@ -1281,12 +1674,14 @@ async function typeTextHumanLike(editor, text) {
 
   // 2. Clear editor first using Selection range and delete
   try {
-    const sel = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(editor);
-    sel.removeAllRanges();
-    sel.addRange(range);
-    document.execCommand('delete', false, null);
+    if (editor && editor.isConnected) {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand('delete', false, null);
+    }
   } catch (e) {}
   await sleep(180);
 
@@ -1320,51 +1715,58 @@ async function typeTextHumanLike(editor, text) {
   // execCommand natively maintains DraftJS's internal ContentState, block offset keys, and backspace handling.
   if (!typedOk) {
     try {
-    for (let i = 0; i < text.length; i++) {
-      if (isWorkflowAborted || isWorkflowItemSkipped) {
-        console.log('[ATOMX] Typing aborted or skipped by user.');
-        return false;
-      }
+      const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+      const userTypingDelay = safetyRes?.atomx_safety_settings?.typingDelay !== undefined ? Number(safetyRes.atomx_safety_settings.typingDelay) : 110;
 
-      // Respect user pause while typing
-      while (isHudWorkflowPaused && !isWorkflowAborted && !isWorkflowItemSkipped) {
-        await sleep(400);
-      }
+      for (let i = 0; i < text.length; i++) {
+        if (isWorkflowAborted || isWorkflowItemSkipped) {
+          console.log('[ATOMX] Typing aborted or skipped by user.');
+          return false;
+        }
 
-      const char = text[i];
-      try {
-        editor.dispatchEvent(new InputEvent('beforeinput', {
-          inputType: 'insertText',
-          data: char,
-          bubbles: true,
-          cancelable: true,
-          composed: true
-        }));
-      } catch (e) {}
-      const ok = document.execCommand('insertText', false, char);
-      if (!ok) {
-        throw new Error('execCommand insertText failed');
-      }
+        // Respect user pause while typing
+        while (isHudWorkflowPaused && !isWorkflowAborted && !isWorkflowItemSkipped) {
+          await sleep(400);
+        }
 
-      // Noticeably slower, natural human typing cadence
-      let delay = Math.floor(Math.random() * 60) + 110; // 110ms - 170ms per character
-      if (char === '.' || char === '!' || char === '?') {
-        delay += Math.floor(Math.random() * 250) + 350; // 350ms - 600ms after sentences
-      } else if (char === ',' || char === ';') {
-        delay += Math.floor(Math.random() * 140) + 200; // 200ms - 340ms after commas
-      } else if (char === ' ') {
-        delay += Math.floor(Math.random() * 100) + 140;  // 140ms - 240ms between words
-      } else if (i > 0 && i % 14 === 0) {
-        delay += Math.floor(Math.random() * 200) + 220; // Natural thinking pause every 14 chars
+        const char = text[i];
+        try {
+          editor.focus?.({ preventScroll: true });
+          editor.dispatchEvent(new InputEvent('beforeinput', {
+            inputType: 'insertText',
+            data: char,
+            bubbles: true,
+            cancelable: true,
+            composed: true
+          }));
+        } catch (e) {}
+        const ok = document.execCommand('insertText', false, char);
+        if (!ok) {
+          throw new Error('execCommand insertText failed');
+        }
+
+        // Natural human typing cadence scaled by user's Comment Typing Delay setting
+        let delay = 0;
+        if (userTypingDelay > 0) {
+          delay = Math.floor(userTypingDelay * (0.85 + Math.random() * 0.3));
+          if (char === '.' || char === '!' || char === '?') {
+            delay += Math.floor(userTypingDelay * 2.2); // punctuation pause
+          } else if (char === ',' || char === ';') {
+            delay += Math.floor(userTypingDelay * 1.4); // comma pause
+          } else if (char === ' ') {
+            delay += Math.floor(userTypingDelay * 0.9); // word space pause
+          } else if (i > 0 && i % 14 === 0) {
+            delay += Math.floor(userTypingDelay * 1.5); // thinking pause
+          }
+        }
+        if (delay > 0) await sleep(delay);
       }
-      await sleep(delay);
-    }
 
     if ((editor.innerText || editor.textContent || '').trim().length > 0) {
       typedOk = true;
     }
   } catch (err) {
-    console.warn('[ATOMX] Letter typing warning, using ClipboardEvent paste fallback:', err);
+    console.log('[ATOMX] Letter typing notice, switching to ClipboardEvent paste fallback:', err?.message || err);
   }
   }
 
@@ -1399,7 +1801,7 @@ async function typeTextHumanLike(editor, text) {
         typedOk = true;
       }
     } catch (pe) {
-      console.warn('[ATOMX] Paste fallback error:', pe);
+      console.log('[ATOMX] Paste fallback notice:', pe?.message || pe);
     }
   }
 
@@ -1437,16 +1839,19 @@ function isTargetRestrictedOrCommentsLocked(targetArticle = null) {
       }
     }
 
-    // 3. Check reply button on target article
-    if (targetArticle) {
-      const replyBtn = targetArticle.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
-      if (!replyBtn) {
-        return { restricted: true, reason: 'No reply button available (comments turned off)' };
-      }
-      const isBtnDisabled = replyBtn.getAttribute('aria-disabled') === 'true' || replyBtn.disabled || replyBtn.getAttribute('disabled') !== null;
-      const btnLabel = (replyBtn.getAttribute('aria-label') || '').toLowerCase();
-      if (isBtnDisabled || btnLabel.includes('disabled') || btnLabel.includes('restricted')) {
-        return { restricted: true, reason: 'Reply button is disabled/restricted' };
+    // 3. Check reply button on target article (only flag if explicitly disabled in DOM)
+    if (targetArticle && targetArticle !== document) {
+      const replyBtn = targetArticle.querySelector('button[data-testid="reply"], div[data-testid="reply"], [data-testid="reply"]') ||
+                       Array.from(targetArticle.querySelectorAll('button, div[role="button"]')).find(b => {
+                         const label = (b.getAttribute('aria-label') || '').toLowerCase();
+                         return label.includes('reply') && !label.includes('post your reply');
+                       });
+      if (replyBtn) {
+        const isBtnDisabled = replyBtn.getAttribute('aria-disabled') === 'true' || replyBtn.disabled || replyBtn.getAttribute('disabled') !== null;
+        const btnLabel = (replyBtn.getAttribute('aria-label') || '').toLowerCase();
+        if (isBtnDisabled || btnLabel.includes('disabled') || btnLabel.includes('restricted')) {
+          return { restricted: true, reason: 'Reply button is disabled/restricted' };
+        }
       }
     }
 
@@ -1483,10 +1888,12 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   }
 
   console.log('[ATOMX COMMENT ENGINE] Posting comment:', commentText);
+  isCommentActive = true;
 
-  let textarea = null;
-  let dialog = null;
-  let isDialog = false;
+  try {
+    let textarea = null;
+    let dialog = null;
+    let isDialog = false;
 
   const isStatusPage = window.location.pathname.includes('/status/');
   const mainArt = getMainPostArticle();
@@ -1538,7 +1945,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     }
 
     if (!replyBtn) {
-      console.warn('[ATOMX COMMENT ENGINE] Reply button not found on target article!');
+      console.log('[ATOMX COMMENT ENGINE] Reply button not found on target article (might be ad, video, or restricted). Skipping.');
       return { success: false, error: 'Reply button not found on post' };
     }
 
@@ -1550,16 +1957,48 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 3500);
     if (!dialog) {
       console.log('[ATOMX COMMENT ENGINE] Modal dialog did not open after first click. Attempting direct authentic click retry...');
-      try { replyBtn.click(); } catch (e) {}
+      try {
+        const targetBtn = replyBtn.closest('button, [role="button"]') || replyBtn;
+        targetBtn.focus?.({ preventScroll: true });
+        dispatchEnhancedHumanEvents(targetBtn);
+        targetBtn.click();
+      } catch (e) {
+        try { replyBtn.click(); } catch (err) {}
+      }
       dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 3500);
     }
 
     if (dialog) {
       isDialog = true;
-      for (let w = 0; w < 15; w++) {
+
+      // Check immediately if this is a "Who can reply?" restriction dialog
+      const dialogText = (dialog.innerText || '').toLowerCase();
+      if (dialogText.includes('who can reply') || dialogText.includes('only some accounts can reply')) {
+        console.log('[ATOMX COMMENT ENGINE] "Who can reply?" restriction detected. Dismissing modal...');
+        const gotItBtn = Array.from(dialog.querySelectorAll('button, div[role="button"]')).find(b => {
+          const t = (b.innerText || '').trim().toLowerCase();
+          return t === 'got it' || t === 'close' || b.getAttribute('aria-label') === 'Close';
+        });
+        if (gotItBtn) {
+          try { gotItBtn.click(); } catch (e) {}
+        } else {
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+        }
+        await sleep(300);
+        if (dialog.isConnected) {
+          try { dialog.remove(); } catch (e) {}
+        }
+        const mask = document.querySelector('div[data-testid="mask"]');
+        if (mask && !document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"]')) {
+          try { mask.remove(); } catch (e) {}
+        }
+        return { success: false, commentsRestricted: true, error: 'Who can reply restriction' };
+      }
+
+      for (let w = 0; w < 10; w++) {
         textarea = dialog.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
         if (textarea) break;
-        await sleep(200);
+        await sleep(150);
       }
     } else {
       // Check if clicking reply focused an inline reply composer (common on status pages / thread detail)
@@ -1569,27 +2008,56 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
         textarea = inline;
         isDialog = false;
       } else {
-        console.warn('[ATOMX COMMENT ENGINE] Reply modal dialog did not appear!');
+        console.log('[ATOMX COMMENT ENGINE] Reply modal dialog did not appear for this tweet (may be restricted or disabled). Skipping.');
         return { success: false, error: 'Reply dialog modal did not open' };
       }
     }
   }
 
   if (!textarea || isWorkflowAborted || isWorkflowItemSkipped) {
-    if (isWorkflowItemSkipped) closeAnyOpenTwitterDialog();
-    console.warn('[ATOMX COMMENT ENGINE] Reply textarea not found inside dialog, skipped or aborted!');
-    return { success: false, error: 'Textarea not found inside dialog, skipped or aborted' };
+    if (dialog && dialog.isConnected) {
+      // Safely close and dismiss any open dialog that failed to mount a composer
+      const closeBtn = dialog.querySelector('button[aria-label="Close"], div[aria-label="Close"], button[data-testid="app-bar-close"]');
+      if (closeBtn) {
+        try { closeBtn.click(); } catch (e) {}
+      }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      await sleep(250);
+      if (dialog.isConnected) {
+        try { dialog.remove(); } catch (e) {}
+      }
+      const mask = document.querySelector('div[data-testid="mask"]');
+      if (mask && !document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"]')) {
+        try { mask.remove(); } catch (e) {}
+      }
+    } else {
+      await closeAnyOpenTwitterDialog();
+    }
+    if (isWorkflowAborted || isWorkflowItemSkipped) {
+      console.log('[ATOMX COMMENT ENGINE] Reply cancelled: workflow was aborted or skipped by user.');
+      return { success: false, aborted: isWorkflowAborted, skipped: isWorkflowItemSkipped, error: 'Workflow was aborted or skipped by user' };
+    }
+    console.log('[ATOMX COMMENT ENGINE] Reply textarea not found inside dialog. Dismissed modal and skipping comment.');
+    return { success: false, commentsRestricted: true, error: 'Textarea not found inside dialog' };
+  }
+
+  // Pre-typing verification: check if daily post limit or rate limit is already active
+  const preCheckLimit = checkTwitterRateLimit();
+  if (preCheckLimit) {
+    triggerRateLimitAbort(preCheckLimit.text, preCheckLimit.isDailyLimit);
+    await closeAnyOpenTwitterDialog();
+    return { success: false, aborted: true, rateLimited: true, isDailyLimit: preCheckLimit.isDailyLimit, error: preCheckLimit.text };
   }
 
   // Pre-typing verification: ONLY on single-tweet status pages (never on Home/Search timelines)
   const curHandle = getLoggedInUserHandle() || '';
   if (isStatusPage && curHandle && hasUserAlreadyCommented(curHandle)) {
-    console.warn(`[ATOMX COMMENT ENGINE] User @${curHandle} already has a comment on this post. Aborting and clearing dialog.`);
+    console.log(`[ATOMX COMMENT ENGINE] User @${curHandle} already has a comment on this post. Aborting and clearing dialog.`);
     clearAnyDraftComment();
     return { success: true, ignored: true, commentSkipped: true, reason: 'Already commented on this post previously.' };
   }
 
-  // 3. Type human-like into the editor
+  // 3. Type into editor (letter by letter or instant paste depending on user typing delay)
   await typeTextHumanLike(textarea, commentText);
 
   if (isWorkflowAborted || isWorkflowItemSkipped) {
@@ -1597,7 +2065,14 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     return { success: false, aborted: isWorkflowAborted, skipped: isWorkflowItemSkipped, error: 'Workflow was aborted or skipped by user' };
   }
 
-  await sleep(600);
+  // Brief pause for DraftJS to sync React state
+  const speedChk = await chrome.storage?.local?.get(['atomx_safety_settings']).catch(() => ({}));
+  const uSpeed = speedChk?.atomx_safety_settings?.cursorSpeed !== undefined ? Number(speedChk.atomx_safety_settings.cursorSpeed) : 450;
+  if (uSpeed > 0) {
+    await sleep(Math.round(600 * Math.max(0.2, uSpeed / 450)));
+  } else {
+    await sleep(100);
+  }
 
   // 5. Find Submit Reply Button scoped to dialog if open
   const scope = (isDialog && dialog) ? dialog : document;
@@ -1647,13 +2122,13 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
       textarea.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
       await sleep(250);
     } catch (e) {
-      console.warn('[ATOMX COMMENT ENGINE] Editor paste activation warning:', e);
+      console.log('[ATOMX COMMENT ENGINE] Editor paste activation notice:', e?.message || e);
     }
     submitBtn = getSubmitBtn();
   }
 
   if (!submitBtn) {
-    console.warn('[ATOMX COMMENT ENGINE] Submit reply button not found!');
+    console.log('[ATOMX COMMENT ENGINE] Submit reply button not found.');
     await clearAnyDraftComment();
     await closeAnyOpenTwitterDialog();
     return { success: false, error: 'Submit button not found' };
@@ -1661,7 +2136,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   // Pre-submit verification: If comment section hydrated during typing, abort submission
   if (curHandle && hasUserAlreadyCommented(curHandle)) {
-    console.warn(`[ATOMX COMMENT ENGINE] User @${curHandle} comment appeared before submit. Aborting submission.`);
+    console.log(`[ATOMX COMMENT ENGINE] User @${curHandle} comment appeared before submit. Aborting submission.`);
     await clearAnyDraftComment();
     await closeAnyOpenTwitterDialog();
     return { success: true, ignored: true, commentSkipped: true, reason: 'Already commented on this post previously.' };
@@ -1678,7 +2153,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   // Pre-submit check: Ensure textarea actually contains content before attempting submit
   const currentEditorContent = (textarea.innerText || textarea.textContent || '').trim();
   if (!currentEditorContent) {
-    console.warn('[ATOMX COMMENT ENGINE] Textarea is completely empty before submit! Re-attempting text entry...');
+    console.log('[ATOMX COMMENT ENGINE] Textarea empty before submit. Re-attempting text entry...');
     await typeTextHumanLike(textarea, commentText);
     await sleep(350);
     submitBtn = getSubmitBtn() || submitBtn;
@@ -1687,45 +2162,149 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
   // If submit button is still strictly disabled in React state, DO NOT force-click (prevents "content of your post is invalid" rejection)
   const isStillDisabled = submitBtn.getAttribute('aria-disabled') === 'true' || submitBtn.disabled;
   if (isStillDisabled) {
-    console.warn('[ATOMX COMMENT ENGINE] Submit button remained disabled by Twitter React state. Discarding cleanly to avoid invalid post content error.');
+    console.log('[ATOMX COMMENT ENGINE] Submit button remained disabled by Twitter React state. Discarding cleanly to avoid invalid post content error.');
     await clearAnyDraftComment();
     await closeAnyOpenTwitterDialog();
     return { success: false, skipped: true, error: 'Twitter submit button remained disabled in React state' };
   }
 
-  // 6. Click Submit EXACTLY ONCE with human pointer events (No double tap, avoids duplicate error)
+  // 6. Click Submit with human pointer events (single click guarantee)
   await simulateHumanSubmitClick(submitBtn);
+  console.log('[ATOMX COMMENT ENGINE] Clicked Submit button, awaiting Twitter confirmation...');
 
-  console.log('[ATOMX COMMENT ENGINE] Clicked Submit button once successfully!');
-  await sleep(1200);
+  // Immediately lock submitBtn to ensure zero secondary clicks occur
+  try {
+    submitBtn.style.pointerEvents = 'none';
+    submitBtn.disabled = true;
+  } catch (e) {}
 
-  // Check immediately if Twitter responded with a content rejection error banner or toast
-  const postErr = checkTwitterPostError();
-  if (postErr) {
-    console.warn('[ATOMX COMMENT ENGINE] Twitter rejected post content:', postErr);
-    // Immediately clear/discard draft sheet so it does not block subsequent actions
-    await clearAnyDraftComment();
-    await closeAnyOpenTwitterDialog();
-    return { success: false, skipped: true, postInvalid: true, error: `Twitter post rejected: ${postErr}` };
+  // Wait for Twitter to process the comment and confirm
+  let isConfirmedSent = false;
+  const submitWaitStart = Date.now();
+  const maxSubmitWaitMs = 8000;
+
+  while (Date.now() - submitWaitStart < maxSubmitWaitMs) {
+    if (isWorkflowAborted || isWorkflowItemSkipped) break;
+
+    // A. Check for Twitter's native "Your post was sent" toast (100% authoritative confirmation)
+    const toastElements = Array.from(document.querySelectorAll('div[data-testid="toast"], [data-testid="toast"] span, [role="status"]'));
+    for (const tEl of toastElements) {
+      const tTxt = (tEl.innerText || tEl.textContent || '').toLowerCase();
+      if (tTxt.includes('your post was sent') || tTxt.includes('post was sent') || (tTxt.includes('sent') && tTxt.includes('view'))) {
+        isConfirmedSent = true;
+        console.log('[ATOMX COMMENT ENGINE] Twitter "Your post was sent" toast confirmed! Comment verified.');
+        break;
+      }
+    }
+    if (isConfirmedSent) break;
+
+    // B. Check if Twitter gave "Whoops! You already said that."
+    // Note: On Twitter this notice ONLY appears when the identical tweet has already been published.
+    // Hence, this is proof that the comment was already successfully posted!
+    const duplicateAlert = Array.from(document.querySelectorAll('div[role="alert"], [data-testid="toast"], div[role="alertdialog"]')).find(el => {
+      const txt = (el.innerText || el.textContent || '').toLowerCase();
+      return txt.includes('whoops! you already said that') || txt.includes('you already sent that');
+    });
+    if (duplicateAlert) {
+      isConfirmedSent = true;
+      console.log('[ATOMX COMMENT ENGINE] "Whoops! You already said that" alert detected — comment already published on Twitter! Verified.');
+      break;
+    }
+
+    // C. Check immediately if Twitter responded with a REAL content rejection error banner or toast
+    const postErr = checkTwitterPostError();
+    if (postErr) {
+      console.warn('[ATOMX COMMENT ENGINE] Twitter rejected post content:', postErr);
+      await clearAnyDraftComment();
+      await closeAnyOpenTwitterDialog();
+      return { success: false, skipped: true, postInvalid: true, error: `Twitter post rejected: ${postErr}` };
+    }
+
+    // D. Check immediately if Twitter responded with a rate limit or daily limit error banner/toast
+    const activeLimit = checkTwitterRateLimit();
+    if (activeLimit) {
+      triggerRateLimitAbort(activeLimit.text, activeLimit.isDailyLimit);
+      await clearAnyDraftComment();
+      await closeAnyOpenTwitterDialog();
+      return { success: false, aborted: true, rateLimited: true, isDailyLimit: activeLimit.isDailyLimit, error: activeLimit.text };
+    }
+
+    // E. Check if dialog / inline box has closed / cleared naturally
+    if (isDialog) {
+      const activeDialog = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[aria-modal="true"] div[data-testid="tweetTextarea_0"]');
+      if (!activeDialog) {
+        isConfirmedSent = true;
+        console.log('[ATOMX COMMENT ENGINE] Reply dialog successfully closed by Twitter! Comment verified.');
+        break;
+      }
+    } else {
+      const inlineTa = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"]');
+      if (!inlineTa || !(inlineTa.innerText || inlineTa.textContent || '').trim()) {
+        isConfirmedSent = true;
+        console.log('[ATOMX COMMENT ENGINE] Inline reply textarea cleared by Twitter! Comment verified.');
+        break;
+      }
+    }
+
+    // F. Check if user\'s comment now appears in the thread below
+    if (curHandle && isStatusPage) {
+      const myComment = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).find(art => {
+        const text = (art.innerText || art.textContent || '');
+        return text.includes(`@${curHandle}`) && text.includes(commentText.slice(0, 20));
+      });
+      if (myComment) {
+        isConfirmedSent = true;
+        console.log('[ATOMX COMMENT ENGINE] Published comment found in thread under tweet! Comment verified.');
+        break;
+      }
+    }
+
+    // NO secondary fallback button.click()! The initial click is authentic and final.
+    await sleep(250);
   }
 
-  // Check immediately if Twitter responded with a rate limit error toast
-  if (checkTwitterRateLimit()) {
-    triggerRateLimitAbort('Rate limited while submitting reply');
-    return { success: false, aborted: true, rateLimited: true, error: 'Twitter Rate Limit detected after posting' };
+  // If dialog is still lingering after max wait, check if submit is still enabled (failed)
+  if (!isConfirmedSent) {
+    const lingeringDialog = document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"], div[aria-modal="true"] div[data-testid="tweetTextarea_0"]');
+    if (lingeringDialog) {
+      const lingeringBtn = getSubmitBtn();
+      const stillActive = lingeringBtn && !lingeringBtn.disabled && lingeringBtn.getAttribute('aria-disabled') !== 'true';
+      if (stillActive) {
+        console.warn('[ATOMX COMMENT ENGINE] Comment was not sent by Twitter (button still active after 8s). Discarding.');
+        await clearAnyDraftComment();
+        await closeAnyOpenTwitterDialog();
+        return { success: false, error: 'Comment submission was not processed by Twitter' };
+      }
+    }
   }
 
-  await sleep(800);
-
-  // Ensure any dialog is completely dismissed so the next post can be scrolled and engaged
-  for (let d = 0; d < 5; d++) {
-    const remainingDialog = document.querySelector('div[role="alertdialog"], div[role="dialog"], div[aria-modal="true"]');
-    if (!remainingDialog) break;
-    await closeAnyOpenTwitterDialog();
-    await sleep(350);
+  const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+  const s = safetyRes?.atomx_safety_settings || {};
+  const isInstant = (s.cursorSpeed !== undefined && Number(s.cursorSpeed) === 0);
+  if (!isInstant) {
+    await sleep(Math.round(600 * Math.max(0.2, (Number(s.cursorSpeed) || 450) / 450)));
   }
+
+  // Reply Delay (After Comment): Centralized Anti-Ban Safety pause before next action
+  try {
+    let rMin = s.replyDelayMin !== undefined ? Number(s.replyDelayMin) : (s.replyDelay !== undefined ? Number(s.replyDelay) : 2);
+    let rMax = s.replyDelayMax !== undefined ? Number(s.replyDelayMax) : (s.replyDelay !== undefined ? Number(s.replyDelay) : 5);
+    if (isInstant || (rMin === 0 && rMax === 0) || s.replyDelay === 0) {
+      // Strictly 0s delay when user configured 0 or instant mode!
+    } else {
+      if (rMin > rMax) [rMin, rMax] = [rMax, rMin];
+      const waitSec = Math.floor(rMin + Math.random() * (rMax - rMin + 1));
+      if (waitSec > 0) {
+        console.log(`[ATOMX COMMENT ENGINE] Reply Delay (After Comment): pausing ${waitSec}s...`);
+        await sleep(waitSec * 1000);
+      }
+    }
+  } catch (e) {}
 
   return { success: true };
+} finally {
+  isCommentActive = false;
+}
 }
 
 // Helper: Detects Twitter post validation errors (The content of your post is invalid, duplicates, etc.)
@@ -1738,8 +2317,6 @@ function checkTwitterPostError() {
     if (
       txt.includes('content of your post is invalid') ||
       txt.includes('post is invalid') ||
-      txt.includes('whoops! you already said that') ||
-      txt.includes('you already sent that') ||
       txt.includes('something went wrong') ||
       txt.includes('cannot send') ||
       txt.includes('tweet is unavailable') ||
@@ -1752,14 +2329,37 @@ function checkTwitterPostError() {
 }
 
 // =========================================================================
-// TWITTER / X RATE LIMIT AUTO-ABORT MONITOR
+// TWITTER / X RATE LIMIT & DAILY POST LIMIT AUTO-ABORT MONITOR
 // =========================================================================
 function checkTwitterRateLimit() {
   const elements = Array.from(document.querySelectorAll(
-    'div[data-testid="toast"], div[role="alert"], div[role="alertdialog"], div[data-testid="error-detail"], [data-testid="toast"] span, [role="alert"] span, div[data-testid="empty_state"]'
+    'div[data-testid="toast"], div[role="alert"], div[role="alertdialog"], div[data-testid="error-detail"], [data-testid="toast"] span, [role="alert"] span, div[data-testid="empty_state"], div[role="dialog"], div[aria-modal="true"]'
   ));
-  for (const el of elements) {
-    const txt = (el.innerText || '').toLowerCase();
+
+  const checkText = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+    const txt = raw.toLowerCase();
+
+    // 1. Daily Post Limit / Tweet Limit (Twitter hard cap message)
+    if (
+      txt.includes('daily post limit') ||
+      txt.includes('hit the daily post limit') ||
+      txt.includes('daily tweet limit') ||
+      txt.includes('daily limit') ||
+      txt.includes('subscribe to premium for higher limits') ||
+      txt.includes('upgrade to unlock') ||
+      txt.includes('over the daily limit') ||
+      txt.includes('reached your limit') ||
+      txt.includes('you are over the daily limit') ||
+      txt.includes('whoops! you\'ve hit your daily post limit')
+    ) {
+      return {
+        isDailyLimit: true,
+        text: "You've hit the daily post limit. Subscribe to Premium for higher limits."
+      };
+    }
+
+    // 2. Standard Rate Limit / Over Capacity
     if (
       txt.includes('rate limit') ||
       txt.includes('rate-limit') ||
@@ -1772,33 +2372,131 @@ function checkTwitterRateLimit() {
       txt.includes('cannot retrieve posts at this time') ||
       txt.includes('over capacity')
     ) {
-      return true;
+      return {
+        isDailyLimit: false,
+        text: "Twitter Rate Limit: Sorry, you are rate limited."
+      };
     }
+
+    return null;
+  };
+
+  for (const el of elements) {
+    const res = checkText(el.innerText || el.textContent || '');
+    if (res) return res;
   }
 
   // Also check top-level alerts / error toasts anywhere on document body
-  const toasts = document.querySelectorAll('div[data-testid="toast"]');
+  const toasts = document.querySelectorAll('div[data-testid="toast"], div[role="alert"]');
   for (const t of toasts) {
-    const txt = (t.textContent || '').toLowerCase();
-    if (txt.includes('rate limit') || txt.includes('rate-limit') || txt.includes('try again later') || txt.includes('sorry, you are rate limited') || txt.includes('over capacity')) {
-      return true;
-    }
+    const res = checkText(t.textContent || '');
+    if (res) return res;
   }
-  return false;
+
+  // Also check open modal dialog text if present
+  const openModal = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
+  if (openModal) {
+    const res = checkText(openModal.innerText || openModal.textContent || '');
+    if (res) return res;
+  }
+
+  return null;
 }
 
-function triggerRateLimitAbort(reason = 'Sorry, you are rate limited.') {
-  console.warn('[ATOMX ALERT] Twitter Rate Limit Detected! Stopping all automation immediately.');
+function showLimitWarningOnPage(reason, isDailyLimit = false) {
+  const existing = document.getElementById('atomx-limit-warning-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'atomx-limit-warning-modal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 520px;
+    background: linear-gradient(135deg, rgba(30, 20, 25, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+    border: 2px solid #EF4444;
+    border-radius: 14px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 24px rgba(239, 68, 68, 0.35);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #FFFFFF;
+    z-index: 2147483647;
+    padding: 16px 20px;
+    box-sizing: border-box;
+    user-select: none;
+  `;
+
+  const titleText = isDailyLimit ? "🛑 Twitter Daily Post Limit Reached!" : "🚨 Twitter Rate Limit Detected!";
+  const descText = isDailyLimit
+    ? "Twitter has restricted your account from posting further tweets/replies today (<strong>\"You've hit the daily post limit\"</strong>).<br><br>All active AtomX automation tasks have been <strong>automatically stopped immediately</strong> to protect your account."
+    : "Twitter returned a rate limit response (<strong>\"Sorry, you are rate limited\"</strong>).<br><br>All active AtomX automation tasks have been <strong>automatically stopped immediately</strong> to protect your account.";
+
+  modal.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:20px;">🛑</span>
+        <strong style="font-size:15px; color:#F87171; font-weight:800;">${titleText}</strong>
+      </div>
+      <button id="atomx-close-limit-modal-btn" style="background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); color:#FCA5A5; font-size:14px; font-weight:800; border-radius:6px; width:26px; height:26px; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1;" title="Close Alert">✕</button>
+    </div>
+    <div style="font-size:12.5px; color:#E2E8F0; line-height:1.5; margin-bottom:14px;">
+      ${descText}
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button id="atomx-ack-limit-modal-btn" style="background:#EF4444; color:#FFFFFF; border:none; padding:8px 16px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; box-shadow:0 2px 8px rgba(239,68,68,0.4);">
+        Acknowledge & Stop Tasks
+      </button>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const cleanup = () => {
+    if (modal && modal.isConnected) modal.remove();
+  };
+
+  modal.querySelector('#atomx-close-limit-modal-btn')?.addEventListener('click', cleanup);
+  modal.querySelector('#atomx-ack-limit-modal-btn')?.addEventListener('click', cleanup);
+}
+
+function triggerRateLimitAbort(reason = 'Sorry, you are rate limited.', isDailyLimit = false) {
+  console.warn(`[ATOMX ALERT] Twitter Limit Detected (${isDailyLimit ? 'DAILY POST LIMIT' : 'RATE LIMIT'}): ${reason}. Stopping all automation immediately.`);
   isWorkflowAborted = true;
+
+  // Clean up any open reply modal or draft
+  closeAnyOpenTwitterDialog();
+  clearAnyDraftComment();
+
+  const badgeText = isDailyLimit ? 'DAILY_LIMIT' : 'RATE_LIMITED';
+  const statusText = isDailyLimit
+    ? '🛑 Daily Post Limit Hit! All automation stopped immediately to protect account.'
+    : '🚨 Rate limit detected! All automation stopped immediately to protect account.';
+
   updateFloatingHud({
-    stateBadge: 'RATE_LIMITED',
-    statusText: '🚨 Rate limit detected! All automation stopped immediately to protect account.',
-    isStopped: true
+    stateBadge: badgeText,
+    statusText: statusText,
+    timerBadge: '🛑 Stopped',
+    nextAction: isDailyLimit ? 'Stopped: Daily Limit Hit' : 'Stopped: Rate Limit Hit',
+    isStopped: true,
+    active: false
   });
+
+  // Display prominent on-page notification toast
+  showLimitWarningOnPage(reason, isDailyLimit);
+
+  // Send message to background service worker to kill all workflows and alarms
   chrome.runtime.sendMessage({
     type: 'RATE_LIMIT_DETECTED',
-    error: 'Twitter Rate Limit: "Sorry, you are rate limited." All automation has been stopped immediately to protect your account.'
+    isDailyLimit,
+    error: reason
   }).catch(() => null);
+
+  chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
+  chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
 }
 
 // =========================================================================
@@ -1949,77 +2647,95 @@ function ensureFloatingHud() {
     if (timerBadge) {
       timerBadge.textContent = isHudWorkflowPaused ? '⏸️ Paused' : '⚡ Active';
     }
-    chrome.storage.local.set({ atomx_workflow_paused: isHudWorkflowPaused }).catch(() => null);
+    if (typeof TgLikerNativeEngine !== 'undefined') {
+      try {
+        TgLikerNativeEngine.setCtrl({
+          state: isHudWorkflowPaused ? 'paused' : 'running',
+          runId: Date.now()
+        });
+      } catch (err) {}
+    }
+    chrome.storage.local.set({
+      atomx_workflow_paused: isHudWorkflowPaused,
+      tgl_ctrl: { state: isHudWorkflowPaused ? 'paused' : 'running' }
+    }).catch(() => null);
     chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: isHudWorkflowPaused }).catch(() => null);
   });
 
   // Skip current item listener — Instant response & real-time tracker update
+  let isHudSkipBtnLocked = false;
   hud.querySelector('#hud-skip-action-btn')?.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (isHudSkipBtnLocked) return;
+    isHudSkipBtnLocked = true;
+    setTimeout(() => { isHudSkipBtnLocked = false; }, 500);
+    isWorkflowItemSkipped = true;
+    isHudWorkflowPaused = false;
+
+    // Reset pause button UI if it was paused
+    const pauseBtn = hud.querySelector('#hud-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="4" width="4" height="16"></rect>
+          <rect x="14" y="4" width="4" height="16"></rect>
+        </svg>
+        Pause
+      `;
+      pauseBtn.style.color = '#FBBF24';
+      pauseBtn.style.background = 'rgba(245, 158, 11, 0.12)';
+      pauseBtn.style.borderColor = 'rgba(245, 158, 11, 0.55)';
+    }
+    const badge = hud.querySelector('#hud-badge');
+    if (badge) {
+      badge.textContent = 'RUNNING';
+      badge.style.color = '#10B981';
+      badge.style.background = 'rgba(16, 185, 129, 0.15)';
+      badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+    }
+
     isWorkflowItemSkipped = true;
     clearAnyDraftComment();
+    chrome.storage.local.set({ atomx_skip_current: true, atomx_workflow_paused: false }).catch(() => null);
+    chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: false }).catch(() => null);
+    chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
 
     // Instant local HUD visual feedback
-    const skipEl = hud.querySelector('#hud-skip-count');
-    let newSkipped = 1;
-    if (skipEl) {
-      newSkipped = (parseInt(skipEl.textContent, 10) || 0) + 1;
-      skipEl.textContent = String(newSkipped);
-    }
     const statusEl = hud.querySelector('#hud-status-text');
     if (statusEl) statusEl.textContent = '⏭️ Skipping current item...';
     const timerBadge = hud.querySelector('#hud-timer-badge');
     if (timerBadge) timerBadge.textContent = '⏭️ Skip';
-
-    chrome.storage.local.get(['atomx_active_hud', 'atomx_agent_workflow'], (res) => {
-      const activeHud = res?.atomx_active_hud || {};
-      const wf = res?.atomx_agent_workflow;
-      const prevSkipped = (activeHud.skipped || 0) + 1;
-      const total = activeHud.collected || activeHud.total || (wf?.total || 10);
-      const done = activeHud.done || (wf?.successCount || 0);
-      const nextIdx = Math.min(total, done + prevSkipped);
-
-      const indEl = hud.querySelector('#hud-indicator');
-      if (indEl) indEl.textContent = `${nextIdx}/${total}`;
-
-      const updatedHud = {
-        ...activeHud,
-        skipped: prevSkipped,
-        indicator: `${nextIdx}/${total}`,
-        statusText: '⏭️ Skipping current item...'
-      };
-      const updates = {
-        atomx_skip_current: true,
-        atomx_active_hud: updatedHud
-      };
-      if (wf && wf.active) {
-        updates.atomx_agent_workflow = {
-          ...wf,
-          ignoredCount: prevSkipped,
-          currentIndex: nextIdx,
-          statusText: '⏭️ Skipping current item...'
-        };
-      }
-      chrome.storage.local.set(updates).catch(() => null);
-    });
-
-    chrome.runtime.sendMessage({ type: 'SKIP_WORKFLOW_ITEM' }).catch(() => null);
   });
 
-  // Stop workflow listener — Instant response
+  // Stop workflow listener — Instant response & full engine unification
   hud.querySelector('#hud-stop-btn')?.addEventListener('click', async (e) => {
     e.stopPropagation();
     isWorkflowAborted = true;
     closeAnyOpenTwitterDialog();
 
-    const stored = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud']).catch(() => ({}));
+    // 1. Immediately kill TgLikerNativeEngine if running
+    if (typeof TgLikerNativeEngine !== 'undefined') {
+      try {
+        TgLikerNativeEngine.stop();
+        TgLikerNativeEngine.removeCursor();
+      } catch (err) {}
+    }
+    const tglCursor = document.getElementById('tgl-cursor');
+    if (tglCursor) tglCursor.remove();
+    removeVirtualCursor();
+
+    const stored = await chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud', 'tgl_state', 'tgl_cfg']).catch(() => ({}));
     const prevWf = stored?.atomx_agent_workflow || {};
     const prevHud = stored?.atomx_active_hud || {};
-    const agentId = prevWf.agentId || 'audience';
-    const title = prevWf.title || prevHud.title || 'AtomX Agent';
-    const total = prevWf.total || prevHud.collected || 0;
-    const done = prevWf.successCount ?? prevHud.done ?? 0;
-    const skipped = prevWf.ignoredCount ?? prevHud.skipped ?? 0;
+    const prevTglState = stored?.tgl_state || {};
+    const agentId = prevWf.agentId || 'tgliker';
+    const title = prevWf.title || prevHud.title || 'TG Liker (Raid & Repost)';
+    const total = prevWf.total || prevHud.collected || stored?.tgl_cfg?.maxPosts || 0;
+    const done = prevWf.successCount ?? prevHud.done ?? prevTglState.total ?? 0;
+    const skipped = prevWf.ignoredCount ?? prevHud.skipped ?? prevTglState.stats?.skipped ?? 0;
+    const liked = prevWf.liked ?? prevTglState.stats?.liked ?? 0;
+    const reposted = prevWf.reposted ?? prevTglState.stats?.reposted ?? 0;
+    const bookmarked = prevWf.bookmarked ?? prevTglState.stats?.bookmarked ?? 0;
 
     const stoppedHud = {
       ...prevHud,
@@ -2034,7 +2750,7 @@ function ensureFloatingHud() {
       done,
       collected: total,
       skipped,
-      indicator: `${done}/${total}`
+      indicator: `Post ${done}/${total > 0 ? total : '∞'}`
     };
 
     const stoppedWf = {
@@ -2049,7 +2765,10 @@ function ensureFloatingHud() {
       timerBadge: '🛑 Stopped',
       total,
       successCount: done,
-      ignoredCount: skipped
+      ignoredCount: skipped,
+      liked,
+      reposted,
+      bookmarked
     };
 
     updateFloatingHud(stoppedHud);
@@ -2059,7 +2778,20 @@ function ensureFloatingHud() {
         atomx_active_hud: stoppedHud,
         atomx_agent_workflow: stoppedWf,
         atomx_workflow_paused: false,
-        atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true }
+        atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true },
+        tgl_ctrl: { state: 'stopped', runId: 0 },
+        tgl_state: {
+          ...prevTglState,
+          phase: 'stopped',
+          status: '⏹ Stopped by user'
+        },
+        atomx_tgliker_last_stats: {
+          handled: done,
+          liked,
+          reposted,
+          bookmarked,
+          skipped
+        }
       }).catch(() => null);
 
       chrome.runtime.sendMessage({ type: 'ABORT_WORKFLOW' }).catch(() => null);
@@ -2128,11 +2860,30 @@ function ensureFloatingHud() {
   return floatingHudEl;
 }
 
+let currentHudState = {
+  active: false,
+  isStopped: false,
+  stateBadge: 'READY',
+  title: 'AtomX Agent',
+  indicator: '',
+  done: 0,
+  collected: 0,
+  skipped: 0,
+  statusText: '',
+  nextAction: '',
+  timerBadge: '',
+  countdownText: ''
+};
+
 function updateFloatingHud(data = {}) {
-  if (data.isStopped || data.stateBadge === 'STOPPED') {
+  // Merge incoming partial data into persistent HUD state
+  currentHudState = Object.assign({}, currentHudState, data);
+  const hudData = currentHudState;
+
+  if (hudData.isStopped || hudData.stateBadge === 'STOPPED') {
     isWorkflowAborted = true;
     removeVirtualCursor();
-  } else if (data.active || data.isNewWorkflow) {
+  } else if (hudData.active || data.isNewWorkflow) {
     isWorkflowAborted = false;
     ensureVirtualCursorActive();
   }
@@ -2140,6 +2891,8 @@ function updateFloatingHud(data = {}) {
   // If explicitly requested a new workflow, clear dismiss flag
   if (data.isNewWorkflow) {
     isHudDismissedLocally = false;
+    currentHudState.isStopped = false;
+    currentHudState.active = true;
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.remove('atomx_hud_dismissed').catch(() => null);
     }
@@ -2162,27 +2915,31 @@ function updateFloatingHud(data = {}) {
 
   hud.style.display = 'block';
 
-  if (data.title) {
+  if (hudData.title) {
     const el = hud.querySelector('#hud-title');
-    if (el) el.textContent = data.title;
+    if (el) el.textContent = hudData.title;
   }
-  if (data.indicator) {
+  if (hudData.indicator) {
     const el = hud.querySelector('#hud-indicator');
-    if (el) el.textContent = data.indicator;
+    if (el) el.textContent = hudData.indicator;
   }
-  if (data.stateBadge) {
+  if (hudData.stateBadge) {
     const el = hud.querySelector('#hud-badge');
     if (el) {
-      el.textContent = data.stateBadge;
-      if (data.stateBadge === 'RATE_LIMITED') {
+      el.textContent = hudData.stateBadge;
+      if (hudData.stateBadge === 'DONE') {
+        el.style.background = 'rgba(16, 185, 129, 0.25)';
+        el.style.color = '#34D399';
+        el.style.border = '1px solid rgba(16, 185, 129, 0.6)';
+      } else if (hudData.stateBadge === 'RATE_LIMITED' || hudData.stateBadge === 'DAILY_LIMIT' || hudData.stateBadge === 'LIMIT_REACHED') {
         el.style.background = 'rgba(239, 68, 68, 0.25)';
         el.style.color = '#EF4444';
-        el.style.border = '1px solid rgba(239, 68, 68, 0.5)';
-      } else if (data.stateBadge === 'STOPPED') {
+        el.style.border = '1px solid rgba(239, 68, 68, 0.6)';
+      } else if (hudData.stateBadge === 'STOPPED') {
         el.style.background = 'rgba(100, 116, 139, 0.2)';
         el.style.color = '#94A3B8';
         el.style.border = '1px solid rgba(100, 116, 139, 0.4)';
-      } else if (data.stateBadge === 'PAUSED') {
+      } else if (hudData.stateBadge === 'PAUSED') {
         el.style.background = 'rgba(245, 158, 11, 0.2)';
         el.style.color = '#FBBF24';
         el.style.border = '1px solid rgba(245, 158, 11, 0.5)';
@@ -2193,67 +2950,80 @@ function updateFloatingHud(data = {}) {
       }
     }
   }
-  if (data.done !== undefined) {
+  if (hudData.done !== undefined) {
     const el = hud.querySelector('#hud-done-count');
-    if (el) el.textContent = data.done;
+    if (el) el.textContent = hudData.done;
   }
-  if (data.collected !== undefined) {
+  if (hudData.collected !== undefined) {
     const el = hud.querySelector('#hud-col-count');
-    if (el) el.textContent = data.collected;
+    if (el) el.textContent = hudData.collected;
   }
-  if (data.skipped !== undefined) {
+  if (hudData.skipped !== undefined) {
     const el = hud.querySelector('#hud-skip-count');
-    if (el) el.textContent = data.skipped;
+    if (el) el.textContent = hudData.skipped;
   }
-  if (data.progressPercent !== undefined) {
+  if (hudData.progressPercent !== undefined) {
     const el = hud.querySelector('#hud-progress-bar');
-    if (el) el.style.width = `${Math.min(100, Math.max(0, data.progressPercent))}%`;
+    if (el) el.style.width = `${Math.min(100, Math.max(0, hudData.progressPercent))}%`;
   }
-  if (data.statusText) {
+  if (hudData.statusText) {
     const el = hud.querySelector('#hud-status-text');
     if (el) {
-      el.textContent = data.statusText;
-      el.title = data.statusText;
+      el.textContent = hudData.statusText;
+      el.title = hudData.statusText;
     }
   }
 
   // Next action display
   const nextActionEl = hud.querySelector('#hud-next-action-text');
   if (nextActionEl) {
-    if (data.isStopped || data.stateBadge === 'STOPPED') {
-      nextActionEl.textContent = 'Stopped by user';
-    } else if (data.stateBadge === 'DONE') {
+    if (hudData.stateBadge === 'DONE') {
       nextActionEl.textContent = 'Workflow Completed';
-    } else if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
+    } else if (hudData.isStopped || hudData.stateBadge === 'STOPPED') {
+      nextActionEl.textContent = 'Stopped by user';
+    } else if (hudData.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
       nextActionEl.textContent = 'Workflow Paused';
-    } else if (data.nextAction && data.nextAction !== 'Completed') {
-      nextActionEl.textContent = data.nextAction;
-    } else if (data.countdownText && (data.countdownText.includes('Next') || data.countdownText.includes('Delay'))) {
-      nextActionEl.textContent = data.countdownText;
-    } else if (data.indicator) {
-      nextActionEl.textContent = `Target ${data.indicator}`;
+    } else if (hudData.nextAction && hudData.nextAction !== 'Completed') {
+      nextActionEl.textContent = hudData.nextAction;
+    } else if (hudData.countdownText && (hudData.countdownText.includes('Next') || hudData.countdownText.includes('Delay') || hudData.countdownText.includes('Pacing'))) {
+      nextActionEl.textContent = hudData.countdownText;
+    } else if (hudData.indicator) {
+      nextActionEl.textContent = `Target ${hudData.indicator}`;
     }
   }
 
-  // Timer badge display
+  // Timer badge display (Real-time delay and countdown display)
   const timerBadgeEl = hud.querySelector('#hud-timer-badge');
   if (timerBadgeEl) {
-    if (data.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
-      timerBadgeEl.textContent = '⏸️ Paused';
-    } else if (data.isStopped || data.stateBadge === 'STOPPED') {
-      timerBadgeEl.textContent = '⏹️ Stopped';
-    } else if (data.stateBadge === 'DONE') {
+    if (hudData.stateBadge === 'DONE') {
       timerBadgeEl.textContent = '✓ Done';
-    } else if (data.timerBadge) {
-      timerBadgeEl.textContent = data.timerBadge;
-    } else if (data.countdownText) {
-      const match = data.countdownText.match(/(\d+:\d+|\d+s|\d+)/);
-      timerBadgeEl.textContent = match ? (match[0].includes('s') || match[0].includes(':') ? `⏱️ ${match[0]}` : `⏱️ ${match[0]}s`) : '⚡ Active';
-    } else if (data.stateBadge !== 'PACING') {
-      const currentText = (timerBadgeEl.textContent || '').trim();
-      if (!currentText.startsWith('⏱️') && !currentText.includes(':')) {
-        timerBadgeEl.textContent = '⚡ Active';
+      timerBadgeEl.style.color = '#34D399';
+    } else if (hudData.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
+      timerBadgeEl.textContent = '⏸️ Paused';
+      timerBadgeEl.style.color = '#FBBF24';
+    } else if (hudData.isStopped || hudData.stateBadge === 'STOPPED') {
+      timerBadgeEl.textContent = '⏹️ Stopped';
+      timerBadgeEl.style.color = '#94A3B8';
+    } else if (hudData.timerBadge && hudData.timerBadge.includes('⏱️')) {
+      timerBadgeEl.textContent = hudData.timerBadge;
+      timerBadgeEl.style.color = '#38BDF8';
+    } else if (hudData.countdownText) {
+      const match = hudData.countdownText.match(/(\d+:\d+|\d+\s*s|\d+)/i);
+      if (match) {
+        const val = match[0].trim();
+        timerBadgeEl.textContent = val.includes(':') || val.endsWith('s') ? `⏱️ ${val}` : `⏱️ ${val}s`;
+        timerBadgeEl.style.color = '#38BDF8';
+      } else {
+        timerBadgeEl.textContent = '⏱️ Delay';
+        timerBadgeEl.style.color = '#38BDF8';
       }
+    } else if (hudData.stateBadge === 'PACING' || (hudData.statusText && hudData.statusText.includes('Delay'))) {
+      const match = (hudData.statusText || '').match(/(\d+)\s*s/);
+      timerBadgeEl.textContent = match ? `⏱️ ${match[1]}s` : '⏱️ Delay';
+      timerBadgeEl.style.color = '#38BDF8';
+    } else {
+      timerBadgeEl.textContent = '⚡ Active';
+      timerBadgeEl.style.color = '#10B981';
     }
   }
 
@@ -2263,14 +3033,38 @@ function updateFloatingHud(data = {}) {
   const stopBtn = hud.querySelector('#hud-stop-btn');
   const dismissBtn = hud.querySelector('#hud-dismiss-btn');
 
-  const isFinished = Boolean(data.isStopped) && (data.stateBadge === 'DONE' || data.stateBadge === 'STOPPED');
-  const isRunning = Boolean(data.active) || (!isFinished && data.stateBadge !== 'DONE' && data.stateBadge !== 'STOPPED');
+  // A workflow is ONLY finished if explicitly stopped or done with non-zero done or reached collected target
+  const isLimitHit = hudData.stateBadge === 'RATE_LIMITED' || hudData.stateBadge === 'DAILY_LIMIT' || hudData.stateBadge === 'LIMIT_REACHED';
+  const isFinished = Boolean(hudData.isStopped) || hudData.stateBadge === 'DONE' || hudData.stateBadge === 'STOPPED' || isLimitHit || (hudData.done !== undefined && hudData.collected !== undefined && hudData.collected > 0 && hudData.done >= hudData.collected);
+  const isRunning = !isFinished && (hudData.active !== false) && hudData.stateBadge !== 'DONE' && hudData.stateBadge !== 'STOPPED' && !isLimitHit;
+
+  if (isFinished && hudData.stateBadge !== 'STOPPED' && !isLimitHit) {
+    const bEl = hud.querySelector('#hud-badge');
+    if (bEl) {
+      bEl.textContent = 'DONE';
+      bEl.style.background = 'rgba(16, 185, 129, 0.25)';
+      bEl.style.color = '#34D399';
+      bEl.style.border = '1px solid rgba(16, 185, 129, 0.6)';
+    }
+    if (nextActionEl) nextActionEl.textContent = 'Workflow Completed';
+    if (timerBadgeEl) timerBadgeEl.textContent = '✓ Done';
+  } else if (isLimitHit) {
+    const bEl = hud.querySelector('#hud-badge');
+    if (bEl) {
+      bEl.textContent = hudData.stateBadge === 'DAILY_LIMIT' ? 'DAILY LIMIT' : 'RATE LIMITED';
+      bEl.style.background = 'rgba(239, 68, 68, 0.25)';
+      bEl.style.color = '#EF4444';
+      bEl.style.border = '1px solid rgba(239, 68, 68, 0.6)';
+    }
+    if (nextActionEl) nextActionEl.textContent = hudData.stateBadge === 'DAILY_LIMIT' ? '🛑 Stopped: Daily Limit Hit' : '🛑 Stopped: Rate Limited';
+    if (timerBadgeEl) timerBadgeEl.textContent = '🛑 Stopped';
+  }
 
   if (isRunning) {
     if (stopBtn) stopBtn.style.display = 'flex';
     if (pauseBtn) {
       pauseBtn.style.display = 'flex';
-      const isPaused = data.stateBadge === 'PAUSED' || isHudWorkflowPaused;
+      const isPaused = hudData.stateBadge === 'PAUSED' || isHudWorkflowPaused;
       pauseBtn.innerHTML = isPaused
         ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="#34D399"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l13-7.5a1 1 0 0 0 0-1.72l-13-7.5A1 1 0 0 0 7 4.5z"/></svg><span id="hud-pause-text">Resume</span>`
         : `<svg width="13" height="13" viewBox="0 0 24 24" fill="#FBBF24"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg><span id="hud-pause-text">Pause</span>`;
@@ -2279,7 +3073,7 @@ function updateFloatingHud(data = {}) {
       pauseBtn.style.borderColor = isPaused ? 'rgba(52, 211, 153, 0.6)' : 'rgba(251, 191, 36, 0.55)';
       pauseBtn.style.boxShadow = isPaused ? '0 0 10px rgba(16, 185, 129, 0.2)' : '0 0 10px rgba(245, 158, 11, 0.2)';
     }
-    if (skipBtn) skipBtn.style.display = 'flex';
+    if (skipBtn) skipBtn.style.display = (hudData.hideSkip || hudData.canSkip === false) ? 'none' : 'flex';
     if (dismissBtn) dismissBtn.style.display = 'none';
   } else {
     if (stopBtn) stopBtn.style.display = 'none';
@@ -2289,10 +3083,18 @@ function updateFloatingHud(data = {}) {
   }
 
   // Real-time synchronization to storage so popup progress tracker stays 1:1 in sync
-  if (!window._atomxHudSyncTimer && typeof chrome !== 'undefined' && chrome.storage?.local) {
+  if (isFinished || data.stateBadge === 'DONE' || data.stateBadge === 'STOPPED') {
+    if (window._atomxHudSyncTimer) {
+      clearTimeout(window._atomxHudSyncTimer);
+      window._atomxHudSyncTimer = null;
+    }
+  } else if (!window._atomxHudSyncTimer && typeof chrome !== 'undefined' && chrome.storage?.local) {
     window._atomxHudSyncTimer = setTimeout(() => {
       window._atomxHudSyncTimer = null;
       chrome.storage.local.get(['atomx_active_hud', 'atomx_agent_workflow'], (res) => {
+        if (res?.atomx_active_hud?.stateBadge === 'DONE' || res?.atomx_active_hud?.isStopped || res?.atomx_agent_workflow?.stateBadge === 'DONE' || res?.atomx_agent_workflow?.active === false) {
+          return;
+        }
         const activeHud = { ...(res?.atomx_active_hud || {}), ...data };
         const updates = { atomx_active_hud: activeHud };
         if (res?.atomx_agent_workflow && res.atomx_agent_workflow.active) {
@@ -2523,6 +3325,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ABORT_WORKFLOW' || message.type === 'BG_ABORT_AGENT_WORKFLOW' || message.type === 'STOP_WORKFLOW') {
     isWorkflowAborted = true;
+    if (typeof TgLikerNativeEngine !== 'undefined') {
+      try {
+        TgLikerNativeEngine.stop();
+        TgLikerNativeEngine.removeCursor();
+      } catch (err) {}
+    }
+    const tglCursor = document.getElementById('tgl-cursor');
+    if (tglCursor) tglCursor.remove();
     removeVirtualCursor();
     closeAnyOpenTwitterDialog();
     updateFloatingHud({
@@ -2530,6 +3340,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       statusText: 'Workflow stopped by user.',
       timerBadge: '🛑 Stopped',
       countdownText: '',
+      nextAction: 'Stopped by user',
       isStopped: true,
       active: false
     });
@@ -2748,6 +3559,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message, topTweets: [] }));
     return true;
   }
+
+  // Agent 16: TG Liker — Mass raid & repost engager
+  if (message.type === 'START_TG_LIKER_ENGINE') {
+    TgLikerNativeEngine.init(message.cfg)
+      .then(res => sendResponse({ success: true, res }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 // Neutralize Twitter / X "Leave site? Changes you made may not be saved" prompt
@@ -2760,141 +3579,231 @@ function suppressBeforeUnloadPrompt() {
 }
 suppressBeforeUnloadPrompt();
 
-// Helper: Finds Twitter's "Save post? -> Discard" button across testids, roles, classes, and languages
+// Helper: Finds Twitter's "Save post? -> Discard" button with 100% precision (NEVER matches Save)
 function findTwitterDiscardButton() {
-  // 1. Direct Twitter testid selectors
-  const directBtn = document.querySelector('button[data-testid="confirmationSheetConfirm"], div[data-testid="confirmationSheetConfirm"], [data-testid="confirmationSheetConfirm"]');
-  if (directBtn) return directBtn;
-
-  // 2. Buttons inside any confirmation/alert/modal dialog
-  const dialogs = Array.from(document.querySelectorAll('div[data-testid="confirmationSheetDialog"], div[role="alertdialog"], div[aria-modal="true"]'));
-  for (const sheetDialog of dialogs) {
-    const sheetBtns = Array.from(sheetDialog.querySelectorAll('button, div[role="button"]'));
-    for (const btn of sheetBtns) {
-      const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-      if (text === 'discard' || text.startsWith('discard') || text.includes('discard') || text === 'descartar' || text === 'abandonner') {
-        return btn;
-      }
+  // 1. Direct Twitter testid for the Discard action in confirmation sheets
+  const confirmSheetBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+  if (confirmSheetBtn) {
+    const text = (confirmSheetBtn.innerText || confirmSheetBtn.textContent || '').trim().toLowerCase();
+    if (text.includes('discard') || text.includes('descartar') || text.includes('abandonner') || !text.includes('save')) {
+      return confirmSheetBtn.closest('button, [role="button"]') || confirmSheetBtn;
     }
   }
 
-  // 3. Fallback: Search all interactive buttons on the entire page
+  // 2. Scan all buttons inside confirmationSheetDialog
+  const sheetBtns = Array.from(document.querySelectorAll(
+    'div[data-testid="confirmationSheetDialog"] button, div[data-testid="confirmationSheetDialog"] [role="button"], div[data-testid="sheetDialog"] button'
+  ));
+  for (const el of sheetBtns) {
+    const text = (el.innerText || el.textContent || '').trim().toLowerCase();
+    if (text.includes('discard') || text.includes('descartar') || text.includes('abandonner')) {
+      return el.closest('button, [role="button"]') || el;
+    }
+  }
+
+  // 3. Scan all buttons and role="button" elements across the page
   const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
-  for (const btn of allBtns) {
-    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-    if (text === 'discard' || text.startsWith('discard') || text.includes('discard')) {
-      return btn;
+  for (const el of allBtns) {
+    const text = (el.innerText || el.textContent || '').trim().toLowerCase();
+    if ((text.includes('discard') || text.includes('descartar') || text.includes('abandonner')) && !text.includes('save') && !text.includes('guardar')) {
+      return el.closest('button, [role="button"]') || el;
+    }
+  }
+
+  // 4. Scan all span / div elements with exact text "Discard"
+  const allSpans = Array.from(document.querySelectorAll('div[data-testid="confirmationSheetDialog"] span, div[role="dialog"] span, span'));
+  for (const span of allSpans) {
+    const text = (span.innerText || span.textContent || '').trim().toLowerCase();
+    if (text === 'discard' || text === 'descartar') {
+      return span.closest('button, [role="button"]') || span;
     }
   }
 
   return null;
 }
 
-// Executes click on Discard button immediately and reliably to dismiss prompts without hanging
-async function executeHumanDiscardClick(discardBtn) {
-  if (!discardBtn) return false;
+// Helper: Dispatches authentic human pointer and mouse clicks on Discard button
+async function executeHumanDiscardClick(btn) {
+  if (!btn) return false;
   try {
-    const rect = discardBtn.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      const targetX = rect.left + rect.width / 2;
-      const targetY = rect.top + rect.height / 2;
-
-      // 1. Instant native click
-      discardBtn.click();
-
-      // 2. Dispatch synthetic pointer & mouse sequence for full event handling
-      const evOpts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: targetX, clientY: targetY };
-      discardBtn.dispatchEvent(new PointerEvent('pointerdown', evOpts));
-      discardBtn.dispatchEvent(new MouseEvent('mousedown', evOpts));
-      discardBtn.dispatchEvent(new PointerEvent('pointerup', evOpts));
-      discardBtn.dispatchEvent(new MouseEvent('mouseup', evOpts));
-      discardBtn.click();
-      return true;
-    }
-  } catch (e) {}
-
-  try {
-    discardBtn.click();
+    const target = btn.closest('button, [role="button"]') || btn;
+    console.log('[ATOMX] Clicking Discard button:', target);
+    target.focus?.({ preventScroll: true });
+    dispatchEnhancedHumanEvents(target);
+    try { target.click(); } catch (e) {}
     return true;
   } catch (e) {
-    return false;
+    console.warn('[ATOMX] Error clicking discard button:', e);
+    try { btn.click(); } catch (err) {}
+    return true;
   }
 }
 
-// Helper: Discards any unsaved draft comment in editor to prevent browser navigation locks
-async function clearAnyDraftComment() {
+// Helper: Dispatches native Escape keyboard events to dismiss any open modals safely without triggering window.close
+function dismissOpenModalViaEscape() {
+  const targets = [
+    document.activeElement,
+    document.querySelector('div[role="dialog"]'),
+    document.querySelector('div[aria-modal="true"]'),
+    document.body,
+    document
+  ];
+  for (const t of targets) {
+    if (!t) continue;
+    try {
+      t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
+      t.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
+    } catch (e) {}
+  }
+}
+
+// Cleanly handles comment skipping as instructed:
+// 1. If "Save post? -> Discard" dialog is open, click Discard immediately.
+// 2. Clear text in composer so Twitter does not prompt to save draft.
+// 3. Click Close (X) button once, wait for Discard dialog if triggered, and click Discard cleanly.
+// 4. Never closes the tab or breaks Twitter router.
+let isSkipHandlingInProgress = false;
+async function handleTwitterCommentSkip() {
+  if (isSkipHandlingInProgress) {
+    while (isSkipHandlingInProgress) {
+      await sleep(100);
+    }
+    return true;
+  }
+  isSkipHandlingInProgress = true;
+
   try {
-    // 1. If "Save post? -> Discard" confirmation sheet is already visible, click Discard first!
-    const discardBtn = findTwitterDiscardButton();
-    if (discardBtn) {
-      await executeHumanDiscardClick(discardBtn);
-      await sleep(150);
+    console.log('[ATOMX SKIP] Initiating clean comment clearance & dialog dismissal flow...');
+
+    // PRIORITY 1: Check if "Save post? -> Discard" confirmation dialog is ALREADY open
+    const immediateDiscard = findTwitterDiscardButton();
+    if (immediateDiscard) {
+      console.log('[ATOMX SKIP] "Save post?" dialog detected immediately, clicking Discard...');
+      await executeHumanDiscardClick(immediateDiscard);
+      await sleep(350);
     }
 
-    // 2. Clear any lingering text from composer editor (Lexical/DraftJS compliant)
-    const textarea = document.querySelector('div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]');
-    if (textarea) {
+    // STEP 1: Clear text inside any open tweet textarea so Twitter doesn't prompt to save draft
+    const activeTextareas = Array.from(document.querySelectorAll(
+      'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"], div[role="textbox"][contenteditable="true"]'
+    ));
+    for (const ta of activeTextareas) {
+      if (ta && ta.isConnected) {
+        try {
+          ta.focus?.({ preventScroll: true });
+          document.execCommand('selectAll', false, null);
+          ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true }));
+          document.execCommand('delete', false, null);
+          ta.innerText = '';
+          ta.textContent = '';
+          ta.dispatchEvent(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true }));
+          ta.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+          ta.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+          ta.dispatchEvent(new KeyboardEvent('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true }));
+          ta.blur?.();
+        } catch (err) {}
+      }
+    }
+    await sleep(100);
+
+    // PRIORITY 2: Check again if clearing text triggered "Save post? -> Discard"
+    const discardAfterClear = findTwitterDiscardButton();
+    if (discardAfterClear) {
+      console.log('[ATOMX SKIP] Discard dialog appeared after text clear, clicking Discard...');
+      await executeHumanDiscardClick(discardAfterClear);
+      await sleep(350);
+    }
+
+    // STEP 2: Only target actual Twitter compose dialogs or confirmation sheets
+    const composeDialog = document.querySelector(
+      'div[role="dialog"] div[data-testid="tweetTextarea_0"], div[aria-modal="true"] div[data-testid="tweetTextarea_0"], div[data-testid="confirmationSheetDialog"]'
+    )?.closest('div[role="dialog"], div[aria-modal="true"], div[data-testid="confirmationSheetDialog"]');
+
+    if (composeDialog) {
+      console.log('[ATOMX SKIP] Compose modal detected, dismissing cleanly via mask/discard...');
+      // Method A: Click the backdrop mask (safely unmounts modal without router back or window.close)
+      const backdropMask = document.querySelector('div[data-testid="mask"]');
+      if (backdropMask) {
+        try { backdropMask.click(); } catch (e) {}
+        await sleep(150);
+      }
+
+      // Method B: Check if clicking backdrop prompted "Save post? -> Discard"
+      const postMaskDiscard = findTwitterDiscardButton();
+      if (postMaskDiscard) {
+        console.log('[ATOMX SKIP] Discard dialog appeared, clicking Discard...');
+        await executeHumanDiscardClick(postMaskDiscard);
+        await sleep(200);
+      }
+
+      // Method C: If still attached to DOM, remove it directly to guarantee zero tab closing
+      if (composeDialog.isConnected) {
+        try { composeDialog.remove(); } catch (e) {}
+      }
+    }
+
+    // Dismiss any "Who can reply?" or informational modals
+    dismissAnyTwitterModal();
+
+    // Final check for any lingering Discard button
+    const finalDiscard = findTwitterDiscardButton();
+    if (finalDiscard) {
+      console.log('[ATOMX SKIP] Final Discard cleanup click...');
+      await executeHumanDiscardClick(finalDiscard);
+      await sleep(200);
+    }
+
+    // STEP 3: Clear inline reply box if lingering
+    const inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"]');
+    if (inlineBox) {
       try {
-        textarea.focus({ preventScroll: true });
-        textarea.dispatchEvent(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true, composed: true }));
-        document.execCommand('selectAll', false, null);
-        document.execCommand('delete', false, null);
-        if (textarea.innerText || textarea.textContent) {
-          textarea.textContent = '';
-        }
-        textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-        textarea.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        inlineBox.innerText = '';
+        inlineBox.textContent = '';
       } catch (err) {}
     }
 
-    // 3. Close open modal dialogs
-    await closeAnyOpenTwitterDialog();
-  } catch (e) {}
+    // STEP 4: If Twitter router pushed /compose/post into URL, restore URL cleanly
+    if (window.location.pathname.includes('/compose/post')) {
+      try {
+        window.history.replaceState({}, '', '/home');
+      } catch (e) {}
+    }
+
+    // STEP 5: Failsafe mask cleanup — ensure backdrop mask never freezes the page for the user
+    const leftoverMasks = document.querySelectorAll('div[data-testid="mask"]');
+    leftoverMasks.forEach(m => {
+      try { m.remove(); } catch (e) {}
+    });
+
+    // STEP 6: Reset Virtual Cursor position to natural viewport center
+    if (virtualCursorEl) {
+      const resetX = Math.round(window.innerWidth * 0.5);
+      const resetY = Math.round(window.innerHeight * 0.4);
+      currentCursorPos = { x: resetX, y: resetY };
+      virtualCursorEl.style.transform = `translate3d(${resetX}px, ${resetY}px, 0)`;
+      virtualCursorEl.style.opacity = '1';
+    }
+
+    dismissLingeringTwitterTooltips();
+    console.log('[ATOMX SKIP] Comment clearance & modal dismissal completed successfully.');
+    return true;
+  } catch (err) {
+    console.warn('[ATOMX SKIP] Error during comment skip handling:', err);
+    return false;
+  } finally {
+    isCommentActive = false;
+    isSkipHandlingInProgress = false;
+  }
 }
 
-// Helper: Closes any open modal/compose dialog and reliably dismisses Twitter confirmation sheets
-async function closeAnyOpenTwitterDialog() {
-  try {
-    for (let attempt = 0; attempt < 10; attempt++) {
-      // 1. First Priority: Check if "Save post? -> Discard" confirmation sheet is visible
-      const discardBtn = findTwitterDiscardButton();
-      if (discardBtn) {
-        console.log('[ATOMX] Active Discard button detected. Clicking Discard to dismiss sheet...');
-        await executeHumanDiscardClick(discardBtn);
-        await sleep(250);
-        if (!findTwitterDiscardButton() && !document.querySelector('div[data-testid="confirmationSheetDialog"]')) {
-          break;
-        }
-      }
 
-      // 2. Second Priority: Close main compose dialog if open
-      const dialog = document.querySelector('div[role="alertdialog"], div[role="dialog"], div[aria-modal="true"]');
-      if (dialog) {
-        const closeBtn = dialog.querySelector('button[aria-label="Close"], div[data-testid="app-bar-close"], button[data-testid="app-bar-close"]');
-        if (closeBtn) {
-          closeBtn.click();
-          await sleep(150);
-          const postDiscard = findTwitterDiscardButton();
-          if (postDiscard) {
-            await executeHumanDiscardClick(postDiscard);
-            await sleep(150);
-          }
-        } else {
-          // If no close button, re-check discard button or dispatch Escape key
-          const dBtn = findTwitterDiscardButton();
-          if (dBtn) {
-            await executeHumanDiscardClick(dBtn);
-          } else {
-            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-          }
-        }
-      } else if (!findTwitterDiscardButton()) {
-        // All dialogs and confirmation sheets are completely closed!
-        break;
-      }
-      await sleep(150);
-    }
-  } catch (e) {}
+// Forward legacy calls to handleTwitterCommentSkip
+async function clearAnyDraftComment() {
+  return await handleTwitterCommentSkip();
+}
+
+async function closeAnyOpenTwitterDialog() {
+  return await handleTwitterCommentSkip();
 }
 
 // Wait for element helper with timeout and abort support
@@ -2982,16 +3891,56 @@ async function executeAutonomousTweetWorkflow(params) {
 
   console.log('[ATOMX AUTONOMOUS WORKFLOW] Starting execution with actions:', actions);
 
-  // 1. Identify MAIN POST article (wait for tweet DOM hydration up to 3.5s)
+  // 1. Verify that the current page matches the requested tweet URL (prevent race conditions on reused tabs)
+  let expectedTweetId = '';
+  if (params.tweetUrl) {
+    const targetMatch = params.tweetUrl.match(/\/status\/(\d+)/);
+    expectedTweetId = targetMatch ? targetMatch[1] : '';
+  }
+  if (!expectedTweetId) {
+    const urlMatch = window.location.href.match(/\/status\/(\d+)/);
+    if (urlMatch) expectedTweetId = urlMatch[1];
+  }
+
+  if (expectedTweetId && !window.location.href.includes(expectedTweetId)) {
+    console.log(`[ATOMX] Tab URL does not yet match requested tweet ID ${expectedTweetId}. Waiting for tab navigation...`);
+    for (let w = 0; w < 15; w++) {
+      await sleep(300);
+      if (window.location.href.includes(expectedTweetId)) break;
+    }
+  }
+
+  // Helper to persist engaged tweet ID to local storage immediately
+  const markTweetEngagedLocally = async (tid) => {
+    const idToSave = String(tid || expectedTweetId || '');
+    if (!idToSave) return;
+    try {
+      const cur = await chrome.storage.local.get(['engagedTweetIds']);
+      const updated = Array.from(new Set([...(cur?.engagedTweetIds || []), idToSave]));
+      await chrome.storage.local.set({ engagedTweetIds: updated });
+    } catch (e) {}
+  };
+
+  // Identify MAIN POST article (wait for tweet DOM hydration up to 5s)
   let mainArticle = getMainPostArticle();
   if (!mainArticle) {
-    for (let r = 0; r < 7; r++) {
+    for (let r = 0; r < 10; r++) {
       await sleep(500);
       mainArticle = getMainPostArticle();
       if (mainArticle) break;
     }
   }
-  if (!mainArticle) mainArticle = document;
+
+  if (!mainArticle) {
+    console.warn('[ATOMX] Could not locate focal tweet article on page.');
+    return {
+      success: false,
+      skipped: true,
+      ignored: true,
+      reason: 'Focal tweet article could not be loaded or was unavailable',
+      performed
+    };
+  }
 
   // On status pages: Allow Twitter 1.5 - 2s to stream/hydrate comments under the post!
   if (window.location.pathname.includes('/status/')) {
@@ -3018,11 +3967,14 @@ async function executeAutonomousTweetWorkflow(params) {
   // USER RULE 1: If both like and comment are already done -> IGNORE AUTOMATICALLY!
   if (isAlreadyLiked && isAlreadyCommented) {
     console.log('[ATOMX] Both like and comment already completed on this post. Auto-ignoring.');
+    await markTweetEngagedLocally();
     return {
       success: true,
       ignored: true,
       commentSkipped: true,
       likeSkipped: true,
+      isAlreadyLiked: true,
+      isAlreadyCommented: true,
       reason: 'Both like and comment already completed on this post.',
       performed: ['Auto-Ignored (Already Liked & Commented)']
     };
@@ -3031,6 +3983,7 @@ async function executeAutonomousTweetWorkflow(params) {
   // USER RULE 2: If user already commented on this post, AUTO-IGNORE!
   if (actions.comment && isAlreadyCommented) {
     console.log('[ATOMX] User already commented on this post previously. Auto-ignoring.');
+    await markTweetEngagedLocally();
     if (actions.like && !isAlreadyLiked) {
       try {
         const likeBtn = mainArticle.querySelector('button[data-testid="like"]');
@@ -3046,6 +3999,8 @@ async function executeAutonomousTweetWorkflow(params) {
       success: true,
       ignored: true,
       commentSkipped: true,
+      isAlreadyLiked: !!isAlreadyLiked,
+      isAlreadyCommented: true,
       reason: 'Already commented on this post previously.',
       performed: ['Auto-Ignored (Already Commented)']
     };
@@ -3078,11 +4033,14 @@ async function executeAutonomousTweetWorkflow(params) {
 
   // If no remaining requested actions needed:
   if (!shouldLike && !shouldComment && !actions.repost && !actions.follow) {
+    await markTweetEngagedLocally();
     return {
       success: true,
       ignored: true,
       commentSkipped: isAlreadyCommented,
       likeSkipped: isAlreadyLiked,
+      isAlreadyLiked: !!isAlreadyLiked,
+      isAlreadyCommented: !!isAlreadyCommented,
       reason: 'Requested actions were already satisfied on this post.',
       performed
     };
@@ -3158,6 +4116,7 @@ async function executeAutonomousTweetWorkflow(params) {
       const likedOk = await simulateHumanLikeClick(mainArticle);
       if (likedOk) {
         performed.push('Liked Main Post ❤️');
+        await markTweetEngagedLocally();
         await sleep(500);
       }
     } catch (e) {
@@ -3240,7 +4199,14 @@ async function executeAutonomousTweetWorkflow(params) {
       if (isWorkflowItemSkipped || isWorkflowAborted) return { success: true, skipped: true, ignored: true, reason: 'Skipped by user', performed };
 
       if (!commentToPost) {
-        commentToPost = 'Spot on insight. Focused execution is key.';
+        const tweetFallbacks = [
+          'Spot on insight. Focused execution is key.',
+          'Great perspective here, fully agree.',
+          'Well said! Really solid point.',
+          'Interesting take, thanks for sharing this.',
+          '100% agree with this outlook. Strong work!'
+        ];
+        commentToPost = tweetFallbacks[Math.floor(Math.random() * tweetFallbacks.length)];
       }
 
       // Enforce client-side anti-bot sanitization (dynamic word limit if specified in prompt)
@@ -3250,12 +4216,73 @@ async function executeAutonomousTweetWorkflow(params) {
       const commentRes = await postCommentOnTargetArticle(mainArticle, commentToPost);
       if (commentRes && commentRes.success) {
         performed.push(`Human Typed & Commented: "${commentToPost}" 💬`);
+        await markTweetEngagedLocally();
+      } else if (commentRes?.skipped || commentRes?.aborted || isWorkflowItemSkipped || isWorkflowAborted) {
+        console.log('[ATOMX] Comment skipped or aborted by user.');
+        return {
+          success: true,
+          skipped: true,
+          ignored: true,
+          aborted: Boolean(commentRes?.aborted || isWorkflowAborted),
+          reason: 'Workflow was aborted or skipped by user',
+          performed,
+          isAlreadyLiked,
+          isAlreadyCommented,
+          commentSkipped: true,
+          commentPosted: false
+        };
       } else {
         console.warn('[ATOMX] Comment posting error:', commentRes?.error);
       }
     } catch (e) {
+      if (isWorkflowItemSkipped || isWorkflowAborted) {
+        return {
+          success: true,
+          skipped: true,
+          ignored: true,
+          reason: 'Workflow was aborted or skipped by user',
+          performed
+        };
+      }
       console.warn('Comment action error:', e);
     }
+  }
+
+  if (isWorkflowItemSkipped || isWorkflowAborted) {
+    return {
+      success: true,
+      skipped: true,
+      ignored: true,
+      reason: 'Workflow was aborted or skipped by user',
+      performed,
+      isAlreadyLiked,
+      isAlreadyCommented,
+      commentSkipped: true,
+      commentPosted: false
+    };
+  }
+
+  // Check if requested actions were actually fulfilled
+  const requestedActions = [];
+  if (actions.like && !isAlreadyLiked) requestedActions.push('like');
+  if (actions.comment && !isAlreadyCommented) requestedActions.push('comment');
+  if (actions.repost) requestedActions.push('repost');
+  if (actions.follow) requestedActions.push('follow');
+
+  const anyDone = performed.some(p => p.includes('Liked') || p.includes('Commented') || p.includes('Reposted') || p.includes('Followed'));
+
+  // If actions were requested, but none could be completed (e.g. elements not found)
+  if (requestedActions.length > 0 && !anyDone) {
+    console.warn('[ATOMX AUTONOMOUS WORKFLOW] Requested actions could not be fulfilled on this tweet.');
+    return {
+      success: false,
+      skipped: true,
+      ignored: true,
+      reason: 'Could not complete requested actions on this post',
+      performed,
+      isAlreadyLiked,
+      isAlreadyCommented
+    };
   }
 
   console.log('[ATOMX AUTONOMOUS WORKFLOW] Finished. Actions completed:', performed);
@@ -3452,8 +4479,7 @@ async function huntAudienceUsers(options = {}) {
     }
 
     // Smooth scroll down to load next batch of timeline posts
-    window.scrollBy({ top: 900, behavior: 'smooth' });
-    await sleep(1000);
+    await humanSmoothScroll(900, { settlePause: 400 });
 
     // TARGET SATISFACTION: Require at least 4 visible scroll cycles so user visibly sees feed exploration
     const minScrollCycles = 4;
@@ -3583,8 +4609,7 @@ async function collectRepliersFromTweetThread(targetCount = 10) {
       consecutiveNoNew = 0;
     }
 
-    window.scrollBy({ top: 1100, behavior: 'smooth' });
-    await sleep(850);
+    await humanSmoothScroll(900, { settlePause: 400 });
   }
 
   return {
@@ -3685,8 +4710,13 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
       seenHandlesInThisScan.add(cleanHandle);
 
       // Found a fresh, unliked comment!
+      const safetyComm = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+      const uSpeedComm = safetyComm?.atomx_safety_settings?.cursorSpeed !== undefined ? Number(safetyComm.atomx_safety_settings.cursorSpeed) : 450;
+      const isInstantComm = (uSpeedComm === 0);
+      const dwellFactorComm = isInstantComm ? 0 : Math.max(0.2, uSpeedComm / 450);
+
       await humanScrollElementIntoView(art, 'center');
-      await sleep(300);
+      if (!isInstantComm) await sleep(Math.round(300 * dwellFactorComm));
 
       // 1. LIKE the comment on the post with Virtual Cursor (cursor moves, hovers, clicks)
       const likeBtn = art.querySelector('button[data-testid="like"]');
@@ -3696,12 +4726,12 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
           await performHumanClick(likeBtn, {
             pulseColor: '#F43F5E',
             scroll: false,
-            hoverDwell: 300,
-            postPause: 350
+            hoverDwell: isInstantComm ? 0 : 300,
+            postPause: isInstantComm ? 0 : 350
           });
           commentLiked = true;
           console.log(`[ATOMX AUDIENCE] Successfully liked comment by @${cleanHandle} with virtual cursor!`);
-          await sleep(350);
+          if (!isInstantComm) await sleep(Math.round(350 * dwellFactorComm));
         } catch (likeErr) {
           console.warn('[ATOMX AUDIENCE] Like comment click notice:', likeErr);
         }
@@ -3715,12 +4745,12 @@ async function findAndLikeNextUnprocessedComment(options = {}) {
       if (profileLink) {
         try {
           console.log(`[ATOMX AUDIENCE] Moving virtual cursor to @${cleanHandle}'s profile link and clicking to visit...`);
-          await sleep(250);
+          if (!isInstantComm) await sleep(Math.round(250 * dwellFactorComm));
           await performHumanClick(profileLink, {
             pulseColor: '#38BDF8',
             scroll: false,
-            hoverDwell: 380,
-            postPause: 600
+            hoverDwell: isInstantComm ? 0 : 380,
+            postPause: isInstantComm ? 100 : 600
           });
           profileClicked = true;
         } catch (pErr) {}
@@ -4109,9 +5139,101 @@ async function engageAndFollowProfile(options = {}) {
       if (isWorkflowAborted || isWorkflowItemSkipped) break;
       const art = postsSlice[pIdx];
 
+      // Read global safety speed for pacing
+      const currentSafety = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+      const userSpeed = currentSafety?.atomx_safety_settings?.cursorSpeed !== undefined ? Number(currentSafety.atomx_safety_settings.cursorSpeed) : 450;
+      const isInstant = (userSpeed === 0);
+      const actionPacing = isInstant ? 0 : Math.round(450 * Math.max(0.2, userSpeed / 450));
+
       // Center this post comfortably on screen
       await humanScrollElementIntoView(art, 'center');
-      await sleep(400);
+      if (!isInstant) await sleep(Math.round(400 * Math.max(0.2, userSpeed / 450)));
+
+      // Concurrent AI Reply Pre-fetching:
+      // Initiates the AI request IMMEDIATELY so the network call runs in parallel with Like & Repost!
+      // This completely removes the 3-5 second waiting freeze between Like and Comment!
+      let replyPromise = null;
+      if (replyPosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
+        const postRestriction = isTargetRestrictedOrCommentsLocked(art);
+        if (!postRestriction.restricted) {
+          replyPromise = (async () => {
+            try {
+              const tweetData = extractTweetData(art);
+              const tweetText = tweetData.text || '';
+              const authorName = tweetData.authorName || targetHandle;
+              const authorHandle = tweetData.authorHandle || `@${targetHandle}`;
+
+              const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
+                ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}))
+                : {};
+              const effStyle = options.style || stored?.selectedTone || style || 'Bullish (5-10 words)';
+              const effPrompt = options.stylePrompt || stored?.selectedTonePrompt || stylePrompt || null;
+
+              let commentToPost = '';
+              try {
+                const aiRes = await chrome.runtime.sendMessage({
+                  type: 'GENERATE_INLINE_REPLY',
+                  tweetText,
+                  tweetAuthor: authorHandle,
+                  tweetAuthorName: authorName,
+                  style: effStyle,
+                  stylePrompt: effPrompt
+                });
+                if (aiRes?.reply) commentToPost = aiRes.reply.trim();
+              } catch (mErr) {
+                console.warn('[ATOMX] Background worker message error:', mErr);
+              }
+
+              // Direct fetch fallback if background worker failed
+              if (!commentToPost) {
+                try {
+                  const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
+                  const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
+                  const uId = stored?.currentUser?.id || stored?.user?.id || null;
+
+                  const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
+                    method: 'POST',
+                    headers: { 
+                      'Content-Type': 'application/json',
+                      'x-user-handle': uHandle,
+                      'x-user-id': uId ? String(uId) : '1'
+                    },
+                    body: JSON.stringify({
+                      tweetText,
+                      tweetAuthor: authorHandle,
+                      tweetAuthorName: authorName,
+                      style: effStyle,
+                      stylePrompt: effPrompt,
+                      userHandle: uHandle,
+                      userEmail: uEmail,
+                      userId: uId
+                    })
+                  });
+                  if (directRes.ok) {
+                    const dJson = await directRes.json();
+                    commentToPost = dJson?.reply?.trim();
+                  }
+                } catch (dErr) {}
+              }
+
+              if (!commentToPost) {
+                const dynamicFallbacks = [
+                  'Spot on insight. Keep building!',
+                  'Great perspective here, fully agree.',
+                  'Well said! Really solid point.',
+                  'Interesting take, thanks for sharing this.',
+                  '100% agree with this outlook. Strong work!'
+                ];
+                commentToPost = dynamicFallbacks[Math.floor(Math.random() * dynamicFallbacks.length)];
+              }
+
+              return sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(effPrompt || effStyle));
+            } catch (err) {
+              return '';
+            }
+          })();
+        }
+      }
 
       // Action 1: Auto-Like
       if (likePosts && !isWorkflowItemSkipped && !isWorkflowAborted) {
@@ -4119,7 +5241,7 @@ async function engageAndFollowProfile(options = {}) {
           const ok = await simulateHumanLikeClick(art);
           if (ok) {
             likesDone++;
-            await sleep(450);
+            if (actionPacing > 0) await sleep(actionPacing);
           }
         } else {
           console.log('[ATOMX] Post already liked. Skipping like.');
@@ -4131,7 +5253,7 @@ async function engageAndFollowProfile(options = {}) {
         const ok = await simulateHumanRepostClick(art);
         if (ok) {
           repostDone++;
-          await sleep(450);
+          if (actionPacing > 0) await sleep(actionPacing);
         }
       }
 
@@ -4142,74 +5264,12 @@ async function engageAndFollowProfile(options = {}) {
           console.log(`[ATOMX] Comments restricted on post ${pIdx + 1}: ${postRestriction.reason}. Skipping comment.`);
         } else {
           try {
-            const tweetData = extractTweetData(art);
-            const tweetText = tweetData.text || '';
-            const authorName = tweetData.authorName || targetHandle;
-            const authorHandle = tweetData.authorHandle || `@${targetHandle}`;
-
-            const stored = (typeof chrome !== 'undefined' && chrome.storage?.local)
-              ? await chrome.storage.local.get(['currentUser', 'user', 'verifiedXHandle', 'selectedTone', 'selectedTonePrompt']).catch(() => ({}))
-              : {};
-            const effStyle = options.style || stored?.selectedTone || style || 'Bullish (5-10 words)';
-            const effPrompt = options.stylePrompt || stored?.selectedTonePrompt || stylePrompt || null;
-
-            let commentToPost = '';
-            try {
-              const aiRes = await chrome.runtime.sendMessage({
-                type: 'GENERATE_INLINE_REPLY',
-                tweetText,
-                tweetAuthor: authorHandle,
-                tweetAuthorName: authorName,
-                style: effStyle,
-                stylePrompt: effPrompt
-              });
-              if (aiRes?.reply) commentToPost = aiRes.reply.trim();
-            } catch (mErr) {
-              console.warn('[ATOMX] Background worker message error:', mErr);
-            }
-
-            // Direct fetch fallback if background worker failed
-            if (!commentToPost) {
-              try {
-                const uHandle = stored?.verifiedXHandle || stored?.currentUser?.handle || stored?.user?.handle || '@user';
-                const uEmail = stored?.currentUser?.email || stored?.user?.email || '';
-                const uId = stored?.currentUser?.id || stored?.user?.id || null;
-
-                const directRes = await fetch(`${backendUrl}/api/generate-reply`, {
-                  method: 'POST',
-                  headers: { 
-                    'Content-Type': 'application/json',
-                    'x-user-handle': uHandle,
-                    'x-user-id': uId ? String(uId) : '1'
-                  },
-                  body: JSON.stringify({
-                    tweetText,
-                    tweetAuthor: authorHandle,
-                    tweetAuthorName: authorName,
-                    style: effStyle,
-                    stylePrompt: effPrompt,
-                    userHandle: uHandle,
-                    userEmail: uEmail,
-                    userId: uId
-                  })
-                });
-                if (directRes.ok) {
-                  const dJson = await directRes.json();
-                  commentToPost = dJson?.reply?.trim();
-                }
-              } catch (dErr) {}
-            }
-
-            if (!commentToPost) {
-              commentToPost = 'Spot on insight. Keep building!';
-            }
-
-            commentToPost = sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(effPrompt || effStyle));
+            const commentToPost = replyPromise ? await replyPromise : '';
             if (commentToPost) {
               const commentRes = await postCommentOnTargetArticle(art, commentToPost);
               if (commentRes && commentRes.success) {
                 replyDone++;
-                await sleep(800);
+                if (actionPacing > 0) await sleep(Math.round(800 * Math.max(0.2, userSpeed / 450)));
               }
             }
           } catch (rErr) {
@@ -4227,8 +5287,9 @@ async function engageAndFollowProfile(options = {}) {
     // Step 7: If unfollowed first, RE-FOLLOW now to maximize follow-back!
     if (unfollowedFirst && followPosts && !isWorkflowAborted) {
       console.log(`[ATOMX] Re-following @${targetHandle} after engagement...`);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      await sleep(800);
+      if (window.scrollY > 0) {
+        await humanSmoothScroll(-window.scrollY, { settlePause: 400 });
+      }
       const reFollowBtn = findProfileFollowButton();
       if (reFollowBtn) {
         await simulateHumanFollowClick(reFollowBtn);
@@ -4288,8 +5349,7 @@ async function executeReplyBackCycle(params = {}) {
 
   // 1. Initial scrolling & handle "Load more replies" to hydrate existing comments
   for (let s = 0; s < 3; s++) {
-    window.scrollBy({ top: 600, behavior: 'smooth' });
-    await sleep(800);
+    await humanSmoothScroll(600, { settlePause: 350 });
     // Click any "Show more replies" buttons if present
     const loadMoreButtons = Array.from(document.querySelectorAll('button[role="button"]')).filter(b => {
       const txt = (b.innerText || '').toLowerCase();
@@ -4394,7 +5454,7 @@ async function executeReplyBackCycle(params = {}) {
     }
 
     // Enforce anti-bot sanitization (dynamic word limit if specified in prompt)
-    replyText = sanitizeClientComment(replyText, extractMaxWordsFromPrompt(options?.stylePrompt || options?.style));
+    replyText = sanitizeClientComment(replyText, extractMaxWordsFromPrompt(params?.stylePrompt || params?.style || style));
 
     // 3. Post reply using universal robust posting engine
     const commentRes = await postCommentOnTargetArticle(commentArt, replyText);
@@ -4406,6 +5466,8 @@ async function executeReplyBackCycle(params = {}) {
         statusText: `✓ Replied to @${commentData.authorHandle}!`
       });
       await sleep(800);
+    } else if (commentRes?.skipped || commentRes?.aborted || isWorkflowAborted || isWorkflowItemSkipped) {
+      console.log('[ATOMX REPLY LOOP] Comment skipped or aborted by user.');
     } else {
       console.warn('[ATOMX REPLY LOOP] Could not post reply to comment:', commentRes?.error);
     }
@@ -4440,122 +5502,375 @@ async function executeReplyBackCycle(params = {}) {
 }
 
 // =========================================================================
-// AGENT 7: AUTO UNFOLLOW STANDALONE ENGINE
+// AGENT 5 / 7: AUTO UNFOLLOW STANDALONE ENGINE (Defaulter Audit & Clean-Up)
 // =========================================================================
-async function executeAutoUnfollowStep(params = {}) {
-  isWorkflowAborted = false;
-  const { criteria = { notFollowing: true, lowScore: false }, scoreThreshold = 30, whitelist = [], processedHandles = [] } = params;
-  const cleanWhitelist = new Set((whitelist || []).map(w => w.replace(/^@/, '').toLowerCase().trim()));
-  const alreadyProcessed = new Set((processedHandles || []).map(h => h.toLowerCase().trim()));
+var autoUnfollowSessionProcessed = new Set();
 
-  // Ensure on following page or scroll to load more
-  let userCells = Array.from(document.querySelectorAll('div[data-testid="UserCell"]'));
-  if (userCells.length === 0) {
-    window.scrollBy({ top: 600, behavior: 'smooth' });
-    await sleep(1500);
-    userCells = Array.from(document.querySelectorAll('div[data-testid="UserCell"]'));
+function findFollowingUserCells() {
+  // Strategy 1: Standard Twitter UserCell selector (tag-agnostic)
+  let cells = Array.from(document.querySelectorAll('[data-testid="UserCell"]'));
+  if (cells.length > 0) return cells;
+
+  // Strategy 2: cellInnerDiv containing handle and a follow/unfollow button
+  const innerDivs = Array.from(document.querySelectorAll('div[data-testid="cellInnerDiv"]'));
+  cells = innerDivs.filter(div => {
+    const hasHandle = div.querySelector('div[data-testid="User-Name"], a[href^="/"]') || /@([a-zA-Z0-9_]{1,25})/.test(div.innerText || '');
+    const hasFollowBtn = Array.from(div.querySelectorAll('button, div[role="button"]')).some(b => {
+      const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+      const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+      const tid = (b.getAttribute('data-testid') || '').toLowerCase();
+      return (txt.includes('following') || aria.includes('following') || tid.includes('unfollow')) &&
+             !tid.includes('more') && !tid.includes('caret') && !tid.includes('dm');
+    });
+    return hasHandle && hasFollowBtn;
+  });
+  if (cells.length > 0) return cells;
+
+  // Strategy 3: Find all buttons representing "Following" status and traverse to row container
+  const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+  const followingBtns = allBtns.filter(b => {
+    const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    const tid = (b.getAttribute('data-testid') || '').toLowerCase();
+    if (txt === 'follow' || aria === 'follow' || (tid.endsWith('-follow') && !tid.includes('unfollow'))) return false;
+    if (tid.includes('more') || tid.includes('dm') || tid.includes('caret') || tid.includes('useractions')) return false;
+    return (
+      tid.includes('unfollow') ||
+      txt.includes('following') ||
+      txt.includes('unfollow') ||
+      aria.includes('following') ||
+      aria.includes('unfollow')
+    );
+  });
+
+  const rowSet = new Set();
+  const rows = [];
+  for (const b of followingBtns) {
+    const row = b.closest('[data-testid="UserCell"]') ||
+                b.closest('div[data-testid="cellInnerDiv"]') ||
+                b.closest('div[role="row"]') ||
+                b.parentElement?.parentElement?.parentElement ||
+                b.parentElement?.parentElement;
+    if (row && !rowSet.has(row)) {
+      rowSet.add(row);
+      row.__atomx_following_btn = b;
+      rows.push(row);
+    }
+  }
+  if (rows.length > 0) return rows;
+
+  // Strategy 4: Containers with User-Name
+  const userNames = Array.from(document.querySelectorAll('div[data-testid="User-Name"]'));
+  for (const un of userNames) {
+    const row = un.closest('div[data-testid="cellInnerDiv"]') || un.closest('div[role="row"]') || un.parentElement?.parentElement;
+    if (row && !rowSet.has(row)) {
+      rowSet.add(row);
+      rows.push(row);
+    }
   }
 
-  if (userCells.length === 0) {
-    return { success: false, error: 'No user cells found on following page' };
+  return rows;
+}
+
+function extractHandleFromFollowingCell(cell) {
+  if (!cell) return '';
+  // 1. Check User-Name container link
+  const userNameLink = cell.querySelector('div[data-testid="User-Name"] a[href^="/"]');
+  if (userNameLink) {
+    const h = (userNameLink.getAttribute('href') || '').replace(/^\//, '').split('/')[0].split('?')[0].toLowerCase().trim();
+    if (h && !['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'settings', 'search', 'hashtag'].includes(h)) {
+      return h;
+    }
   }
 
-  for (const cell of userCells) {
-    if (isWorkflowAborted) break;
+  // 2. Extract handle via regex from cell text: @someHandle
+  const text = cell.innerText || cell.textContent || '';
+  const match = text.match(/@([a-zA-Z0-9_]{1,25})/);
+  if (match && match[1]) {
+    const h = match[1].toLowerCase().trim();
+    if (!['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'settings', 'search', 'hashtag'].includes(h)) {
+      return h;
+    }
+  }
 
-    // Extract handle
-    const link = cell.querySelector('a[href^="/"]');
-    const href = link ? (link.getAttribute('href') || '').replace(/^\//, '').split('/')[0].split('?')[0].toLowerCase().trim() : '';
-    if (!href || ['home', 'explore', 'notifications', 'messages', 'i', 'compose'].includes(href)) continue;
+  // 3. Fallback to any link starting with /
+  const links = Array.from(cell.querySelectorAll('a[href^="/"]'));
+  for (const l of links) {
+    const h = (l.getAttribute('href') || '').replace(/^\//, '').split('/')[0].split('?')[0].toLowerCase().trim();
+    if (h && !['home', 'explore', 'notifications', 'messages', 'i', 'compose', 'settings', 'search', 'hashtag'].includes(h)) {
+      return h;
+    }
+  }
 
-    // 1. Whitelist Check
-    if (cleanWhitelist.has(href)) {
-      alreadyProcessed.add(href);
-      continue; // Skip whitelisted VIP
+  return '';
+}
+
+function findFollowingButtonInCell(cell) {
+  if (!cell) return null;
+  if (cell.__atomx_following_btn && document.body.contains(cell.__atomx_following_btn)) {
+    return cell.__atomx_following_btn;
+  }
+
+  const allBtns = Array.from(cell.querySelectorAll('button, div[role="button"]'));
+  return allBtns.find(b => {
+    const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+    const testId = (b.getAttribute('data-testid') || '').toLowerCase();
+
+    // Explicitly reject if it's already a "Follow" button (not following) or More/DM
+    if (txt === 'follow' || aria === 'follow' || aria.startsWith('follow ') || (testId.endsWith('-follow') && !testId.includes('unfollow'))) {
+      return false;
+    }
+    if (testId.includes('more') || testId.includes('dm') || testId.includes('caret') || testId.includes('useractions')) {
+      return false;
     }
 
-    // 2. Check if already processed in this session
-    if (alreadyProcessed.has(href)) {
+    return (
+      testId.includes('unfollow') ||
+      txt.includes('following') ||
+      txt.includes('unfollow') ||
+      aria.includes('following') ||
+      aria.includes('unfollow')
+    );
+  }) || null;
+}
+
+function checkCellFollowsYou(cell) {
+  if (!cell) return false;
+  const followIndicator = cell.querySelector('[data-testid="userFollowIndicator"]');
+  if (followIndicator) return true;
+  const cellText = (cell.innerText || '').toLowerCase();
+  return /follows you|te sigue|vous suit|folgt dir|ti segue|следит за вами/i.test(cellText);
+}
+
+function findUnfollowConfirmationButton() {
+  // Strategy 1: Standard Twitter confirmationSheetConfirm testid
+  const testIdBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+  if (testIdBtn) {
+    const btn = testIdBtn.tagName === 'BUTTON' ? testIdBtn : (testIdBtn.querySelector('button') || testIdBtn);
+    const rect = btn.getBoundingClientRect();
+    if (rect.width >= 35 && rect.height >= 15) return btn;
+  }
+
+  // Strategy 2: Look inside active confirmation dialog specifically for the Unfollow button
+  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], div[role="alertdialog"], div[aria-modal="true"], div[data-testid="confirmationSheetDialog"]'));
+  for (const dialog of dialogs) {
+    const allBtns = Array.from(dialog.querySelectorAll('button, div[role="button"]'));
+    const confirmBtn = allBtns.find(b => {
+      const txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+      const tid = (b.getAttribute('data-testid') || '').toLowerCase();
+      if (txt === 'cancel' || tid.includes('cancel')) return false;
+
+      const rect = b.getBoundingClientRect();
+      const isButtonSize = rect.width >= 40 && rect.width <= 450 && rect.height >= 20 && rect.height <= 85;
+      return isButtonSize && (tid.includes('confirm') || txt === 'unfollow');
+    });
+    if (confirmBtn) return confirmBtn;
+  }
+
+  // Strategy 3: Page button with exact text "Unfollow" (and genuine button dimensions)
+  const allPageBtns = Array.from(document.querySelectorAll('button'));
+  const candidate = allPageBtns.find(b => {
+    const txt = (b.innerText || '').trim().toLowerCase();
+    const rect = b.getBoundingClientRect();
+    return txt === 'unfollow' && rect.width >= 40 && rect.width <= 450 && rect.height >= 20 && rect.height <= 85;
+  });
+  if (candidate) return candidate;
+
+  return null;
+}
+
+async function executeAutoUnfollowStep(params = {}) {
+  isWorkflowAborted = false;
+  if (params.resetSession) {
+    autoUnfollowSessionProcessed.clear();
+  }
+
+  const { criteria = { notFollowing: true, lowScore: false }, scoreThreshold = 30, whitelist = [] } = params;
+  const cleanWhitelist = new Set((whitelist || []).map(w => (w || '').replace(/^@/, '').toLowerCase().trim()));
+  const myHandle = (params.verifiedXHandle || '').toLowerCase().replace(/^@/, '').trim();
+
+  // 1. Wait for Following page items to hydrate (resilient multi-strategy search)
+  let userCells = findFollowingUserCells();
+  if (userCells.length === 0) {
+    const startWait = Date.now();
+    while (Date.now() - startWait < 5000) {
+      if (isWorkflowAborted) return { success: false, aborted: true };
+      await sleep(300);
+      userCells = findFollowingUserCells();
+      if (userCells.length > 0) break;
+    }
+  }
+
+  if (userCells.length === 0) {
+    // Gentle scroll down to trigger Twitter's virtual scroll hydration
+    await humanSmoothScroll(500, { settlePause: 600 });
+    await sleep(700);
+    userCells = findFollowingUserCells();
+  }
+
+  if (userCells.length === 0) {
+    console.warn('[ATOMX UNFOLLOW] Zero user cells detected on Following page after scroll hydration.');
+    return { success: true, exhausted: true, reason: 'No user cells found on following page' };
+  }
+
+  let skippedCountInBatch = 0;
+
+  for (const cell of userCells) {
+    if (isWorkflowAborted) return { success: false, aborted: true };
+
+    const href = extractHandleFromFollowingCell(cell);
+    if (!href) continue;
+    if (myHandle && href === myHandle) continue;
+
+    // 1. Whitelist Check (Never unfollow protected VIP accounts)
+    if (cleanWhitelist.has(href)) {
+      if (!autoUnfollowSessionProcessed.has(href)) {
+        autoUnfollowSessionProcessed.add(href);
+        skippedCountInBatch++;
+        console.log(`[ATOMX UNFOLLOW] @${href} is whitelisted. Skipping.`);
+      }
       continue;
     }
 
-    // Mark as visited in session
-    alreadyProcessed.add(href);
+    // 2. Check if already evaluated in this active session
+    if (autoUnfollowSessionProcessed.has(href)) {
+      continue;
+    }
 
-    // 3. Check "Follows you" badge
-    // Twitter/X renders a span with text "Follows you" inside [data-testid="userFollowIndicator"]
-    const followIndicator = cell.querySelector('[data-testid="userFollowIndicator"]');
-    const cellText = (cell.innerText || '');
-    const followsYou = cellText.includes('Follows you') || (followIndicator && followIndicator.innerText.includes('Follows you'));
+    // 3. Inspect "Follows you" badge
+    const followsYou = checkCellFollowsYou(cell);
 
-    // Check criteria match
+    // Evaluate criteria
     let shouldUnfollow = false;
     if (criteria.notFollowing && !followsYou) {
       shouldUnfollow = true;
     }
     if (criteria.lowScore && !shouldUnfollow) {
-      // User specified low score rule
       shouldUnfollow = true;
     }
 
     if (!shouldUnfollow) {
-      return { success: true, action: 'SKIPPED', handle: href, reason: 'Follows you back' };
+      // Account follows you back — retain follow and move forward
+      autoUnfollowSessionProcessed.add(href);
+      skippedCountInBatch++;
+      console.log(`[ATOMX UNFOLLOW] @${href} follows you back. Retaining follow and moving to next...`);
+      continue;
     }
 
-    // 4. Find Following button to click
-    const followBtn = cell.querySelector('button[data-testid$="-unfollow"]') ||
-                      Array.from(cell.querySelectorAll('button')).find(b => (b.innerText || '').trim().toLowerCase() === 'following');
-
+    // 4. Locate Following button to click
+    const followBtn = findFollowingButtonInCell(cell);
     if (!followBtn) {
-      return { success: true, action: 'SKIPPED', handle: href, reason: 'Already not following' };
+      console.warn(`[ATOMX UNFOLLOW] Following button not found for @${href}. Skipping.`);
+      autoUnfollowSessionProcessed.add(href);
+      continue;
     }
 
-    // Scroll into view
-    cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await sleep(500);
+    // 5. Scroll cell into center view
+    console.log(`[ATOMX UNFOLLOW] Target non-reciprocal account: @${href}. Centering for authentic human unfollow...`);
+    await scrollElementIntoViewAndEnsureVisible(cell, 'center');
+    await sleep(350);
 
-    // Click Unfollow button
-    followBtn.click();
-    await sleep(600);
-
-    // Support expanded/revealed menuitem or button if rendered
-    const revealedMenu = Array.from(document.querySelectorAll('button, div[role="button"], div[role="menuitem"]')).find(b => {
-      const txt = (b.innerText || '').trim().toLowerCase();
-      const testId = (b.getAttribute('data-testid') || '').toLowerCase();
-      return (txt.startsWith('unfollow') || testId.includes('unfollow')) && !testId.includes('confirmationsheetconfirm');
+    // 6. Click Following button with authentic Virtual Cursor and red ripple (#EF4444)
+    await performHumanClick(followBtn, {
+      pulseColor: '#EF4444',
+      scroll: false,
+      hoverDwell: 350,
+      postPause: 300
     });
-    if (revealedMenu && revealedMenu !== followBtn) {
-      revealedMenu.click();
-      await sleep(500);
+
+    // Wait up to 3000ms for confirmation sheet to appear
+    let confirmBtn = null;
+    const startConfirmWait = Date.now();
+    while (Date.now() - startConfirmWait < 3000) {
+      if (isWorkflowAborted) return { success: false, aborted: true };
+      confirmBtn = findUnfollowConfirmationButton();
+      if (confirmBtn) break;
+      await sleep(150);
     }
 
-    // Confirm dialog: click "Unfollow" in confirmation modal
-    const confirmBtn = await waitForElement('button[data-testid="confirmationSheetConfirm"]', 2500);
-    if (confirmBtn) {
-      confirmBtn.click();
-      await sleep(700);
-      return { success: true, action: 'UNFOLLOWED', handle: href };
-    } else {
-      // Try fallback modal confirmation
-      const modalBtn = Array.from(document.querySelectorAll('div[role="dialog"] button, div[role="alertdialog"] button, button')).find(b => {
-        const txt = (b.innerText || '').trim().toLowerCase();
-        const testId = (b.getAttribute('data-testid') || '').toLowerCase();
-        return testId.includes('confirmationsheetconfirm') || txt === 'unfollow';
-      });
-      if (modalBtn) {
-        modalBtn.click();
-        await sleep(700);
-        return { success: true, action: 'UNFOLLOWED', handle: href };
+    // Direct click fallback on Following button if confirmation sheet didn't appear
+    if (!confirmBtn) {
+      console.log(`[ATOMX UNFOLLOW] Confirmation sheet not detected yet for @${href}. Applying direct click fallback on Following button...`);
+      try {
+        followBtn.focus();
+        followBtn.click();
+        followBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {}
+
+      const secondWait = Date.now();
+      while (Date.now() - secondWait < 2500) {
+        if (isWorkflowAborted) return { success: false, aborted: true };
+        confirmBtn = findUnfollowConfirmationButton();
+        if (confirmBtn) break;
+        await sleep(150);
       }
     }
 
-    return { success: false, action: 'FAILED', handle: href, error: 'Confirmation button not found' };
+    if (confirmBtn) {
+      // Allow modal slide-in transition to fully settle so coordinates are 100% frozen
+      await sleep(250);
+      confirmBtn = findUnfollowConfirmationButton() || confirmBtn;
+
+      console.log(`[ATOMX UNFOLLOW] Confirming unfollow sheet dead-center for @${href}...`);
+      await performHumanClick(confirmBtn, {
+        pulseColor: '#EF4444',
+        scroll: false,
+        exactCenter: true,
+        hoverDwell: 350,
+        postPause: 350
+      });
+
+      // Direct synthetic & native click dispatch on the confirm button
+      try {
+        confirmBtn.focus();
+        confirmBtn.click();
+        confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {}
+
+      // Check if modal dialog still present after 350ms, dispatch secondary direct click
+      await sleep(350);
+      const lingeringConfirmBtn = findUnfollowConfirmationButton();
+      if (lingeringConfirmBtn) {
+        console.log(`[ATOMX UNFOLLOW] Sheet still present. Dispatching direct fallback click on confirm button...`);
+        try {
+          lingeringConfirmBtn.focus();
+          lingeringConfirmBtn.click();
+          lingeringConfirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        } catch (e) {}
+      }
+
+      await sleep(750);
+      autoUnfollowSessionProcessed.add(href);
+      return { success: true, unfollowed: true, handle: href };
+    } else {
+      // Check if button state already changed to "Follow" directly
+      const updatedBtn = findFollowingButtonInCell(cell);
+      const updatedTxt = (cell.innerText || '').toLowerCase();
+      if (!updatedBtn || (updatedTxt.includes('follow') && !updatedTxt.includes('following'))) {
+        console.log(`[ATOMX UNFOLLOW] @${href} unfollow verified without modal.`);
+        autoUnfollowSessionProcessed.add(href);
+        return { success: true, unfollowed: true, handle: href };
+      }
+
+      console.warn(`[ATOMX UNFOLLOW] Confirmation dialog not found for @${href}. Marking processed.`);
+      autoUnfollowSessionProcessed.add(href);
+      return { success: false, action: 'FAILED', handle: href, error: 'Confirmation button not found' };
+    }
   }
 
-  // If reached end of visible cells, scroll down to load more
-  window.scrollBy({ top: 800, behavior: 'smooth' });
-  await sleep(1500);
-  return { success: true, action: 'SCROLLED' };
+  // All visible cells in this viewport were evaluated (either followed back or whitelisted)
+  // Scroll down smoothly to hydrate the next batch of accounts using Global Human Scroll Architecture
+  console.log(`[ATOMX UNFOLLOW] Evaluated visible batch (${skippedCountInBatch} followed back/whitelisted). Scrolling for more accounts via humanSmoothScroll...`);
+  await humanSmoothScroll(750, { settlePause: 450 });
+  await sleep(600);
+  return {
+    success: true,
+    skipped: true,
+    scrolledMore: true,
+    skippedCount: Math.max(1, skippedCountInBatch),
+    reason: 'Visible accounts follow you back. Scrolled down.'
+  };
 }
 
 // =========================================================================
@@ -4620,7 +5935,7 @@ async function auditPostCommenters(params = {}) {
         txt.includes('show probability')
       ) {
         try {
-          gentleScrollIntoView(btn);
+          await gentleScrollIntoView(btn);
           btn.click();
           buttonClicked = true;
           clickedSpamOrHidden = true;
@@ -4728,17 +6043,22 @@ async function collectReciprocatorCommenters(params = {}) {
       }
 
       // NOT YET LIKED: Like the comment on the spot before collecting profile!
-      gentleScrollIntoView(art);
+      await gentleScrollIntoView(art);
       await sleep(200);
       const likedOk = await simulateHumanLikeClick(art);
       if (likedOk) {
         likesGiven++;
       }
 
-      // Special Delay Between Comment Likes (Commenter Reciprocator Exclusive)
-      const specialPacing = Math.max(1500, likeDelayMs + Math.floor(Math.random() * 1000 - 500));
-      console.log(`[ATOMX RECIPROCATOR] Comment liked. Special like delay pause: ${(specialPacing / 1000).toFixed(1)}s`);
-      await sleep(specialPacing);
+      // Global Safety Governed Delay: Uses user's configured safety delay
+      const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+      const s = safetyRes?.atomx_safety_settings || {};
+      let waitMin = s.profileWaitMin !== undefined ? Number(s.profileWaitMin) : (s.profileWait !== undefined ? Math.max(1, Number(s.profileWait) - 1) : 2);
+      let waitMax = s.profileWaitMax !== undefined ? Number(s.profileWaitMax) : (s.profileWait !== undefined ? Number(s.profileWait) : 4);
+      if (waitMin > waitMax) [waitMin, waitMax] = [waitMax, waitMin];
+      const safetyPacing = Math.floor(waitMin * 1000 + Math.random() * ((waitMax - waitMin) * 1000 + 1));
+      console.log(`[ATOMX RECIPROCATOR] Comment liked. Global safety pacing: ${(safetyPacing / 1000).toFixed(1)}s`);
+      await sleep(safetyPacing);
 
       // Collect this commenter's profile for reciprocal engagement
       collectedHandles.add(commentAuthor);
@@ -4796,28 +6116,26 @@ async function collectReciprocatorCommenters(params = {}) {
 function isPromotedTweet(article) {
   if (!article) return false;
 
-  // 1. Placement tracking / Promoted testids
+  // 1. Placement tracking / Promoted testids & SVGs
   if (article.querySelector('[data-testid="placementTracking"], [data-testid="promoted"], svg[data-testid="icon-promoted"]')) {
     return true;
   }
 
-  // 2. Direct text markers within badges, spans, or user name metadata
-  const textSpans = Array.from(article.querySelectorAll('span, div[dir="ltr"]'));
-  for (const el of textSpans) {
-    const txt = (el.innerText || '').trim();
-    if (txt === 'Ad' || txt === 'Promoted' || txt === 'Sponsored' || txt === 'Promoted Tweet') {
-      return true;
+  // 2. Check metadata header / social context / badge elements ONLY (do NOT inspect tweet text!)
+  const headerOrBadges = Array.from(article.querySelectorAll('[data-testid="User-Name"], [data-testid="socialContext"], [data-testid="tweet"] > div:first-child'));
+  for (const container of headerOrBadges) {
+    const textSpans = Array.from(container.querySelectorAll('span, div[dir="ltr"]'));
+    for (const el of textSpans) {
+      const txt = (el.innerText || '').trim();
+      if (txt === 'Ad' || txt === 'Promoted' || txt === 'Sponsored' || txt === 'Promoted Tweet') {
+        return true;
+      }
     }
   }
 
-  // 3. Twitter business / ads redirect links
-  if (article.querySelector('a[href*="/ads"], a[href*="/business"]')) {
-    return true;
-  }
-
-  // 4. Raw text content check for promoted indicators
-  const rawText = article.innerText || '';
-  if (rawText.includes('Promoted') || rawText.startsWith('Ad\n') || rawText.includes('\nAd\n')) {
+  // 3. Twitter business / ads redirect link (only inside header or CTA buttons, not tweet links)
+  const promoLink = article.querySelector('a[href*="ads.twitter.com"], a[href*="business.twitter.com"], a[href*="ads.x.com"]');
+  if (promoLink) {
     return true;
   }
 
@@ -4894,6 +6212,7 @@ function isReplyOrCommentTweet(article) {
  */
 async function executeHomeFeedEngagementStep(params = {}) {
   isWorkflowItemSkipped = false;
+  await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
   if (isWorkflowAborted) return { success: false, aborted: true };
 
   // Dismiss any lingering dialog before starting new post scan
@@ -4954,7 +6273,10 @@ async function executeHomeFeedEngagementStep(params = {}) {
       continue;
     }
 
-    // 4. Skip already engaged
+    // 4. Skip already engaged or skipped posts
+    if (art.getAttribute('data-atomx-skipped') === 'true' || art.getAttribute('data-atomx-engaged') === 'true') {
+      continue;
+    }
     const isAlreadyLiked = isPostAlreadyLiked(art);
     if (tweetId && alreadyEngagedSet.has(String(tweetId))) {
       continue;
@@ -5022,7 +6344,17 @@ async function executeHomeFeedEngagementStep(params = {}) {
       if (comRes?.skipped || isWorkflowItemSkipped) {
         isWorkflowItemSkipped = false;
         await clearAnyDraftComment();
-        await humanSmoothScroll(500, { settlePause: 350 });
+        art.setAttribute('data-atomx-skipped', 'true');
+        art.setAttribute('data-atomx-engaged', 'true');
+        if (tweetId) {
+          alreadyEngagedSet.add(String(tweetId));
+          try {
+            const curEng = await chrome.storage.local.get(['engagedTweetIds']);
+            const updated = Array.from(new Set([...(curEng?.engagedTweetIds || []), String(tweetId)]));
+            await chrome.storage.local.set({ engagedTweetIds: updated });
+          } catch (e) {}
+        }
+        await humanSmoothScroll(520, { settlePause: 400 });
         dismissLingeringTwitterTooltips();
         return { success: false, skipped: true, performed, authorHandle: data.authorHandle, tweetId };
       }
@@ -5031,12 +6363,32 @@ async function executeHomeFeedEngagementStep(params = {}) {
 
     // Action 4: Follow
     if (actions.follow && !isWorkflowAborted && !isWorkflowItemSkipped) {
-      const followBtn = art.querySelector('button[data-testid$="-follow"]');
-      if (followBtn) {
-        await simulateHumanFollowClick(followBtn);
+      const targetHandle = data.authorHandle || '';
+      console.log(`[ATOMX HOME FEED] Performing follow action on author @${targetHandle}`);
+      const followed = await performFollowOnTweetAuthor(art, targetHandle);
+      if (followed) {
         performed.follow = true;
-        await sleep(400);
       }
+      await sleep(400);
+    }
+
+    // Check if user clicked skip during follow or after actions
+    if (isWorkflowItemSkipped) {
+      isWorkflowItemSkipped = false;
+      await clearAnyDraftComment();
+      art.setAttribute('data-atomx-skipped', 'true');
+      art.setAttribute('data-atomx-engaged', 'true');
+      if (tweetId) {
+        alreadyEngagedSet.add(String(tweetId));
+        try {
+          const curEng = await chrome.storage.local.get(['engagedTweetIds']);
+          const updated = Array.from(new Set([...(curEng?.engagedTweetIds || []), String(tweetId)]));
+          await chrome.storage.local.set({ engagedTweetIds: updated });
+        } catch (e) {}
+      }
+      await humanSmoothScroll(520, { settlePause: 400 });
+      dismissLingeringTwitterTooltips();
+      return { success: false, skipped: true, performed, authorHandle: data.authorHandle, tweetId };
     }
 
     // Ensure dialog is closed and any floating tooltips ("Reply", "Unlike") are dismissed
@@ -5064,6 +6416,744 @@ async function executeHomeFeedEngagementStep(params = {}) {
 }
 
 // =========================================================================
+// AGENT 16: TG LIKER — MASS RAID, REPOSTS & QUOTES ENGAGER
+// 100% Exact Port of Native Continuous In-Page Raid & Glide Engine
+// =========================================================================
+const TgLikerNativeEngine = (() => {
+  const K = { cfg: 'tgl_cfg', ctrl: 'tgl_ctrl', state: 'tgl_state', hour: 'tgl_hourlog', seen: 'tgl_seen' };
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  let ctrl = { state: 'stopped', runId: 0 };
+  let S = {};            // content-written state
+  let hourLog = [];      // last 1 hour action timestamps
+  let myRun = null;
+  let seenMap = {};      // { [targetUrl]: [post ids already handled] }
+  let seenCtx = null;    // current page seen context
+  let dead = false;
+  let busy = false;
+  let currentCfg = null;
+
+  const extAlive = () => { try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; } };
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes[K.ctrl]) {
+      ctrl = changes[K.ctrl].newValue || { state: 'stopped', runId: 0 };
+      if (ctrl.state === 'stopped') {
+        dead = true;
+        removeCursor();
+      }
+    }
+    if (changes.atomx_agent_workflow?.newValue?.isStopped || changes.atomx_active_hud?.newValue?.isStopped) {
+      ctrl = { state: 'stopped', runId: 0 };
+      dead = true;
+      removeCursor();
+    }
+  });
+
+  // ---------------------------------------------------------------- state / status
+  let lastStatus = '';
+  let lastStatusAt = 0;
+
+  async function save(patch) {
+    if (!extAlive()) { dead = true; return; }
+    Object.assign(S, patch);
+    try {
+      await chrome.storage.local.set({ [K.state]: S });
+
+      // Sync to AtomX Agent Workflow & Floating HUD in real time
+      const total = (currentCfg && currentCfg.maxPosts) || S.total || 0;
+      const done = S.total || 0;
+      const liked = S.stats?.liked || 0;
+      const reposted = S.stats?.reposted || 0;
+      const bookmarked = S.stats?.bookmarked || 0;
+      const skipped = S.stats?.skipped || 0;
+      const isStopped = ctrl.state === 'stopped' || S.phase === 'stopped';
+      const isDone = S.phase === 'done';
+      const stateBadge = isDone ? 'DONE' : (isStopped ? 'STOPPED' : (ctrl.state === 'paused' ? 'PAUSED' : (S.onBreak ? 'BREAK' : 'RUNNING')));
+
+      const hudPayload = {
+        title: 'TG Liker (Raid & Repost)',
+        stateBadge,
+        indicator: `Post ${done}/${total > 0 ? total : '∞'}`,
+        done,
+        collected: total,
+        skipped,
+        progressPercent: total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 50,
+        statusText: S.status || `[${done}/${total > 0 ? total : '∞'}] (❤️${liked} 🔁${reposted} 🔖${bookmarked})`,
+        countdownText: S.wait ? `Break: ${Math.round(S.wait.left)}s left` : '',
+        isStopped,
+        active: !isStopped && !isDone
+      };
+
+      // Direct synchronous update to on-page Floating HUD
+      if (typeof updateFloatingHud === 'function') {
+        updateFloatingHud(hudPayload);
+      }
+
+      await chrome.storage.local.set({
+        atomx_agent_workflow: {
+          agentId: 'tgliker',
+          title: 'TG Liker (Raid & Repost)',
+          active: !isStopped && !isDone,
+          isStopped,
+          stateBadge,
+          statusText: S.status || 'Running...',
+          total,
+          successCount: done,
+          liked,
+          reposted,
+          bookmarked,
+          ignoredCount: skipped,
+          countdownText: S.wait ? `Break: ${Math.round(S.wait.left)}s left` : ''
+        },
+        atomx_active_hud: hudPayload,
+        atomx_tgliker_last_stats: {
+          handled: done,
+          liked,
+          reposted,
+          bookmarked,
+          skipped
+        }
+      }).catch(() => null);
+    } catch (e) { dead = true; }
+  }
+
+  function status(text, force) {
+    const now = Date.now();
+    if (!force && (text === lastStatus || now - lastStatusAt < 200)) return;
+    lastStatus = text;
+    lastStatusAt = now;
+    save({ status: text });
+  }
+
+  async function saveHour() {
+    if (!extAlive()) return;
+    try { await chrome.storage.local.set({ [K.hour]: hourLog }); } catch (e) {}
+  }
+
+  async function flushSeen() {
+    if (!seenCtx || !extAlive()) return;
+    seenMap[seenCtx.url] = seenCtx.list.slice(-4000);
+    try { await chrome.storage.local.set({ [K.seen]: seenMap }); } catch (e) {}
+  }
+
+  function markSeen(id) {
+    if (!seenCtx) return;
+    seenCtx.list.push(id);
+    if (seenCtx.list.length % 5 === 0) flushSeen();
+  }
+
+  // Pause / Stop gate: stays here when paused, returns false when stopped
+  async function gate() {
+    while (true) {
+      if (dead || !extAlive()) return false;
+      if (ctrl.runId !== myRun || ctrl.state === 'stopped') return false;
+      if (ctrl.state === 'paused') {
+        status('⏸ Paused');
+        await sleep(250);
+        continue;
+      }
+      return true;
+    }
+  }
+
+  async function waitUntil(fn, maxMs, step = 50) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < maxMs) {
+      if (dead || ctrl.state === 'stopped' || ctrl.runId !== myRun) return false;
+      try { if (fn()) return true; } catch (e) {}
+      await sleep(step);
+    }
+    try { return !!fn(); } catch (e) { return false; }
+  }
+
+  // ---------------------------------------------------------------- DOM helpers
+  const isLiked = (a) => !!a.querySelector('[data-testid="unlike"]');
+  const isReposted = (a) => !!a.querySelector('[data-testid="unretweet"]');
+  const isBookmarked = (a) => !!(
+    a.querySelector('[data-testid="removeBookmark"]') ||
+    a.querySelector('button[aria-label*="Remove from Bookmarks" i]') ||
+    a.querySelector('button[aria-label*="Bookmarked" i]')
+  );
+  const findBookmarkBtn = (a) =>
+    a.querySelector('[data-testid="bookmark"]') ||
+    a.querySelector('button[aria-label*="Bookmark" i]') ||
+    a.querySelector('div[role="button"][aria-label*="Bookmark" i]') ||
+    a.querySelector('button[aria-label*="Save" i]') ||
+    a.querySelector('[data-testid*="bookmark" i]');
+
+  function articleId(a) {
+    const timeLink = a.querySelector('a[href*="/status/"] time');
+    const link = (timeLink && timeLink.closest('a')) || a.querySelector('a[href*="/status/"]');
+    const href = (link && link.getAttribute('href')) || '';
+    const m = href.match(/\/status\/(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  const articlesNow = () =>
+    Array.from((document.querySelector('div[data-testid="primaryColumn"]') || document)
+      .querySelectorAll('article[data-testid="tweet"]'));
+
+  async function clickShowMore() {
+    const btn = Array.from(document.querySelectorAll('div[role="button"], button')).find((b) => {
+      const t = (b.textContent || '').trim();
+      return t.length < 90 && /show (more|additional) replies|show probable spam/i.test(t);
+    });
+    if (btn) { try { btn.click(); } catch (e) {} await sleep(1000); }
+  }
+
+  const nextFrame = () => new Promise((res) => {
+    let fired = false;
+    const f = () => { if (!fired) { fired = true; res(); } };
+    requestAnimationFrame(f);
+    setTimeout(f, 50);   // Fallback for background tabs where rAF throttles
+  });
+
+  // ---------------------------------------------------------------- virtual mouse cursor
+  let cursorEl = null;
+  let cur = { x: 0, y: 0 };
+
+  function placeCursor(x, y) {
+    const vh = window.innerHeight || 800;
+    const vw = window.innerWidth || 1200;
+    x = clamp(x, 15, vw - 25);
+    y = clamp(y, 15, vh - 25);
+    cur = { x, y };
+    if (cursorEl) cursorEl.style.transform = `translate3d(${Math.round(x - 3)}px, ${Math.round(y - 2)}px, 0)`;
+  }
+
+  function ensureCursor() {
+    if (cursorEl && cursorEl.isConnected) return;
+    cursorEl = document.createElement('div');
+    cursorEl.id = 'tgl-cursor';
+    cursorEl.style.cssText =
+      'position:fixed;left:0;top:0;width:24px;height:24px;z-index:2147483647;pointer-events:none;' +
+      'will-change:transform;filter:drop-shadow(0 2px 3px rgba(0,0,0,.55));';
+    cursorEl.innerHTML =
+      '<svg width="24" height="24" viewBox="0 0 24 24" style="display:block;transform-origin:3px 2px">' +
+      '<path d="M3 2v17l4.6-4.1 3 6.6 2.7-1.2-3-6.5H17z" fill="#fff" stroke="#0b0b0b" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+    document.documentElement.appendChild(cursorEl);
+    if (!cur.x && !cur.y) cur = { x: window.innerWidth * 0.62, y: window.innerHeight * 0.55 };
+    placeCursor(cur.x, cur.y);
+  }
+
+  function removeCursor() {
+    if (cursorEl) cursorEl.remove();
+    cursorEl = null;
+  }
+
+  // Curved path cursor glide (ease-in-out Bézier)
+  async function moveCursor(tx, ty, ms) {
+    ensureCursor();
+    const sx = cur.x, sy = cur.y;
+    const dx = tx - sx, dy = ty - sy;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 3) { placeCursor(tx, ty); return; }
+    const nx = -dy / dist, ny = dx / dist;
+    const bend = (Math.random() - 0.5) * Math.min(80, dist * 0.3);
+    const cx = sx + dx / 2 + nx * bend;
+    const cy = sy + dy / 2 + ny * bend;
+    const t0 = performance.now();
+    while (true) {
+      if (dead || ctrl.state === 'stopped') return;
+      const t = Math.min(1, (performance.now() - t0) / ms);
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const u = 1 - e;
+      placeCursor(u * u * sx + 2 * u * e * cx + e * e * tx, u * u * sy + 2 * u * e * cy + e * e * ty);
+      if (t >= 1) break;
+      await nextFrame();
+    }
+  }
+
+  function clickEffect(x, y, color) {
+    const svg = cursorEl && cursorEl.firstElementChild;
+    if (svg && svg.animate) {
+      svg.animate([{ transform: 'scale(1)' }, { transform: 'scale(.82)' }, { transform: 'scale(1)' }],
+        { duration: 220, easing: 'ease-out' });
+    }
+    const ring = document.createElement('div');
+    ring.style.cssText =
+      `position:fixed;left:${x - 14}px;top:${y - 14}px;width:28px;height:28px;border-radius:50%;` +
+      `border:2px solid ${color};background:${color}33;z-index:2147483646;pointer-events:none;`;
+    document.documentElement.appendChild(ring);
+    if (ring.animate) {
+      const an = ring.animate([{ transform: 'scale(.3)', opacity: 0.95 }, { transform: 'scale(1.9)', opacity: 0 }],
+        { duration: 480, easing: 'ease-out' });
+      an.onfinish = () => ring.remove();
+    } else {
+      setTimeout(() => ring.remove(), 480);
+    }
+  }
+
+  function dispatchClick(el, x, y) {
+    const PE = window.PointerEvent || MouseEvent;
+    const o = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, screenX: x, screenY: y, button: 0 };
+    const p = { ...o, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    el.dispatchEvent(new PE('pointerover', p));
+    el.dispatchEvent(new MouseEvent('mouseover', o));
+    el.dispatchEvent(new PE('pointermove', p));
+    el.dispatchEvent(new MouseEvent('mousemove', o));
+    el.dispatchEvent(new PE('pointerdown', { ...p, buttons: 1 }));
+    el.dispatchEvent(new MouseEvent('mousedown', { ...o, buttons: 1 }));
+    el.dispatchEvent(new PE('pointerup', p));
+    el.dispatchEvent(new MouseEvent('mouseup', o));
+    el.dispatchEvent(new MouseEvent('click', o));
+  }
+
+  // Cursor moves naturally over element, pauses briefly, then clicks with visual feedback
+  async function humanClick(el, color, delay) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) { el.click(); return; }
+    const x = r.left + r.width * rand(0.3, 0.7);
+    const y = r.top + r.height * rand(0.3, 0.7);
+    const cursorMs = clamp(delay * 0.15, 220, 500);
+    const dist = Math.hypot(x - cur.x, y - cur.y);
+    await moveCursor(x, y, clamp(cursorMs + dist * 0.25, cursorMs, 650));
+    await sleep(clamp(delay * 0.05, 70, 250));          // Hover pause
+    clickEffect(x, y, color);
+    await sleep(rand(60, 110));                         // Press dwell
+    dispatchClick(el, x, y);
+  }
+
+  // ---------------------------------------------------------------- smooth scroll
+  async function glideScroll(dy, ms) {
+    if (Math.abs(dy) < 4) return;
+    const t0 = performance.now();
+    let last = 0;
+    while (true) {
+      if (dead || ctrl.state === 'stopped') return;
+      const t = Math.min(1, (performance.now() - t0) / ms);
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;   // easeInOutCubic
+      const target = Math.round(dy * e);
+      if (target !== last) { window.scrollBy({ top: target - last, behavior: 'instant' }); last = target; }
+      if (t >= 1) break;
+      await nextFrame();
+    }
+  }
+
+  // ---------------------------------------------------------------- break
+  async function takeBreak(cfg, long) {
+    const b = long ? cfg.longBreak : cfg.breaks;
+    const total = long ? rand(b.minMin * 60, b.minMax * 60) : rand(b.secMin, b.secMax);
+    const kind = long ? 'long' : 'break';
+    let left = total;
+    let lastSave = 0;
+    await save({ onBreak: true, wait: { kind, left: total, total } });
+    while (left > 0) {
+      if (!(await gate())) { await save({ onBreak: false, wait: null }); return false; }
+      const now = Date.now();
+      if (now - lastSave >= 1000) {
+        lastSave = now;
+        lastStatus = '';
+        save({ status: `${long ? '🛑 Long break' : '☕ Break'} — ${fmt(Math.max(0, left))} remaining`, wait: { kind, left: Math.max(0, left), total } });
+      }
+      await sleep(250);
+      left -= 0.25;
+    }
+    const patch = {
+      onBreak: false, wait: null,
+      sinceBreak: 0, breakAt: randInt(cfg.breaks.everyMin, cfg.breaks.everyMax)
+    };
+    if (long) { patch.sinceLong = 0; patch.longAt = randInt(cfg.longBreak.everyMin, cfg.longBreak.everyMax); }
+    await save(patch);
+    return true;
+  }
+
+  // Hourly limit: max N posts per hour
+  async function quotaGate(cfg) {
+    if (!cfg.hourlyMax) return true;
+    while (true) {
+      const now = Date.now();
+      hourLog = hourLog.filter((t) => now - t < 3600e3);
+      if (hourLog.length < cfg.hourlyMax) { if (S.wait) await save({ wait: null }); return true; }
+      const waitSec = Math.ceil((hourLog[0] + 3600e3 - now) / 1000);
+      if (!(await gate())) { await save({ wait: null }); return false; }
+      lastStatus = '';
+      save({ status: `⏳ Hourly limit (${hourLog.length}/${cfg.hourlyMax}) — resumes in ${fmt(waitSec)}`,
+             wait: { kind: 'hourly', left: waitSec, total: 3600 } });
+      await sleep(1000);
+    }
+  }
+
+  // ---------------------------------------------------------------- main raid (single page)
+  async function raidPage(cfg, target) {
+    try { return await raidPageInner(cfg, target); }
+    finally { await flushSeen(); }
+  }
+
+  async function raidPageInner(cfg, target) {
+    const delay = Number.isFinite(cfg.speedMs) ? cfg.speedMs : 2000;
+    const instant = delay < 1000;       // Turbo: instant jump + direct click
+    const human = !instant;             // Human mode: smooth scroll + curved mouse cursor
+    const A = cfg.actions || { like: true };
+
+    const SPEED = instant
+      ? { settle: 30, likeMax: 900, menuMax: 2000, afterAction: 80, scrollWaitMax: 1200, pollStep: 40 }
+      : { settle: 70, likeMax: 1500, menuMax: 2500, afterAction: 60, scrollWaitMax: 2000, pollStep: 60,
+          scrollMsMin: 320, scrollMsMax: Math.min(800, Math.round(delay * 0.35)), likeAtViewportPct: 0.62 };
+
+    const mainId = (location.pathname.match(/\/status\/(\d+)/) || [])[1] || null;
+    const seenList = Array.isArray(seenMap[target.url]) ? seenMap[target.url].slice() : [];
+    seenCtx = { url: target.url, list: seenList };
+    const done = new Set(seenList);
+    const preSeen = seenList.length;
+    const viewed = new Set();
+    const doneNoId = new WeakSet();
+    let emptyScrolls = 0;
+    let failStreak = 0;
+
+    const hasFresh = () => articlesNow().some((a) => {
+      const id = articleId(a);
+      return id ? (id !== mainId && !done.has(id)) : !doneNoId.has(a);
+    });
+
+    const nextArticle = () => {
+      for (const a of articlesNow()) {
+        const id = articleId(a);
+        if (!id) { if (doneNoId.has(a)) continue; return { a, id: null }; }
+        if (id === mainId || done.has(id)) continue;
+        return { a, id };
+      }
+      return null;
+    };
+
+    // Needs work check: avoids re-touching posts already matching selected actions
+    const needsWork = (a) =>
+      (A.like && !isLiked(a)) ||
+      (A.repost && !isReposted(a)) ||
+      (A.bookmark && !isBookmarked(a));
+
+    const glideToPost = async (a) => {
+      const anchor = a.querySelector('[data-testid="like"], [data-testid="unlike"]') || a;
+      const vh = window.innerHeight || 800;
+      const dy = anchor.getBoundingClientRect().top - vh * SPEED.likeAtViewportPct;
+      const ms = clamp(260 + Math.abs(dy) * 0.45, SPEED.scrollMsMin, SPEED.scrollMsMax) * rand(0.92, 1.08);
+      ensureCursor();
+      // Mouse naturally wanders slightly with scroll as a real hand would
+      await Promise.all([
+        glideScroll(dy, ms),
+        moveCursor(clamp(cur.x + rand(-140, 140), 40, window.innerWidth - 40),
+                   clamp(cur.y + rand(-90, 90), 80, window.innerHeight - 40), Math.min(ms, 420))
+      ]);
+    };
+
+    status('Loading posts...', true);
+    const first = await waitUntil(() => document.querySelector('article[data-testid="tweet"]'), 15000, 200);
+    if (!first) {
+      if (ctrl.state === 'stopped') return { stopped: true };
+      return { error: 'No posts found on X page. Please check login or page load.' };
+    }
+
+    let handled = 0;
+
+    while (true) {
+      if (!(await gate())) return { stopped: true };
+
+      const item = nextArticle();
+
+      // No new post found -> scroll downward
+      if (!item) {
+        const idsNow = articlesNow().map(articleId).filter(Boolean);
+        const newInDom = idsNow.some((x) => !viewed.has(x));
+        idsNow.forEach((x) => viewed.add(x));
+        if (newInDom) emptyScrolls = 0; else emptyScrolls++;
+        if (emptyScrolls > (instant ? 7 : 6)) return { endReached: true };
+
+        // Continue mode: rapidly fast-scroll past previously handled posts
+        if (preSeen > 0 && handled === 0) {
+          status(`⏩ Continuing downward... ${done.size} posts passed`);
+          window.scrollBy({ top: Math.round(window.innerHeight * 1.6), behavior: 'instant' });
+          await waitUntil(() => hasFresh() || articlesNow().some((x) => { const i = articleId(x); return i && !viewed.has(i); }), 1200, 60);
+          continue;
+        }
+
+        status(`Scrolling... ${done.size} seen, ${handled} engaged`);
+        if (emptyScrolls >= 2) await clickShowMore();
+        if (human) await glideScroll(Math.round(window.innerHeight * 0.85), 650);
+        else window.scrollBy({ top: Math.round(window.innerHeight * 0.9), behavior: 'instant' });
+        await waitUntil(hasFresh, SPEED.scrollWaitMax, SPEED.pollStep);
+        continue;
+      }
+      emptyScrolls = 0;
+
+      const { a, id } = item;
+      if (!id) { doneNoId.add(a); continue; }   // Skip ads / promoted
+      done.add(id);
+
+      // All selected actions already satisfied -> skip scroll/click
+      if (!needsWork(a)) {
+        S.stats.skipped++;
+        handled++;
+        markSeen(id);
+        S.total = (S.total || 0) + 1;
+        if (cfg.maxPosts && S.total >= cfg.maxPosts) {
+          await save({ stats: S.stats, total: S.total });
+          return { limitReached: true };
+        }
+        if (S.stats.skipped % 10 === 0) await save({ stats: S.stats, total: S.total });
+        status(`${instant ? '⚡ Turbo' : '🖱️ Running'} — ${S.total}${cfg.maxPosts ? '/' + cfg.maxPosts : ''} posts`);
+        continue;
+      }
+
+      if (!(await quotaGate(cfg))) return { stopped: true };
+
+      const postStart = Date.now();
+      const ev = { liked: false, reposted: false, bookmarked: false };
+      let attempted = false;
+      let failed = false;
+
+      // ---- 1) Smooth Scroll to Target Post ----
+      if (human) await glideToPost(a);
+      else a.scrollIntoView({ block: 'center', behavior: 'instant' });
+      await sleep(SPEED.settle);
+      if (!(await gate())) return { stopped: true };
+
+      // ---- 2) LIKE Action ----
+      if (A.like && !isLiked(a)) {
+        attempted = true;
+        const lb = a.querySelector('[data-testid="like"]');
+        if (lb) {
+          if (human) await humanClick(lb, '#F43F5E', delay); else lb.click();
+        }
+        let ok = await waitUntil(() => isLiked(a), SPEED.likeMax);
+        if (!ok && lb && ctrl.state !== 'stopped') {
+          try { lb.click(); } catch (e) {}
+          ok = await waitUntil(() => isLiked(a), 700);
+        }
+        if (isLiked(a)) ev.liked = true; else failed = true;
+      }
+
+      // ---- 3) REPOST Action ----
+      if (A.repost && (await gate())) {
+        const alreadyReposted = !!a.querySelector('[data-testid="unretweet"]');
+        if (!alreadyReposted) {
+          const rt = a.querySelector('[data-testid="retweet"]');
+          if (rt) {
+            attempted = true;
+            if (human) await humanClick(rt, '#10B981', delay); else rt.click();
+            // Wait for Twitter's dropdown menu to render and settle on screen
+            await waitUntil(() => {
+              const el = document.querySelector('[data-testid="retweetConfirm"]');
+              if (!el) return false;
+              const r = el.getBoundingClientRect();
+              return r.width > 10 && r.height > 10 && r.top > 0 && r.left > 0;
+            }, SPEED.menuMax);
+            await sleep(180); // Smooth dwell for dropdown animation
+
+            const confirmItem = document.querySelector('[data-testid="retweetConfirm"]');
+            if (confirmItem) {
+              if (human) {
+                await humanClick(confirmItem, '#10B981', delay);
+                await sleep(100);
+                if (document.querySelector('[data-testid="retweetConfirm"]')) {
+                  try { confirmItem.click(); } catch (e) {}
+                }
+              } else {
+                confirmItem.click();
+              }
+              const ok = await waitUntil(() => a.querySelector('[data-testid="unretweet"]'), SPEED.likeMax);
+              if (ok) ev.reposted = true; else failed = true;
+              await sleep(SPEED.afterAction);
+            } else {
+              failed = true;
+              document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+              await sleep(150);
+            }
+          }
+        }
+      }
+
+      // ---- 4) BOOKMARK Action ----
+      if (A.bookmark && !isBookmarked(a) && (await gate())) {
+        let bm = findBookmarkBtn(a);
+        if (!bm) {
+          await waitUntil(() => findBookmarkBtn(a), 400, 50);
+          bm = findBookmarkBtn(a);
+        }
+        if (bm) {
+          attempted = true;
+          if (human) await humanClick(bm, '#3B82F6', delay); else bm.click();
+          let ok = await waitUntil(() => isBookmarked(a), SPEED.likeMax);
+          if (!ok && ctrl.state !== 'stopped') {
+            try { bm.click(); } catch (e) {}
+            ok = await waitUntil(() => isBookmarked(a), 700);
+          }
+          if (ok || isBookmarked(a)) ev.bookmarked = true; else failed = true;
+          await sleep(SPEED.afterAction);
+        }
+      }
+
+      const acted = ev.liked || ev.reposted || ev.bookmarked;
+      handled++;
+      markSeen(id);
+      if (ev.liked) S.stats.liked++;
+      if (ev.reposted) S.stats.reposted++;
+      if (ev.bookmarked) S.stats.bookmarked++;
+      if (!acted) S.stats.skipped++;
+
+      failStreak = (attempted && failed && !acted) ? failStreak + 1 : 0;
+
+      if (acted) {
+        hourLog.push(Date.now());
+        S.sinceBreak = (S.sinceBreak || 0) + 1;
+        S.sinceLong = (S.sinceLong || 0) + 1;
+        saveHour();
+      }
+      S.total = (S.total || 0) + 1;
+      await save({ stats: S.stats, sinceBreak: S.sinceBreak, sinceLong: S.sinceLong, total: S.total });
+      status(`${instant ? '⚡ Turbo' : '🖱️ Running'} — ${S.total}${cfg.maxPosts ? '/' + cfg.maxPosts : ''} posts`);
+
+      // Max posts limit check
+      if (cfg.maxPosts && S.total >= cfg.maxPosts) return { limitReached: true };
+
+      // 3 consecutive failures: abort to avoid rate limit bans
+      if (failStreak >= 3) {
+        return { error: '3 consecutive actions failed (possible X rate limit). Please try again shortly.' };
+      }
+
+      // Smart Break Engine evaluation
+      if (acted) {
+        const longDue = cfg.longBreak && cfg.longBreak.enabled && S.sinceLong >= S.longAt;
+        const shortDue = cfg.breaks && cfg.breaks.enabled && S.sinceBreak >= S.breakAt;
+        if (longDue) { if (!(await takeBreak(cfg, true))) return { stopped: true }; }
+        else if (shortDue) { if (!(await takeBreak(cfg, false))) return { stopped: true }; }
+      }
+
+      // Natural Human Pacing Delay
+      if (human && acted) {
+        const remain = delay * rand(0.92, 1.08) - (Date.now() - postStart);
+        if (remain > 0) await sleep(remain);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- target navigation / loop
+  const normPath = (p) => { try { return new URL(p, location.href).pathname.replace(/\/+$/, '').toLowerCase(); } catch (e) { return ''; } };
+
+  async function waitActive(seconds, label) {
+    let left = seconds;
+    while (left > 0) {
+      if (!(await gate())) return false;
+      status(`${label} — ${Math.ceil(left)}s`);
+      await sleep(250);
+      left -= 0.25;
+    }
+    return true;
+  }
+
+  async function runJob(cfg) {
+    currentCfg = cfg;
+    const idx = S.targetIndex || 0;
+    const target = cfg.targets && cfg.targets[idx];
+    if (!target) return;
+
+    myRun = ctrl.runId;
+    const res = await raidPage(cfg, target);
+    setTimeout(removeCursor, 1500);
+
+    if (res.limitReached) {
+      const s = S.stats || {};
+      await save({
+        phase: 'done',
+        status: `✓ Target complete: ${S.total} posts (${s.liked || 0} like, ${s.reposted || 0} repost, ${s.bookmarked || 0} bookmark, ${s.skipped || 0} skip).`
+      });
+      return;
+    }
+    if (res.stopped) { await save({ phase: 'stopped', status: '⏹ Stopped by user' }, true); return; }
+    if (res.error) { await save({ phase: 'error', status: '⚠ ' + res.error }); return; }
+
+    // Page reached end -> proceed to next target if multi-target configured
+    if (idx + 1 < (cfg.targets ? cfg.targets.length : 0)) {
+      await save({ targetIndex: idx + 1, status: 'Navigating to next target...' });
+      await sleep(500);
+      location.href = cfg.targets[idx + 1].url;
+      return;
+    }
+
+    // Continuous Feed Loop
+    if (cfg.loop) {
+      const wait = cfg.speedMs < 3000 ? 20 : 60;
+      const ok = await waitActive(wait, '✓ Pass complete — refreshing feed for new posts');
+      if (!ok) { await save({ phase: 'stopped', status: '⏹ Stopped by user' }); return; }
+      await save({ targetIndex: 0, round: (S.round || 1) + 1, status: 'Refreshing feed...' });
+      location.href = cfg.targets[0].url;
+      return;
+    }
+
+    await save({ phase: 'done', status: '✓ Complete' });
+  }
+
+  // ---------------------------------------------------------------- init
+  async function init(overrideCfg) {
+    if (!extAlive() || busy) return;
+    dead = false;
+    busy = true;
+    try {
+      const data = await chrome.storage.local.get([K.cfg, K.ctrl, K.state, K.hour, K.seen]);
+      const cfg = overrideCfg || data[K.cfg];
+      ctrl = data[K.ctrl] || { state: 'stopped', runId: 0 };
+      S = data[K.state] || {};
+      hourLog = Array.isArray(data[K.hour]) ? data[K.hour] : [];
+      seenMap = data[K.seen] && typeof data[K.seen] === 'object' ? data[K.seen] : {};
+
+      if (!cfg || !(ctrl.state === 'running' || ctrl.state === 'paused') || S.phase !== 'running') return;
+
+      const me = await chrome.runtime.sendMessage({ type: 'whoami' }).catch(() => null);
+      if (cfg.tabId && me && me.tabId && me.tabId !== cfg.tabId) return;
+
+      const target = cfg.targets && cfg.targets[S.targetIndex || 0];
+      if (!target) return;
+
+      const want = normPath(target.url);
+      if (want && normPath(location.href) !== want) {
+        await save({ status: '⚠ Tab not on target URL. Please restart.' });
+        return;
+      }
+
+      currentCfg = cfg;
+      S.stats = S.stats || { liked: 0, reposted: 0, bookmarked: 0, skipped: 0 };
+      if (S.breakAt == null && cfg.breaks) S.breakAt = randInt(cfg.breaks.everyMin, cfg.breaks.everyMax);
+      if (S.sinceBreak == null) S.sinceBreak = 0;
+      if (S.longAt == null && cfg.longBreak) S.longAt = randInt(cfg.longBreak.everyMin, cfg.longBreak.everyMax);
+      if (S.sinceLong == null) S.sinceLong = 0;
+
+      await runJob(cfg);
+    } catch (e) {
+      console.warn('[ATOMX TG-LIKER] Engine init error:', e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function stopEngine() {
+    ctrl = { state: 'stopped', runId: 0 };
+    if (S) S.phase = 'stopped';
+    dead = true;
+    removeCursor();
+  }
+
+  return {
+    init,
+    runJob,
+    stop: stopEngine,
+    removeCursor,
+    setCtrl: (c) => {
+      ctrl = c || { state: 'stopped', runId: 0 };
+      if (ctrl.state === 'stopped') {
+        dead = true;
+        removeCursor();
+      }
+    }
+  };
+})();
+
+// =========================================================================
 // AGENT 12: TELEGRAM LIVE LIKER & PROOF RECORDER
 // =========================================================================
 async function executeLiveRaidEngagement(params = {}) {
@@ -5079,8 +7169,8 @@ async function executeLiveRaidEngagement(params = {}) {
   }
 
   // Smooth scroll into view so screen recorder captures the target
-  gentleScrollIntoView(tweetArticle);
-  await sleep(600);
+  await gentleScrollIntoView(tweetArticle);
+  await sleep(400);
 
   // Visual Recording Glow
   if (actions.glow) {
@@ -5277,8 +7367,7 @@ async function collectAudienceFromListTimeline(params = {}) {
     // If 5-6 scrolls find no fresh tweets, scroll back up slightly to re-trigger feed hydration
     if (consecutiveEmptyScrolls >= 5) {
       console.log('[ATOMX AUDIENCE] 5 scrolls found no fresh tweets. Re-hydrating feed...');
-      window.scrollTo({ top: Math.max(0, window.scrollY - 800), behavior: 'smooth' });
-      await sleep(1500);
+      await humanSmoothScroll(-800, { settlePause: 600 });
       consecutiveEmptyScrolls = 0;
       continue;
     }
@@ -5391,8 +7480,7 @@ async function collectEngagingNicheProfiles(params = {}) {
     // If 5-6 scrolls find no fresh tweets, re-hydrate feed without reloading page
     if (consecutiveEmptyScrolls >= 5) {
       console.log('[ATOMX FOLLOWERS] 5-6 scrolls found no new tweets. Re-hydrating feed...');
-      window.scrollTo({ top: Math.max(0, window.scrollY - 800), behavior: 'smooth' });
-      await sleep(1500);
+      await humanSmoothScroll(-800, { settlePause: 600 });
       consecutiveEmptyScrolls = 0;
       continue;
     }
@@ -5689,6 +7777,11 @@ async function discoverTopActiveListTweets(params = {}) {
         continue;
       }
 
+      // STRICT: Root post only, skip retweets / reposts
+      const socialContext = art.querySelector('div[data-testid="socialContext"], span[data-testid="socialContext"]');
+      const isRetweet = !!socialContext || !!art.querySelector('svg[data-testid="icon-retweet"]') || /reposted|retweeted/i.test(socialContext?.innerText || '');
+      if (isRetweet) continue;
+
       // STRICT: Root post only, skip replies/comments
       const artText = (art.innerText || '');
       const hasReplyingText = /replying to/i.test(artText);
@@ -5755,10 +7848,11 @@ async function discoverTopActiveListTweets(params = {}) {
       consecutiveEmptyScrolls = 0;
     }
 
-    if (!isNewest && foundOlderInPass > 3) {
+    // Timeframe cutoff guard: Give active mode enough scrolls (at least 6 scrolls) and demand consistent older tweets
+    if (!isNewest && foundOlderInPass >= 8 && scrollPass >= 6) {
       consecutiveOlderCount++;
-      if (consecutiveOlderCount >= 3) {
-        console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}). Deep scan complete.`);
+      if (consecutiveOlderCount >= 4) {
+        console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}) after ${scrollPass} scrolls. Deep scan complete.`);
         break;
       }
     } else {
@@ -5847,8 +7941,6 @@ async function executeFollowersListCycle(params = {}) {
   const engagedAuthors = (stored?.atomx_follower_engaged_history && typeof stored.atomx_follower_engaged_history === 'object')
     ? stored.atomx_follower_engaged_history : {};
   const safety = stored?.atomx_safety_settings || {};
-  const postWaitSec = Number(safety.postWait) || 20;
-
   let engagedCount = 0;
   let skippedCount = 0;
   const processedTweetIds = new Set();
@@ -5857,7 +7949,8 @@ async function executeFollowersListCycle(params = {}) {
 
   // Helper: Execute engagement actions on a single tweet element
   async function performActionsOnTweet(art, tweetData, tweetId, authorHandle) {
-    const skipCheckFollowers = await chrome.storage.local.get(['atomx_skip_current']).catch(() => ({}));
+    try {
+      const skipCheckFollowers = await chrome.storage.local.get(['atomx_skip_current']).catch(() => ({}));
     if (skipCheckFollowers?.atomx_skip_current || isWorkflowItemSkipped) {
       isWorkflowItemSkipped = false;
       closeAnyOpenTwitterDialog();
@@ -5867,7 +7960,7 @@ async function executeFollowersListCycle(params = {}) {
         skipped: skippedCount,
         statusText: `Skipped @${authorHandle || 'user'}'s post. Moving to next...`
       });
-      window.scrollBy({ top: 450, behavior: 'smooth' });
+      await humanSmoothScroll(500, { settlePause: 350 });
       return;
     }
 
@@ -5884,7 +7977,7 @@ async function executeFollowersListCycle(params = {}) {
         skipped: skippedCount,
         statusText: `Skipped @${authorHandle || 'user'}'s post. Moving to next...`
       });
-      window.scrollBy({ top: 450, behavior: 'smooth' });
+      await humanSmoothScroll(500, { settlePause: 350 });
       return;
     }
 
@@ -5896,7 +7989,7 @@ async function executeFollowersListCycle(params = {}) {
         skipped: skippedCount,
         statusText: `Post by @${authorHandle || 'user'} already liked. Auto-skipping to next...`
       });
-      window.scrollBy({ top: 450, behavior: 'smooth' });
+      await humanSmoothScroll(500, { settlePause: 350 });
       return;
     }
 
@@ -5934,7 +8027,7 @@ async function executeFollowersListCycle(params = {}) {
         closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
         skippedCount++;
-        window.scrollBy({ top: 450, behavior: 'smooth' });
+        await humanSmoothScroll(500, { settlePause: 350 });
         return;
       }
       await simulateHumanLikeClick(art);
@@ -5948,7 +8041,7 @@ async function executeFollowersListCycle(params = {}) {
         closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
         skippedCount++;
-        window.scrollBy({ top: 450, behavior: 'smooth' });
+        await humanSmoothScroll(500, { settlePause: 350 });
         return;
       }
       await simulateHumanRepostClick(art);
@@ -5962,7 +8055,7 @@ async function executeFollowersListCycle(params = {}) {
         closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
         skippedCount++;
-        window.scrollBy({ top: 450, behavior: 'smooth' });
+        await humanSmoothScroll(500, { settlePause: 350 });
         return;
       }
       const tweetText = (tweetData.text || '').trim();
@@ -5985,18 +8078,40 @@ async function executeFollowersListCycle(params = {}) {
         replyContent = 'Solid point. Appreciate the clear insight here.';
       }
 
-      replyContent = sanitizeClientComment(replyContent, extractMaxWordsFromPrompt(options?.stylePrompt || options?.style));
+      replyContent = sanitizeClientComment(replyContent, extractMaxWordsFromPrompt(params?.stylePrompt || params?.style || stylePrompt || style));
       if (replyContent && !isWorkflowAborted) {
         if (isWorkflowItemSkipped) {
           isWorkflowItemSkipped = false;
           closeAnyOpenTwitterDialog();
           await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
           skippedCount++;
-          window.scrollBy({ top: 450, behavior: 'smooth' });
+          await humanSmoothScroll(500, { settlePause: 350 });
           return;
         }
-        await postCommentOnTargetArticle(art, replyContent);
-        await sleep(900);
+        const comRes = await postCommentOnTargetArticle(art, replyContent);
+        if (comRes?.skipped || isWorkflowItemSkipped) {
+          isWorkflowItemSkipped = false;
+          await clearAnyDraftComment();
+          art.setAttribute('data-atomx-skipped', 'true');
+          art.setAttribute('data-atomx-engaged', 'true');
+          if (tweetId) {
+            engagedTweets[tweetId] = Date.now();
+            await chrome.storage?.local?.set({ atomx_follower_engaged_tweets: engagedTweets, atomx_skip_current: false }).catch(() => null);
+          } else {
+            await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+          }
+          skippedCount++;
+          await humanSmoothScroll(500, { settlePause: 350 });
+          return;
+        }
+        if (comRes?.commentsRestricted) {
+          console.log(`[ATOMX FOLLOWERS] Comments restricted on post by @${authorHandle || 'user'}. Modal closed.`);
+          updateFloatingHud({
+            statusText: `Comments restricted for @${authorHandle || 'user'}. Continuing...`
+          });
+          dismissAnyTwitterModal();
+        }
+        await sleep(600);
       }
     }
 
@@ -6006,19 +8121,14 @@ async function executeFollowersListCycle(params = {}) {
         isWorkflowItemSkipped = false;
         closeAnyOpenTwitterDialog();
         await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
-        window.scrollBy({ top: 450, behavior: 'smooth' });
+        await humanSmoothScroll(500, { settlePause: 350 });
         return;
       }
-      const followBtn = art.querySelector('button[data-testid$="-follow"]:not([data-testid*="unfollow"]), div[data-testid$="-follow"]:not([data-testid*="unfollow"]') ||
-        Array.from(art.querySelectorAll('button, div[role="button"]')).find(b => {
-          const t = (b.innerText || '').trim();
-          const tid = (b.getAttribute('data-testid') || '').toLowerCase();
-          return (t === 'Follow' || tid.includes('-follow')) && !t.includes('Following') && !tid.includes('unfollow');
-        });
-      if (followBtn) {
-        await simulateHumanFollowClick(followBtn);
-        await sleep(500);
-      }
+      updateFloatingHud({
+        statusText: `Following author @${authorHandle}...`
+      });
+      await performFollowOnTweetAuthor(art, authorHandle);
+      await sleep(400);
     }
 
     engagedCount++;
@@ -6046,30 +8156,60 @@ async function executeFollowersListCycle(params = {}) {
 
     if (engagedCount >= targetCount || isWorkflowAborted) return;
 
-    // Pacing countdown between posts
-    const waitSec = Math.max(8, postWaitSec + Math.floor(Math.random() * 6 - 3));
-    for (let sec = waitSec; sec > 0 && !isWorkflowAborted; sec--) {
-      const check = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud', 'atomx_skip_current']).catch(() => ({}));
-      if (check?.atomx_agent_workflow?.active === false || check?.atomx_agent_workflow?.isStopped || check?.atomx_active_hud?.isStopped || check?.atomx_active_hud?.stateBadge === 'STOPPED') {
-        isWorkflowAborted = true;
-        break;
-      }
-      if (isWorkflowItemSkipped || check?.atomx_skip_current) {
-        isWorkflowItemSkipped = false;
-        closeAnyOpenTwitterDialog();
-        await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
-        console.log('[ATOMX FOLLOWERS] Skip signal received during pacing delay. Advancing to next post.');
-        break;
-      }
-      updateFloatingHud({
-        nextAction: `Post [${Math.min(engagedCount + 1, targetCount)}/${targetCount}]`,
-        countdownText: `⏱️ Next post in ${sec}s...`,
-        timerBadge: `⏱️ ${sec}s`
-      });
-      await sleep(1000);
-      if (isWorkflowAborted) break;
+    // Dynamically retrieve user's latest Safety Settings (Profile Wait & Batch Rest)
+    const curSafetyRes = await chrome.storage?.local?.get(['atomx_safety_settings']).catch(() => ({}));
+    const curSafety = curSafetyRes?.atomx_safety_settings || safety || {};
+
+    // 1. Check for Batch Rest Break (Take Break After X actions)
+    let bMin = curSafety.breakActionsMin !== undefined ? Number(curSafety.breakActionsMin) : (curSafety.breakActions || 35);
+    let bMax = curSafety.breakActionsMax !== undefined ? Number(curSafety.breakActionsMax) : (curSafety.breakActions || 40);
+    if (bMin > bMax) [bMin, bMax] = [bMax, bMin];
+    const breakAfter = Math.floor(bMin + Math.random() * (bMax - bMin + 1));
+    const isBatchBreak = (engagedCount > 0 && breakAfter > 0 && engagedCount % breakAfter === 0);
+
+    let waitSec = 0;
+    if (isBatchBreak) {
+      let rdMin = curSafety.restDurationMin !== undefined ? Number(curSafety.restDurationMin) : (curSafety.restDuration || 10);
+      let rdMax = curSafety.restDurationMax !== undefined ? Number(curSafety.restDurationMax) : (curSafety.restDuration || 15);
+      if (rdMin > rdMax) [rdMin, rdMax] = [rdMax, rdMin];
+      waitSec = Math.floor(rdMin * 60 + Math.random() * ((rdMax - rdMin) * 60 + 1));
+    } else {
+      // 2. Profile Wait (Between Accounts): strictly obey the user's slider setting (e.g. 0-5s)
+      let pMin = curSafety.profileWaitMin !== undefined ? Number(curSafety.profileWaitMin) : (curSafety.profileWait !== undefined ? Math.max(0, Number(curSafety.profileWait) - 2) : 0);
+      let pMax = curSafety.profileWaitMax !== undefined ? Number(curSafety.profileWaitMax) : (curSafety.profileWait !== undefined ? Number(curSafety.profileWait) : 5);
+      if (pMin > pMax) [pMin, pMax] = [pMax, pMin];
+      waitSec = Math.floor(pMin + Math.random() * (pMax - pMin + 1));
     }
+
+    if (waitSec > 0) {
+      for (let sec = waitSec; sec > 0 && !isWorkflowAborted; sec--) {
+        const check = await chrome.storage?.local?.get(['atomx_agent_workflow', 'atomx_active_hud', 'atomx_skip_current']).catch(() => ({}));
+        if (check?.atomx_agent_workflow?.active === false || check?.atomx_agent_workflow?.isStopped || check?.atomx_active_hud?.isStopped || check?.atomx_active_hud?.stateBadge === 'STOPPED') {
+          isWorkflowAborted = true;
+          break;
+        }
+        if (isWorkflowItemSkipped || check?.atomx_skip_current) {
+          isWorkflowItemSkipped = false;
+          closeAnyOpenTwitterDialog();
+          await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
+          console.log('[ATOMX FOLLOWERS] Skip signal received during pacing delay. Advancing to next post.');
+          break;
+        }
+        updateFloatingHud({
+          stateBadge: isBatchBreak ? 'BATCH_BREAK' : 'ENGAGING',
+          nextAction: isBatchBreak ? `Batch Rest (${Math.ceil(sec / 60)}m left)` : `Post [${Math.min(engagedCount + 1, targetCount)}/${targetCount}]`,
+          countdownText: isBatchBreak ? `☕ Batch Rest cooldown: ${Math.ceil(sec / 60)}m...` : `⏱️ Next post in ${sec}s...`,
+          timerBadge: isBatchBreak ? `☕ ${Math.ceil(sec / 60)}m` : `⏱️ ${sec}s`
+        });
+        await sleep(1000);
+        if (isWorkflowAborted) break;
+      }
+    }
+  } catch (actErr) {
+    console.warn(`[ATOMX FOLLOWERS] Error engaging tweet ${tweetId || ''}:`, actErr);
+    skippedCount++;
   }
+}
 
   // =========================================================================
   // STRATEGY 1: "MOST ACTIVE" (Sort by highest replies within timeframe)
@@ -6136,6 +8276,11 @@ async function executeFollowersListCycle(params = {}) {
           continue;
         }
 
+        // STRICT: Root post only, skip retweets / reposts
+        const socialContext = art.querySelector('div[data-testid="socialContext"], span[data-testid="socialContext"]');
+        const isRetweet = !!socialContext || !!art.querySelector('svg[data-testid="icon-retweet"]') || /reposted|retweeted/i.test(socialContext?.innerText || '');
+        if (isRetweet) continue;
+
         // STRICT: Root post only, skip replies/comments
         const artText = (art.innerText || '');
         const hasReplyingText = /replying to/i.test(artText);
@@ -6178,10 +8323,11 @@ async function executeFollowersListCycle(params = {}) {
         consecutiveEmptyScrolls = 0;
       }
 
-      if (foundOlderInPass > 3) {
+      // Timeframe cutoff guard: Give active mode enough scrolls (at least 6 scrolls) and demand consistent older tweets
+      if (foundOlderInPass >= 8 && s >= 6) {
         consecutiveOlderCount++;
-        if (consecutiveOlderCount >= 3) {
-          console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}). Scan complete.`);
+        if (consecutiveOlderCount >= 4) {
+          console.log(`[ATOMX FOLLOWERS] Reached timeframe boundary (${freshness}) after ${s} scrolls. Scan complete.`);
           break;
         }
       } else {
@@ -6232,7 +8378,33 @@ async function executeFollowersListCycle(params = {}) {
 
     for (const item of rankedCandidates) {
       if (engagedCount >= targetCount || isWorkflowAborted) break;
-      await performActionsOnTweet(item.art, item.tweetData, item.tweetId, item.authorHandle);
+      let targetArt = (item.art && item.art.isConnected) ? item.art : null;
+      if (!targetArt) {
+        targetArt = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).find(a => {
+          const d = extractTweetData(a);
+          return (d.tweetId && d.tweetId === item.tweetId) || (item.tweetId && a.innerHTML.includes(item.tweetId));
+        });
+      }
+      if (!targetArt) {
+        if (window.scrollY > 0) {
+          await humanSmoothScroll(-window.scrollY, { settlePause: 400 });
+        }
+        for (let pass = 0; pass < 20 && !targetArt; pass++) {
+          if (isWorkflowAborted) break;
+          targetArt = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).find(a => {
+            const d = extractTweetData(a);
+            return (d.tweetId && d.tweetId === item.tweetId) || (item.tweetId && a.innerHTML.includes(item.tweetId));
+          });
+          if (targetArt) break;
+          await humanSmoothScroll(650, { settlePause: 350 });
+        }
+      }
+      if (!targetArt) {
+        console.warn(`[ATOMX FOLLOWERS] Candidate tweet ${item.tweetId} not found in DOM after search. Skipping.`);
+        skippedCount++;
+        continue;
+      }
+      await performActionsOnTweet(targetArt, item.tweetData, item.tweetId, item.authorHandle);
     }
   }
 
@@ -6266,7 +8438,7 @@ async function executeFollowersListCycle(params = {}) {
         if (isWorkflowAborted || engagedCount >= targetCount) break;
 
         const tweetData = extractTweetData(art);
-        const tweetId = tweetData.id || tweetData.tweetUrl;
+        const tweetId = tweetData.tweetId || tweetData.id || tweetData.tweetUrl;
         const authorHandle = (tweetData.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
 
         if (!tweetId || processedTweetIds.has(tweetId)) continue;
@@ -6277,7 +8449,8 @@ async function executeFollowersListCycle(params = {}) {
         if (authorHandle && authorHandle === loggedInHandle) continue;
 
         // Skip if already engaged on this tweet -> Skip and advance to next post down!
-        if (engagedTweets[tweetId]) {
+        const isEngagedAlready = engagedTweets[tweetId] || (tweetData.tweetUrl && engagedTweets[tweetData.tweetUrl]) || (tweetData.tweetId && engagedTweets[tweetData.tweetId]);
+        if (isEngagedAlready) {
           skippedCount++;
           updateFloatingHud({
             skipped: skippedCount,
@@ -6295,6 +8468,11 @@ async function executeFollowersListCycle(params = {}) {
           });
           continue;
         }
+
+        // STRICT: Root posts only (skip retweets/reposts in timeline)
+        const socialContext = art.querySelector('div[data-testid="socialContext"], span[data-testid="socialContext"]');
+        const isRetweet = !!socialContext || !!art.querySelector('svg[data-testid="icon-retweet"]') || /reposted|retweeted/i.test(socialContext?.innerText || '');
+        if (isRetweet) continue;
 
         // STRICT: Root posts only (skip comments/replies in timeline)
         const artText = (art.innerText || '');
@@ -6428,14 +8606,12 @@ async function executeReciprocalProfileEngagement(params = {}) {
     }
 
     // 2. Smoothly scroll past profile header/bio to reveal recent posts
-    window.scrollBy({ top: 550, behavior: 'smooth' });
-    await sleep(900);
+    await humanSmoothScroll(550, { settlePause: 400 });
 
     // 3. Find recent tweets, skip pinned tweets
     let allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     if (allArticles.length === 0) {
-      window.scrollBy({ top: 450, behavior: 'smooth' });
-      await sleep(1000);
+      await humanSmoothScroll(450, { settlePause: 400 });
       allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
     }
 
@@ -6454,8 +8630,8 @@ async function executeReciprocalProfileEngagement(params = {}) {
     }
 
     // Gently scroll target post into view without jerking
-    gentleScrollIntoView(targetArticle);
-    await sleep(600);
+    await gentleScrollIntoView(targetArticle);
+    await sleep(400);
 
     if (isWorkflowAborted) return { success: false, aborted: true };
 
@@ -6523,7 +8699,7 @@ async function executeReciprocalProfileEngagement(params = {}) {
     }
 
     // Sanitize comment (dynamic word limit if specified in prompt)
-    replyText = sanitizeClientComment(replyText, extractMaxWordsFromPrompt(options?.stylePrompt || options?.style));
+    replyText = sanitizeClientComment(replyText, extractMaxWordsFromPrompt(params?.stylePrompt || params?.style));
 
     // 6. Post AI reply on target post using universal robust posting engine
     const commentRes = await postCommentOnTargetArticle(targetArticle, replyText);
@@ -6531,6 +8707,8 @@ async function executeReciprocalProfileEngagement(params = {}) {
       replyDone = true;
       console.log(`[ATOMX RECIPROCAL] Successfully posted reply on @${targetHandle}: "${replyText}"`);
       await sleep(800);
+    } else if (commentRes?.skipped || commentRes?.aborted || isWorkflowAborted || isWorkflowItemSkipped) {
+      console.log('[ATOMX RECIPROCAL] Reply skipped or aborted by user.');
     } else {
       console.warn('[ATOMX RECIPROCAL] Could not post reply:', commentRes?.error);
     }
@@ -6549,4 +8727,8 @@ async function executeReciprocalProfileEngagement(params = {}) {
   }
 }
 
+// Auto-initialize TG Liker engine on page load (if active workflow matches this tab)
+if (typeof TgLikerNativeEngine !== 'undefined') {
+  TgLikerNativeEngine.init().catch(() => null);
+}
 

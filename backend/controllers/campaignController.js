@@ -83,7 +83,13 @@ exports.parseAndFilterTweets = async (req, res) => {
 // Get list of engaged tweet IDs for the user
 exports.getEngagedTweets = async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    let userId = req.headers['x-user-id'] || req.query.userId || 1;
+    if (req.query.handle) {
+      try {
+        const u = await db.getUserByHandle(req.query.handle);
+        if (u?.id) userId = u.id;
+      } catch (e) {}
+    }
     const engagedIds = await db.getEngagedTweetIds(userId);
     res.json({
       count: engagedIds.length,
@@ -97,11 +103,18 @@ exports.getEngagedTweets = async (req, res) => {
 // Mark tweets as engaged
 exports.markTweetsEngaged = async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    let userId = req.headers['x-user-id'] || req.body?.userId || 1;
     const { tweets } = req.body;
 
     if (!tweets) {
       return res.status(400).json({ error: 'tweets array or object required' });
+    }
+
+    if (req.body?.handle) {
+      try {
+        const u = await db.getUserByHandle(req.body.handle);
+        if (u?.id) userId = u.id;
+      } catch (e) {}
     }
 
     await db.markTweetsEngaged(tweets, userId);

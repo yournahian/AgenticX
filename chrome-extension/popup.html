@@ -80,6 +80,22 @@
       </div>
     </div>
 
+    <!-- Real-Time Twitter Daily Post Limit / Rate Limit Warning Banner -->
+    <div id="rateLimitWarningBanner" style="display:none; margin:8px 10px 4px 10px; padding:10px 12px; background:linear-gradient(135deg, rgba(239, 68, 68, 0.22) 0%, rgba(185, 28, 28, 0.38) 100%); border:1px solid rgba(239, 68, 68, 0.65); border-radius:8px; font-size:11px; color:#FCA5A5; line-height:1.45; box-shadow:0 4px 14px rgba(239, 68, 68, 0.25);">
+      <div style="font-weight:800; font-size:11.5px; color:#F87171; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span style="display:flex; align-items:center; gap:5px;">
+          <span>🛑</span>
+          <span id="rateLimitBannerTitle">Twitter Daily Post Limit Reached</span>
+        </span>
+        <button id="closeRateLimitBannerBtn" style="background:none; border:none; color:#FCA5A5; font-size:13px; cursor:pointer; padding:0 2px; line-height:1;" title="Dismiss Warning">✕</button>
+      </div>
+      <div id="rateLimitBannerDesc">
+        <strong>You've hit the daily post limit on Twitter.</strong><br>
+        All active tasks have been automatically stopped immediately to protect your account.<br>
+        <span style="font-size:10px; color:#E2E8F0; margin-top:3px; display:inline-block;">👉 Twitter limits daily posts/replies. Please wait until your limit resets before restarting automation.</span>
+      </div>
+    </div>
+
     <!-- Modern Segmented Navigation Tabs (Hidden until authenticated & active) -->
     <nav class="ext-tabs" id="extTabsNav" style="display:none;">
       <button class="tab-btn active" data-tab="agents">
@@ -117,21 +133,10 @@
           <div class="section-intro">
             <div style="font-weight:700; font-size:13px; color:var(--text-primary); display:flex; align-items:center; justify-content:space-between;">
               <span>Autonomous Agents (100% Auto)</span>
-              <span class="badge-mini popular">11 SUITE</span>
+              <span class="badge-mini popular">12 SUITE</span>
             </div>
           </div>
 
-          <!-- Compact Execution Strategy Quick Selector -->
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 10px; margin-bottom:10px; background:rgba(255,255,255,0.03); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
-            <div style="display:flex; align-items:center; gap:6px; color:var(--text-secondary);">
-              <span>🖱️</span>
-              <span style="font-weight:600; color:var(--text-primary);">Execution Strategy:</span>
-            </div>
-            <select id="extQuickStrategySelect" style="font-size:10.5px; padding:3px 8px; border-radius:4px; background:var(--bg-card); color:var(--blue-primary); border:1px solid var(--border-subtle); outline:none; font-weight:600; cursor:pointer;">
-              <option value="dom" selected>Standard DOM Mode (with Virtual Cursor)</option>
-              <option value="debugger">Advanced Debugger Mode</option>
-            </select>
-          </div>
 
           <div class="bento-grid">
             <!-- 1. Telegram Group Engage -->
@@ -226,17 +231,6 @@
               <div class="bento-action">Audit Post ➔</div>
             </button>
 
-            <!-- 12. Telegram Live Liker -->
-            <button type="button" class="bento-card" data-agent-id="tgliveliker">
-              <div class="bento-top">
-                <span class="bento-emoji">🔴</span>
-                <span class="badge-mini viral">PROOF REC</span>
-              </div>
-              <div class="bento-title">TG Live Liker</div>
-              <div class="bento-desc">Continuous raid liker — keeps tab open for screen record proof</div>
-              <div class="bento-action">Start Raid ➔</div>
-            </button>
-
             <!-- 13. Commenter Reciprocator -->
             <button type="button" class="bento-card" data-agent-id="reciprocator">
               <div class="bento-top">
@@ -268,6 +262,17 @@
               <div class="bento-title">Niche Search Engager</div>
               <div class="bento-desc">Search any niche keyword (e.g. "follow for follow") & engage posts</div>
               <div class="bento-action">Engage Niche ➔</div>
+            </button>
+
+            <!-- 16. TG Liker (Mass Raid & Repost Engager) -->
+            <button type="button" class="bento-card" data-agent-id="tgliker">
+              <div class="bento-top">
+                <span class="bento-emoji">⚡</span>
+                <span class="badge-mini viral">MASS RAID</span>
+              </div>
+              <div class="bento-title">TG Liker (Raid & Repost)</div>
+              <div class="bento-desc">Mass Like, Repost & Bookmark on profile reposts, quotes or active tab</div>
+              <div class="bento-action">Launch Liker ➔</div>
             </button>
           </div>
         </div>
@@ -336,6 +341,17 @@
               <div style="margin: 6px 0; padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 11px; display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight: 700; color: var(--text-primary);">AI Comment Style:</span>
                 <span id="tgActiveToneName" style="color: var(--blue-primary); font-weight: 700;">Global Voice Active</span>
+              </div>
+
+              <!-- Central Safety Settings Synced Indicator -->
+              <div style="margin: 6px 0; padding: 7px 10px; background: rgba(59, 130, 246, 0.05); border: 1px dashed rgba(59, 130, 246, 0.25); border-radius: 6px; font-size: 10.5px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                  <span style="font-weight:700; color:var(--text-primary);">🛡️ Anti-Ban Safety Controls</span>
+                  <span style="font-size:9.5px; font-weight:700; color:var(--blue-primary);">Synced</span>
+                </div>
+                <div style="font-size:10px; color:var(--text-muted); line-height:1.35;">
+                  Pacing Delays, Reply Pauses, Batch Breaks, Cursor Speed & Typing Cadence are actively governed by your central <strong>Safety Settings</strong>.
+                </div>
               </div>
 
               <!-- Link Parser & Filter Live Feedback Card -->
@@ -958,6 +974,17 @@
                 <strong>Following Cleaner:</strong> Opens your Following list and unfollows one account at a time. Filters accounts that do not follow you back or have low scores, using smart auto-scroll, safe pacing, and automatic long breaks.
               </div>
 
+              <!-- Global AI Voice & Centralized Safety indicator -->
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <div>
+                  <span style="color:var(--text-secondary);">Active AI Voice: </span>
+                  <span id="unfollowActiveToneLabel" style="color:var(--blue-primary); font-weight:700;">Global Voice Active</span>
+                </div>
+                <div style="font-size:9.5px; color:var(--text-muted); display:flex; align-items:center; gap:4px;">
+                  <span>🛡️ Global Safety Governed</span>
+                </div>
+              </div>
+
               <!-- Phase A: Filter Selection (Can select either or both) -->
               <div>
                 <label class="opt-label">Unfollow Filtering Criteria (Select one or both)</label>
@@ -985,30 +1012,16 @@
                 </div>
               </div>
 
-              <!-- Custom Pacing & Batch Breaks -->
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div>
-                  <label class="opt-label">Delay Per Unfollow</label>
-                  <div style="display:flex; align-items:center; gap:4px;">
-                    <input type="number" id="unfollowCustomDelayInput" class="ext-input" value="15" min="3" max="120" placeholder="15">
-                    <span style="font-size:11px; color:var(--text-muted);">sec</span>
-                  </div>
+              <!-- Global Safety & Human Scroll Governance -->
+              <div style="display:flex; flex-direction:column; gap:4px; padding:8px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:5px;">
+                    <span>🛡️ Global Safety Engine</span>
+                  </span>
+                  <span style="font-size:10px; color:var(--blue-primary); font-weight:600;">ACTIVE</span>
                 </div>
-                <div>
-                  <label class="opt-label">Batch Break Every</label>
-                  <div style="display:flex; align-items:center; gap:4px;">
-                    <input type="number" id="unfollowBatchCountInput" class="ext-input" value="15" min="2" max="100" placeholder="15">
-                    <span style="font-size:11px; color:var(--text-muted);">unfollows</span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label class="opt-label">Batch Break Duration</label>
-                <div style="display:flex; align-items:center; gap:6px; background:var(--bg-card); padding:6px 10px; border-radius:6px; border:1px solid var(--border-subtle); font-size:11px;">
-                  <span>☕ Pause for</span>
-                  <input type="number" id="unfollowBreakDurationInput" class="ext-input" value="60" min="5" max="600" style="width:65px; padding:3px 6px; font-size:11px; text-align:center;">
-                  <span>seconds after every batch</span>
+                <div style="font-size:10px; color:var(--text-muted); line-height:1.4;">
+                  Pacing delays, batch rest breaks, and anti-ban limits are automatically synchronized from your central <strong>Safety Settings</strong>. Powered by <strong>Global Smooth Scroll & Virtual Cursor</strong>.
                 </div>
               </div>
 
@@ -1178,105 +1191,6 @@
                 </div>
               </div>
             </div>
-
-            <!-- Workspace 12: Telegram Live Liker & Proof Recorder (A12, Proof Rec) -->
-            <div class="agent-panel-content" id="panel-agent-tgliveliker" style="display:none; flex-direction:column; gap:10px;">
-              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-                <strong>Screen-Record Friendly Liker:</strong> Designed for Telegram raid groups where you need to submit screen recording proof. Opens the target post or timeline, visually scrolls, executes actions, and <strong>keeps the tab open</strong> for recording!
-              </div>
-
-              <!-- Notice Badge -->
-              <div style="background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.3); border-radius:6px; padding:6px 10px; font-size:11px; color:#F87171; display:flex; align-items:center; gap:6px;">
-                <span>🔴</span>
-                <span><strong>Tab Stays Open:</strong> Browser tab will NOT close automatically so your screen recorder captures proof!</span>
-              </div>
-
-              <!-- Raid Links Input -->
-              <div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <label class="opt-label" style="margin-bottom:0;">Raid Links / Target Post / Feed</label>
-                  <button type="button" class="badge-mini" id="tgLiveUseCurrentTabBtn" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-canvas);">⚡ Current Tab</button>
-                </div>
-                <textarea id="tgLiveRaidInput" class="ext-textarea" rows="3" placeholder="Paste tweet raid links here (supports Telegram messages with timestamps)..."></textarea>
-              </div>
-
-              <!-- Action Selection Mode -->
-              <div>
-                <label class="opt-label">Actions to Execute</label>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
-                    <input type="checkbox" id="tgLiveOptLike" checked>
-                    <span>❤️ Auto-Like</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
-                    <input type="checkbox" id="tgLiveOptRepost" checked>
-                    <span>🔁 Auto-Repost</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
-                    <input type="checkbox" id="tgLiveOptComment" checked>
-                    <span>💬 Auto-Comment</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
-                    <input type="checkbox" id="tgLiveOptBookmark">
-                    <span>🔖 Auto-Bookmark</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:6px; font-size:11px; background:var(--bg-card); padding:6px 8px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer; grid-column: span 2;">
-                    <input type="checkbox" id="tgLiveOptGlow" checked>
-                    <span>✨ Recording Glow Effect</span>
-                  </label>
-                </div>
-              </div>
-
-              <!-- Pacing Delay -->
-              <div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <label class="opt-label" style="margin-bottom:0;">Pacing Speed (Recording Delay)</label>
-                  <span id="tgLivePacingLabel" style="font-size:10px; color:var(--text-muted);">3.5s per action</span>
-                </div>
-                <select id="tgLivePacingSelect" class="ext-select">
-                  <option value="2500">Fast (2.5s) — Quick Proof Recording</option>
-                  <option value="3500" selected>Balanced (3.5s) — Optimal for Screen Recording</option>
-                  <option value="6000">Slow & Natural (6.0s) — Ultra Organic</option>
-                </select>
-              </div>
-
-              <!-- Action Controls -->
-              <div style="display:flex; gap:6px; margin-top:2px;">
-                <button type="button" class="primary-btn mini-btn" id="startTgLiveRaidBtn" style="flex:2; margin-top:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg> Launch</button>
-                <button type="button" class="secondary-btn mini-btn" id="resetTgLiveLikerBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Counters">🔄 Reset</button>
-                <button type="button" class="secondary-btn mini-btn" id="stopTgLiveRaidBtn" style="display:none; flex:1; margin-top:0; color:#EF4444; border-color:#EF4444;">⏹️ Stop Raid</button>
-              </div>
-
-              <!-- Live Counter Status -->
-              <div id="tgLiveStatusCard" style="display:none; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <div style="font-weight:700; font-size:12px; display:flex; align-items:center; gap:6px;">
-                    <span class="live-dot" style="background:#EF4444;"></span>
-                    <span id="tgLiveStatusText">Recording Live...</span>
-                  </div>
-                  <span class="badge-mini popular" id="tgLiveTabStatus">TAB OPEN</span>
-                </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px; text-align:center;">
-                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
-                    <div style="font-size:10px; color:var(--text-muted);">Liked</div>
-                    <div style="font-weight:800; font-size:14px; color:#EF4444;" id="tgLiveCountLiked">0</div>
-                  </div>
-                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
-                    <div style="font-size:10px; color:var(--text-muted);">Reposted</div>
-                    <div style="font-weight:800; font-size:14px; color:#10B981;" id="tgLiveCountReposted">0</div>
-                  </div>
-                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
-                    <div style="font-size:10px; color:var(--text-muted);">Commented</div>
-                    <div style="font-weight:800; font-size:14px; color:#8B5CF6;" id="tgLiveCountCommented">0</div>
-                  </div>
-                  <div style="background:var(--bg-canvas); padding:6px; border-radius:6px;">
-                    <div style="font-size:10px; color:var(--text-muted);">Bookmarked</div>
-                    <div style="font-weight:800; font-size:14px; color:#3B82F6;" id="tgLiveCountBookmarked">0</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <!-- Workspace 13: Commenter Reciprocator (A13, Reciprocal Engagement Pod) -->
             <div class="agent-panel-content" id="panel-agent-reciprocator" style="display:none; flex-direction:column; gap:10px;">
               <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
@@ -1319,20 +1233,6 @@
                 </div>
               </div>
 
-              <!-- Special Pre-Scan Delay Between Comment Likes (Commenter Reciprocator Exclusive) -->
-              <div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <label class="opt-label" style="margin-bottom:0;">Delay Between Comment Likes</label>
-                  <span style="font-size:10px; color:var(--blue-primary); font-weight:700;">Special Delay</span>
-                </div>
-                <select id="reciprocatorLikeDelaySelect" class="ext-select">
-                  <option value="2500">Fast (2 - 3s per like)</option>
-                  <option value="4000" selected>🛡️ Recommended (3 - 5s per like)</option>
-                  <option value="6000">Organic (5 - 7s per like)</option>
-                  <option value="10000">Ultra Safe (8 - 12s per like)</option>
-                </select>
-                <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">Special pause between liking comments on your post before profile collection.</div>
-              </div>
 
               <!-- Global AI Voice & Centralized Safety indicator -->
               <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; font-size:11px;">
@@ -1636,6 +1536,215 @@
               </div>
             </div>
 
+            <!-- Workspace 12: TG Liker (Mass Raid & Repost Engager) -->
+            <div class="agent-panel-content" id="panel-agent-tgliker" style="display:none; flex-direction:column; gap:10px;">
+              <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <strong>TG Liker (Raid & Repost Engager):</strong> Mass Like, Repost, and Bookmark on any profile's reposts timeline, tweet quotes, replies, or active tab. Mimics human hand movements with customizable speed, smart breaks, and session continuation.
+              </div>
+
+              <!-- Target URL / Profile Input -->
+              <div>
+                <label class="opt-label">Target Profile URL / @handle / Tweet URL</label>
+                <textarea id="tgLikerTargetInput" class="ext-textarea mini" style="min-height:54px; font-size:11px; font-family:monospace;" placeholder="https://x.com/username or @username&#10;(Leave empty to use active X tab)"></textarea>
+                <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">Leave blank to raid whatever profile or tweet is currently open in your active X tab.</div>
+              </div>
+
+              <!-- Target Section -->
+              <div>
+                <label class="opt-label">Target Section</label>
+                <select id="tgLikerSectionSelect" class="ext-select">
+                  <option value="auto" selected>Auto — Profile ➔ /reposts page, Tweet ➔ Quotes</option>
+                  <option value="profile_reposts">Profile: /reposts page (All posts reposted by creator)</option>
+                  <option value="profile_all">Profile: Main timeline</option>
+                  <option value="quotes">Tweet: Quotes</option>
+                  <option value="replies">Tweet: Replies</option>
+                </select>
+              </div>
+
+              <!-- Actions Checkboxes -->
+              <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
+                <div style="font-size:10px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">ACTIONS ON EACH POST:</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; font-size:11px;">
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="tgLikerOptLike" checked style="accent-color:var(--blue-primary);">
+                    <span>❤️ Auto-Like</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="tgLikerOptRepost" style="accent-color:var(--blue-primary);">
+                    <span>🔁 Auto-Repost</span>
+                  </label>
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="tgLikerOptBookmark" style="accent-color:var(--blue-primary);">
+                    <span>🔖 Auto-Bookmark</span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Speed Selector & Mode -->
+              <div>
+                <label class="opt-label">Execution Speed (per post)</label>
+                <select id="tgLikerSpeedSelect" class="ext-select">
+                  <option value="0">⚡ Turbo — Instant jump (direct click, no cursor delay)</option>
+                  <option value="1500">🖱️ Human Fast — 1.5s</option>
+                  <option value="2000" selected>🖱️ Human — 2s (Recommended)</option>
+                  <option value="2500">🖱️ Human — 2.5s</option>
+                  <option value="3500">🖱️ Balanced — 3.5s</option>
+                  <option value="6000">🖱️ Slow &amp; Natural — 6s</option>
+                </select>
+              </div>
+
+              <!-- Target Post Count & Presets -->
+              <div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label class="opt-label" style="margin-bottom:0;">Max Posts to Process</label>
+                  <span style="font-size:9.5px; color:var(--text-muted);">(0 = Unlimited until stopped)</span>
+                </div>
+                <input type="number" id="tgLikerTargetCountInput" class="ext-input" min="0" max="9999" value="20" placeholder="Enter post count (0 = unlimited)">
+                <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                  <button type="button" class="preset-pill-btn tgliker-preset-btn" data-count="10" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">10</button>
+                  <button type="button" class="preset-pill-btn tgliker-preset-btn active" data-count="20" style="cursor:pointer; background:#2563EB; border:1px solid #3B82F6; color:#FFFFFF; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">20</button>
+                  <button type="button" class="preset-pill-btn tgliker-preset-btn" data-count="30" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">30</button>
+                  <button type="button" class="preset-pill-btn tgliker-preset-btn" data-count="50" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">50</button>
+                  <button type="button" class="preset-pill-btn tgliker-preset-btn" data-count="100" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">100</button>
+                  <button type="button" class="preset-pill-btn tgliker-preset-btn" data-count="0" style="cursor:pointer; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.45); color:#60A5FA; font-weight:700; font-size:11px; padding:4px 12px; border-radius:9999px;">∞</button>
+                </div>
+              </div>
+
+              <!-- Continuous loop toggle -->
+              <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:6px; padding:7px 10px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <div style="font-size:11px; font-weight:700; color:var(--text-primary);">Continuous Feed Loop</div>
+                  <div style="font-size:9.5px; color:var(--text-muted);">Refresh feed automatically when end of page is reached to catch new incoming posts</div>
+                </div>
+                <label style="cursor:pointer; display:flex; align-items:center;">
+                  <input type="checkbox" id="tgLikerContinuousLoop" checked style="accent-color:var(--blue-primary); width:16px; height:16px;">
+                </label>
+              </div>
+
+              <!-- Smart Break Engine Card (Full User Control) -->
+              <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:6px;">
+                  <span style="font-size:11.5px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:5px;">☕ Smart Break Engine</span>
+                  <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:#60A5FA; font-weight:700; cursor:pointer;">
+                    <input type="checkbox" id="tgLikerBreakOn" checked style="accent-color:var(--blue-primary);">
+                    <span>Short Break On</span>
+                  </label>
+                </div>
+
+                <!-- Short Break Inputs -->
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary); flex-wrap:wrap;">
+                    <span>Every</span>
+                    <input type="number" id="tgLikerEvMin" min="1" value="25" class="ext-input" style="width:48px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>–</span>
+                    <input type="number" id="tgLikerEvMax" min="1" value="40" class="ext-input" style="width:48px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>posts</span>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary); flex-wrap:wrap;">
+                    <span>take a break of</span>
+                    <input type="number" id="tgLikerBsMin" min="1" value="45" class="ext-input" style="width:48px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>–</span>
+                    <input type="number" id="tgLikerBsMax" min="1" value="120" class="ext-input" style="width:52px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>sec</span>
+                  </div>
+                </div>
+
+                <!-- Long Break Header & Inputs -->
+                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:6px; display:flex; justify-content:space-between; align-items:center;">
+                  <label style="display:flex; align-items:center; gap:5px; cursor:pointer; font-size:11px; font-weight:700; color:#F59E0B;">
+                    <input type="checkbox" id="tgLikerLbOn" checked style="accent-color:#F59E0B;">
+                    <span>🛑 Long Break</span>
+                  </label>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                  <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary); flex-wrap:wrap;">
+                    <span>Every</span>
+                    <input type="number" id="tgLikerLbEvMin" min="1" value="100" class="ext-input" style="width:52px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>–</span>
+                    <input type="number" id="tgLikerLbEvMax" min="1" value="150" class="ext-input" style="width:52px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>posts</span>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary); flex-wrap:wrap;">
+                    <span>take</span>
+                    <input type="number" id="tgLikerLbMinMin" min="1" value="5" class="ext-input" style="width:44px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>–</span>
+                    <input type="number" id="tgLikerLbMinMax" min="1" value="10" class="ext-input" style="width:48px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                    <span>minutes break</span>
+                  </div>
+                </div>
+
+                <!-- Hourly Limit -->
+                <div style="border-top:1px solid rgba(255,255,255,0.06); padding-top:6px; display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary);">
+                  <span>⏳ Hourly limit</span>
+                  <input type="number" id="tgLikerHourly" min="0" value="0" class="ext-input" style="width:52px; padding:3px 5px; text-align:center; font-size:11px; height:24px;">
+                  <span>posts/hr</span>
+                  <small style="color:var(--text-muted); font-size:9.5px;">(0 = off)</small>
+                </div>
+              </div>
+
+              <!-- Add More / Continue box (Dark Mode Styled) -->
+              <div id="tgLikerContinueBox" style="display:none; background:rgba(30, 41, 59, 0.45); border:1px solid rgba(59,130,246,0.35); border-radius:8px; padding:10px 12px; flex-direction:column; gap:8px;">
+                <div style="font-size:11.5px; font-weight:800; color:#60A5FA; display:flex; justify-content:space-between; align-items:center;">
+                  <span>➕ Add More Posts</span>
+                  <span id="tgLikerContinueInfo" style="font-size:10px; color:#94A3B8; font-weight:600;">0 previously handled</span>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  <button type="button" class="tgliker-cont-btn" data-add="10" style="cursor:pointer; background:rgba(15,23,42,0.8); border:1px solid rgba(59,130,246,0.35); color:#93C5FD; font-weight:700; font-size:11px; padding:5px 12px; border-radius:6px; transition:all 0.15s ease;">+10</button>
+                  <button type="button" class="tgliker-cont-btn active" data-add="20" style="cursor:pointer; background:#2563EB; border:1px solid #3B82F6; color:#FFFFFF; font-weight:700; font-size:11px; padding:5px 12px; border-radius:6px; transition:all 0.15s ease;">+20</button>
+                  <button type="button" class="tgliker-cont-btn" data-add="30" style="cursor:pointer; background:rgba(15,23,42,0.8); border:1px solid rgba(59,130,246,0.35); color:#93C5FD; font-weight:700; font-size:11px; padding:5px 12px; border-radius:6px; transition:all 0.15s ease;">+30</button>
+                  <button type="button" class="tgliker-cont-btn" data-add="50" style="cursor:pointer; background:rgba(15,23,42,0.8); border:1px solid rgba(59,130,246,0.35); color:#93C5FD; font-weight:700; font-size:11px; padding:5px 12px; border-radius:6px; transition:all 0.15s ease;">+50</button>
+                  <button type="button" class="tgliker-cont-btn" data-add="100" style="cursor:pointer; background:rgba(15,23,42,0.8); border:1px solid rgba(59,130,246,0.35); color:#93C5FD; font-weight:700; font-size:11px; padding:5px 12px; border-radius:6px; transition:all 0.15s ease;">+100</button>
+                </div>
+                <button type="button" id="btnTgLikerContinue" class="primary-btn mini-btn" style="margin-top:2px; font-size:11px; padding:8px 12px; font-weight:700;">▶ Continue from where it ended</button>
+                <div style="font-size:10px; color:var(--text-muted); line-height:1.35;">
+                  Retains handled post IDs. Skips already engaged posts and continues downward from the exact stopping point.
+                </div>
+              </div>
+
+              <!-- Progress & State Machine Card -->
+              <div id="tgLikerProgressCard" style="display:none; padding:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="live-dot" id="tgLikerLiveDot"></span>
+                    <span id="tgLikerStateBadge" class="badge-mini growth" style="font-family:monospace;">IDLE</span>
+                  </div>
+                  <span id="tgLikerQueueIndicator" style="font-weight:700; color:var(--text-primary);">Post 0/20</span>
+                </div>
+                <div style="width:100%; height:6px; background:var(--bg-canvas); border-radius:3px; overflow:hidden; margin-bottom:8px;">
+                  <div id="tgLikerProgressBar" style="width:0%; height:100%; background:var(--blue-primary); transition:width 0.3s ease;"></div>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; text-align:center; margin-bottom:8px;">
+                  <div style="background:var(--bg-canvas); padding:5px 2px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:#F43F5E;">Liked</div>
+                    <div style="font-weight:800; font-size:13px; color:#F43F5E;" id="tgLikerCountLiked">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px 2px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:#10B981;">Reposted</div>
+                    <div style="font-weight:800; font-size:13px; color:#10B981;" id="tgLikerCountReposted">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px 2px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:#3B82F6;">Bookmarked</div>
+                    <div style="font-weight:800; font-size:13px; color:#3B82F6;" id="tgLikerCountBookmarked">0</div>
+                  </div>
+                  <div style="background:var(--bg-canvas); padding:5px 2px; border-radius:5px;">
+                    <div style="font-size:9.5px; color:var(--text-muted);">Skipped</div>
+                    <div style="font-weight:800; font-size:13px; color:var(--text-muted);" id="tgLikerCountSkipped">0</div>
+                  </div>
+                </div>
+                <div id="tgLikerLiveStatusText" style="color:var(--text-secondary); font-size:11px; line-height:1.3;">Ready. Target profile reposts, quotes or active tab.</div>
+                <div id="tgLikerCountdownText" style="display:none; color:var(--blue-primary); font-weight:700; font-size:10.5px; margin-top:4px;">⏱️ Next post in 2s...</div>
+              </div>
+
+              <!-- Action Controls -->
+              <div style="display:flex; gap:6px; margin-top:2px;">
+                <button type="button" class="primary-btn mini-btn" id="runTgLikerBtn" style="flex:2; margin-top:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M8 5v14l11-7z"/></svg> Launch Liker</button>
+                <button type="button" class="secondary-btn mini-btn" id="resetTgLikerBtn" style="flex:1; margin-top:0; border-color:var(--border-subtle); display:flex; align-items:center; justify-content:center; gap:4px; font-weight:600;" title="Reset Queue & Counters"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg> Reset</button>
+                <button type="button" class="secondary-btn mini-btn" id="pauseTgLikerBtn" style="flex:1; margin-top:0; display:none; background:#D97706; color:#FFF; border-color:#D97706;" title="Pause / Resume workflow"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> Pause</button>
+                <button type="button" class="secondary-btn mini-btn" id="skipTgLikerBtn" style="flex:1; margin-top:0; display:none; background:#2563EB; color:#FFF; border-color:#2563EB;" title="Skip current post"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg> Skip</button>
+                <button type="button" class="secondary-btn mini-btn" id="stopTgLikerBtn" style="flex:1; margin-top:0; display:none; background:#DC2626; color:#FFF; border-color:#DC2626;" title="Stop workflow"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> STOP</button>
+              </div>
+            </div>
+
           </div>
 
           <!-- Agent Live Console & Feedback Box -->
@@ -1759,44 +1868,84 @@
             <div>Whenever your target count exceeds <strong>10 profiles</strong>, AtomX automatically processes in batches of <strong>5 profiles</strong> with a cooldown break between batches.</div>
           </div>
 
-          <!-- 1. Reply Delay -->
+          <!-- 1. Reply Delay (Dual Point) -->
           <div class="setting-item" style="margin-bottom:14px;">
             <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
               <span>Reply Delay (After Comment)</span>
-              <span id="valExtReplyDelay" style="color:var(--blue-primary);">8 - 14 sec</span>
+              <span id="valExtReplyDelay" style="color:var(--blue-primary); font-weight:700;">3 - 6 sec</span>
             </div>
-            <input type="range" min="5" max="30" value="10" id="extReplyDelaySlider" class="ext-slider">
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Pause after each reply before executing follow, like, or next action.</div>
+            <div class="dual-range-wrap">
+              <div class="dual-range-track"></div>
+              <div class="dual-range-highlight" id="highlightReplyDelay"></div>
+              <input type="range" min="0" max="60" value="3" id="extReplyDelayMin" class="dual-range-input">
+              <input type="range" min="0" max="60" value="6" id="extReplyDelayMax" class="dual-range-input">
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Randomized pause (min - max) after comment before next action.</div>
           </div>
 
-          <!-- 2. Profile Wait -->
+          <!-- 2. Profile Wait (Dual Point) -->
           <div class="setting-item" style="margin-bottom:14px;">
             <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
               <span>Profile Wait (Between Accounts)</span>
-              <span id="valExtProfileWait" style="color:var(--blue-primary);">15 - 25 sec</span>
+              <span id="valExtProfileWait" style="color:var(--blue-primary); font-weight:700;">10 - 20 sec</span>
             </div>
-            <input type="range" min="10" max="60" value="20" id="extProfileWaitSlider" class="ext-slider">
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Pacing wait time before navigating to the next target profile.</div>
+            <div class="dual-range-wrap">
+              <div class="dual-range-track"></div>
+              <div class="dual-range-highlight" id="highlightProfileWait"></div>
+              <input type="range" min="0" max="120" value="10" id="extProfileWaitMin" class="dual-range-input">
+              <input type="range" min="0" max="120" value="20" id="extProfileWaitMax" class="dual-range-input">
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Randomized pacing wait time before navigating to the next target profile.</div>
           </div>
 
-          <!-- 3. Break After Actions -->
+          <!-- 3. Break After Actions (Dual Point) -->
           <div class="setting-item" style="margin-bottom:14px;">
             <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
               <span>Take Break After</span>
-              <span id="valExtBreakActions" style="color:var(--blue-primary);">15 actions</span>
+              <span id="valExtBreakActions" style="color:var(--blue-primary); font-weight:700;">10 - 15 actions</span>
             </div>
-            <input type="range" min="5" max="40" step="5" value="15" id="extBreakActionsSlider" class="ext-slider">
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Triggers a restorative cooldown pause after N combined actions.</div>
+            <div class="dual-range-wrap">
+              <div class="dual-range-track"></div>
+              <div class="dual-range-highlight" id="highlightBreakActions"></div>
+              <input type="range" min="0" max="50" value="10" id="extBreakActionsMin" class="dual-range-input">
+              <input type="range" min="0" max="50" value="15" id="extBreakActionsMax" class="dual-range-input">
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Triggers a restorative cooldown pause randomly between N actions.</div>
           </div>
 
-          <!-- 4. Batch Rest Duration -->
+          <!-- 4. Batch Rest Duration (Dual Point) -->
           <div class="setting-item" style="margin-bottom:14px;">
             <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
               <span>Batch Rest Duration</span>
-              <span id="valExtRestDuration" style="color:var(--blue-primary);">5 minutes</span>
+              <span id="valExtRestDuration" style="color:var(--blue-primary); font-weight:700;">1 - 3 min</span>
             </div>
-            <input type="range" min="2" max="20" step="1" value="5" id="extRestDurationSlider" class="ext-slider">
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">How long the bot rests during batch intervals and action breaks.</div>
+            <div class="dual-range-wrap">
+              <div class="dual-range-track"></div>
+              <div class="dual-range-highlight" id="highlightRestDuration"></div>
+              <input type="range" min="0" max="15" value="1" id="extRestDurationMin" class="dual-range-input">
+              <input type="range" min="0" max="15" value="3" id="extRestDurationMax" class="dual-range-input">
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Randomized duration the bot rests during batch intervals.</div>
+          </div>
+
+          <!-- 5. Cursor Movement Speed (Delay) -->
+          <div class="setting-item" style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
+              <span>Cursor Movement Speed (Delay)</span>
+              <span id="valExtCursorSpeed" style="color:var(--blue-primary); font-weight:700;">450 ms (Natural)</span>
+            </div>
+            <input type="range" min="0" max="1500" step="50" value="450" id="extCursorSpeedSlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">How fast the virtual cursor travels to buttons (0ms instant – 1500ms slow human).</div>
+          </div>
+
+          <!-- 6. Comment Typing Delay -->
+          <div class="setting-item" style="margin-bottom:14px;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; margin-bottom:6px;">
+              <span>Comment Typing Delay</span>
+              <span id="valExtTypingDelay" style="color:var(--blue-primary); font-weight:700;">110 ms / char (Human)</span>
+            </div>
+            <input type="range" min="0" max="250" step="10" value="110" id="extTypingDelaySlider" class="ext-slider">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Typing cadence speed (0ms instant paste – 250ms slow human keystroke).</div>
           </div>
 
           <!-- Background Mode Toggle -->

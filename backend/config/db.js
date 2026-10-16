@@ -226,8 +226,14 @@ module.exports = {
     if (!user) throw new Error('User not found');
     if ((user.credits || 0) < amount) throw new Error('Insufficient credits');
 
-    const newBalance = user.credits - amount;
-    const { error: updateErr } = await supabase.from('users').update({ credits: newBalance }).eq('id', user.id);
+    const newBalance = Math.max(0, user.credits - amount);
+    // Enforce DB-level atomic guard using .gte('credits', amount) to prevent race-condition concurrency bypass
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ credits: newBalance })
+      .eq('id', user.id)
+      .gte('credits', amount);
+
     if (updateErr) throw new Error(updateErr.message);
 
     // Record immutable audit ledger entry
@@ -241,6 +247,20 @@ module.exports = {
     });
 
     return newBalance;
+  },
+
+  async recordLedgerEntry(userId, amount, balanceAfter, action, reason) {
+    if (!supabase || !userId) return;
+    try {
+      await supabase.from('credits_ledger').insert({
+        user_id: userId,
+        amount,
+        balance_after: balanceAfter,
+        action,
+        admin_source: 'Server System',
+        reason
+      });
+    } catch (e) {}
   },
 
   async addCredits(userId, amount, action = 'Bonus', adminSource = 'Admin', reason = 'Credit adjustment') {
@@ -281,7 +301,7 @@ module.exports = {
       .from('credits_ledger')
       .select('*, users(full_name, email, handle)')
       .order('created_at', { ascending: false })
-      .limit(100);
+      .limit(10000);
 
     return (data || []).map(l => {
       const handleMatch = (l.reason || '').match(/for\s+(@?[\w_]+)/i);

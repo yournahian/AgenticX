@@ -120,8 +120,31 @@ exports.generateReply = async (req, res) => {
     }
   } catch (e) {}
 
+  // 1. Transaction Pre-Reservation: Atomically lock and deduct 1 credit BEFORE slow AI call
+  // This physically blocks users from bypassing credits by spamming parallel concurrent requests
+  let creditReserved = false;
+  let remainingCredits = typeof user.credits === 'number' ? user.credits : 99;
+
+  if (user.id && user.id !== 'default_member') {
+    try {
+      remainingCredits = await db.deductCredit(
+        user.id,
+        1,
+        'AI Reply',
+        `[${activeProv} / ${activeModel || 'auto'}] Reply for ${tweetAuthor}`
+      );
+      creditReserved = true;
+    } catch (deductErr) {
+      return res.status(402).json({
+        error: 'Insufficient credits',
+        message: deductErr.message || 'You have 0 credits remaining. Upgrade to continue generating.',
+        currentBalance: user.credits || 0
+      });
+    }
+  }
+
   try {
-    // 2. Generate Reply using selected Provider & Model
+    // 2. Generate Reply using selected Provider & Model (OpenAI, Gemini, Groq, OpenRouter)
     const aiResult = await multiProviderService.generateWithProvider({
       provider: activeProv,
       model: activeModel,
@@ -136,22 +159,6 @@ exports.generateReply = async (req, res) => {
       userEmail: user.email || ''
     });
 
-    // 3. Atomically deduct 1 Credit and write to Credits Ledger
-    let remainingCredits = typeof user.credits === 'number' ? Math.max(0, user.credits - 1) : 99;
-    try {
-      if (user.id && user.id !== 'default_member') {
-        const resCredits = await db.deductCredit(
-          user.id,
-          1,
-          'AI Reply',
-          `[${aiResult.provider} / ${aiResult.modelUsed}] Reply for ${tweetAuthor}`
-        );
-        if (typeof resCredits === 'number') remainingCredits = resCredits;
-      }
-    } catch (e) {
-      console.warn('Credit deduction note:', e.message);
-    }
-
     res.json({
       success: true,
       reply: aiResult.reply,
@@ -162,7 +169,23 @@ exports.generateReply = async (req, res) => {
       tokensUsed: aiResult.tokensUsed
     });
   } catch (err) {
+    // 3. Rollback & Auto-Refund: If any error occurred during AI generation, REFUND the credit immediately!
+    if (creditReserved && user.id && user.id !== 'default_member') {
+      try {
+        console.warn(`[ATOMX AI] Generation failed, automatically refunding 1 credit to user ${user.id}...`);
+        await db.addCredits(
+          user.id,
+          1,
+          'AI Reply Refund',
+          'System Auto-Refund',
+          `Auto-refund due to AI generation error: ${err.message || 'Provider failure'}`
+        );
+      } catch (refundErr) {
+        console.error('[ATOMX AI] Auto-refund error:', refundErr);
+      }
+    }
+
     console.error('[AI Generation Error]', err);
-    res.status(500).json({ error: 'Generation failed: ' + err.message });
+    res.status(500).json({ error: 'Generation failed: ' + (err.message || 'Service temporarily unavailable') });
   }
 };

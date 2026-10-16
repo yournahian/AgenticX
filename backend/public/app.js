@@ -2702,7 +2702,9 @@ function renderAdminDashboard(container) {
   const suspendedUsers = users.filter(u => (u.status || '').toUpperCase() === 'SUSPENDED').length;
   const pendingCount = reqs.filter(r => (r.status || '').toUpperCase() === 'PENDING').length;
   const circulatingCredits = users.reduce((acc, u) => acc + (u.credits || 0), 0);
-  const totalAIGenerations = ledger.filter(l => (l.action || '').toLowerCase().includes('reply')).length;
+  const ledgerDeductionsCount = ledger.filter(l => l.amount < 0 || (l.action || '').toLowerCase().includes('reply') || (l.action || '').toLowerCase().includes('ai') || (l.reason || '').toLowerCase().includes('reply')).length;
+  const logsSuccessCount = logs.filter(l => l.status === 'SUCCESS' && (!l.statusCode || l.statusCode < 400)).length;
+  const totalAIGenerations = Math.max(ledgerDeductionsCount, logsSuccessCount, logs.length, AtomXState.adminStats?.totalAIGenerations || 0);
   
   // Real revenue from transactions
   const totalRevenue = txs.reduce((acc, t) => {
@@ -2714,37 +2716,88 @@ function renderAdminDashboard(container) {
   const latencies = logs.map(l => Number(l.latencyMs)).filter(n => !isNaN(n) && n > 0);
   const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) + 'ms' : '< 450ms';
 
-  // Calculate real daily throughput distribution over past 7 days from ledger & logs
+  // Multi-period throughput distribution calculation (All Time, 1Y, 1M, 7D, 1D Today)
+  const velocityFilter = AtomXState.velocityChartFilter || '7D';
+  const parseItemDate = (item) => {
+    const raw = item.created_at || item.date || (item.id && !isNaN(parseInt(item.id)) ? parseInt(item.id) : null);
+    if (!raw) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  const allEvents = [
+    ...ledger.filter(l => l.amount < 0 || (l.action || '').toLowerCase().includes('reply') || (l.action || '').toLowerCase().includes('ai') || (l.reason || '').toLowerCase().includes('reply')).map(l => ({ date: parseItemDate(l), type: 'ledger' })),
+    ...logs.map(l => ({ date: parseItemDate(l), type: 'log' }))
+  ].filter(e => e.date !== null);
+
   const now = new Date();
-  const past7Days = Array.from({ length: 7 }, (_, idx) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - (6 - idx));
-    const targetY = d.getFullYear();
-    const targetM = d.getMonth();
-    const targetD = d.getDate();
-    const dayStr = idx === 6 ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' });
+  let chartBars = [];
 
-    // Match ledger items on same calendar day
-    const ledgerMatches = ledger.filter(l => {
-      const ts = l.created_at ? new Date(l.created_at) : (l.date ? new Date(l.date) : null);
-      if (!ts || isNaN(ts.getTime())) return false;
-      return ts.getFullYear() === targetY && ts.getMonth() === targetM && ts.getDate() === targetD;
-    }).length;
-
-    // Match logs on same calendar day
-    const logMatches = logs.filter(l => {
-      let ts = null;
-      if (l.created_at) ts = new Date(l.created_at);
-      else if (l.id && !isNaN(parseInt(l.id))) ts = new Date(parseInt(l.id));
-      else if (l.date) ts = new Date(l.date);
-      if (!ts || isNaN(ts.getTime())) return false;
-      return ts.getFullYear() === targetY && ts.getMonth() === targetM && ts.getDate() === targetD;
-    }).length;
-
-    const count = ledgerMatches + logMatches;
-    return { day: dayStr, count, isToday: idx === 6 };
-  });
-  const maxDayCount = Math.max(1, ...past7Days.map(p => p.count));
+  if (velocityFilter === '1D') {
+    // Today by 4-hour slots
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const slots = [
+      { label: '00-04h', start: 0, end: 4 },
+      { label: '04-08h', start: 4, end: 8 },
+      { label: '08-12h', start: 8, end: 12 },
+      { label: '12-16h', start: 12, end: 16 },
+      { label: '16-20h', start: 16, end: 20 },
+      { label: '20-24h', start: 20, end: 24 }
+    ];
+    chartBars = slots.map(slot => {
+      const count = allEvents.filter(e => {
+        if (e.date < startOfToday) return false;
+        const h = e.date.getHours();
+        return h >= slot.start && h < slot.end;
+      }).length;
+      const isCurrent = now.getHours() >= slot.start && now.getHours() < slot.end;
+      return { day: slot.label, count, isToday: isCurrent };
+    });
+  } else if (velocityFilter === '1M') {
+    // 4 weeks of the past month
+    chartBars = Array.from({ length: 4 }, (_, idx) => {
+      const wStart = new Date(now);
+      wStart.setDate(wStart.getDate() - ((3 - idx) * 7));
+      const wEnd = new Date(wStart);
+      wEnd.setDate(wEnd.getDate() + 7);
+      const count = allEvents.filter(e => e.date >= wStart && e.date < wEnd).length;
+      return { day: `Wk ${idx + 1}`, count, isToday: idx === 3 };
+    });
+  } else if (velocityFilter === '1Y') {
+    // 12 monthly bars
+    chartBars = Array.from({ length: 12 }, (_, idx) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (11 - idx), 1);
+      const mNum = d.getMonth();
+      const yNum = d.getFullYear();
+      const count = allEvents.filter(e => e.date.getFullYear() === yNum && e.date.getMonth() === mNum).length;
+      const mStr = d.toLocaleDateString('en-US', { month: 'short' });
+      return { day: mStr, count, isToday: idx === 11 };
+    });
+  } else if (velocityFilter === 'ALL') {
+    // Lifetime across months
+    chartBars = Array.from({ length: 6 }, (_, idx) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - ((5 - idx) * 2), 1);
+      const count = allEvents.filter(e => {
+        const diffMonths = (now.getFullYear() - e.date.getFullYear()) * 12 + (now.getMonth() - e.date.getMonth());
+        return diffMonths >= (5 - idx) * 2 && diffMonths < (6 - idx) * 2;
+      }).length;
+      const mStr = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+      return { day: mStr, count, isToday: idx === 5 };
+    });
+  } else {
+    // '7D' (Default: 7 daily bars)
+    chartBars = Array.from({ length: 7 }, (_, idx) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - (6 - idx));
+      const targetY = d.getFullYear();
+      const targetM = d.getMonth();
+      const targetD = d.getDate();
+      const dayStr = idx === 6 ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' });
+      const count = allEvents.filter(e => e.date.getFullYear() === targetY && e.date.getMonth() === targetM && e.date.getDate() === targetD).length;
+      return { day: dayStr, count, isToday: idx === 6 };
+    });
+  }
+  const maxDayCount = Math.max(1, ...chartBars.map(p => p.count));
 
   // Compute Model Reliability & Telemetry breakdown
   const modelStatsMap = {};
@@ -2903,16 +2956,25 @@ function renderAdminDashboard(container) {
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:20px; margin-bottom:24px;">
             <!-- Generation Throughput Visual Graph -->
             <div class="atomx-card">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
                 <div>
                   <h3 style="font-size:15px; font-weight:700; margin:0;">📊 AI Generation & Activity Velocity</h3>
-                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Throughput distribution across past 7 days (Ledger + Telemetry)</div>
+                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Throughput distribution (${velocityFilter === 'ALL' ? 'All-Time' : velocityFilter === '1Y' ? 'Past 12 Months' : velocityFilter === '1M' ? 'Past 30 Days' : velocityFilter === '1D' ? 'Today (Hourly)' : 'Past 7 Days (Daily)'})</div>
                 </div>
-                <span class="badge badge-primary" style="font-size:10px;">${totalAIGenerations} Total Deductions</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div style="display:inline-flex; background:var(--bg-canvas); padding:2px; border-radius:6px; border:1px solid var(--border-subtle); font-size:11px;">
+                    <button class="btn btn-xs ${velocityFilter === '1D' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '1D' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1D')">Today</button>
+                    <button class="btn btn-xs ${velocityFilter === '7D' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '7D' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('7D')">7D</button>
+                    <button class="btn btn-xs ${velocityFilter === '1M' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '1M' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1M')">1M</button>
+                    <button class="btn btn-xs ${velocityFilter === '1Y' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '1Y' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1Y')">1Y</button>
+                    <button class="btn btn-xs ${velocityFilter === 'ALL' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === 'ALL' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('ALL')">All Time</button>
+                  </div>
+                  <span class="badge badge-primary" style="font-size:10px;">${totalAIGenerations.toLocaleString()} Lifetime</span>
+                </div>
               </div>
               <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:8px; padding:16px; min-height:160px; display:flex; flex-direction:column; justify-content:space-between;">
                 <div style="display:flex; align-items:flex-end; justify-content:space-between; height:120px; gap:8px; padding-top:10px;">
-                  ${past7Days.map(({ day, count, isToday }) => {
+                  ${chartBars.map(({ day, count, isToday }) => {
                     const hPercent = count === 0 ? 8 : Math.max(16, Math.min(100, Math.round((count / maxDayCount) * 100)));
                     const barColor = isToday ? 'linear-gradient(180deg, #10b981 0%, rgba(16,185,129,0.3) 100%)' : 'linear-gradient(180deg, var(--blue-primary) 0%, rgba(59,130,246,0.3) 100%)';
                     return `
@@ -2966,10 +3028,10 @@ function renderAdminDashboard(container) {
                 <div style="background:var(--bg-canvas); border:1px solid var(--border-subtle); border-radius:8px; padding:12px; margin-top:2px; font-size:11.5px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <span style="font-weight:700; color:var(--text-primary);">Model Telemetry:</span>
-                    <select class="form-control" style="font-size:11px; padding:2px 8px; width:auto; height:26px;" onchange="window.handleModelTelemetryFilterChange(this.value)">
-                      <option value="ALL" ${activeModelFilter === 'ALL' ? 'selected' : ''}>All Models (${logs.length} calls)</option>
+                    <select class="form-control" style="font-size:11px; padding:3px 8px; width:auto; height:28px; background:#111827; color:#F3F4F6; border:1px solid rgba(255,255,255,0.18); border-radius:6px; outline:none; cursor:pointer;" onchange="window.handleModelTelemetryFilterChange(this.value)">
+                      <option value="ALL" style="background:#111827; color:#F3F4F6;" ${activeModelFilter === 'ALL' ? 'selected' : ''}>All Models (${logs.length} calls)</option>
                       ${uniqueModelsList.map(m => `
-                        <option value="${escapeHtml(m)}" ${activeModelFilter === m ? 'selected' : ''}>${escapeHtml(m)} (${modelStatsMap[m].total})</option>
+                        <option value="${escapeHtml(m)}" style="background:#111827; color:#F3F4F6;" ${activeModelFilter === m ? 'selected' : ''}>${escapeHtml(m)} (${modelStatsMap[m].total})</option>
                       `).join('')}
                     </select>
                   </div>
@@ -3042,6 +3104,13 @@ function renderAdminDashboard(container) {
     </div>
   `;
 }
+
+window.setVelocityChartFilter = function(filter) {
+  AtomXState.velocityChartFilter = filter;
+  if (AtomXState.currentScreen === '12') {
+    renderCurrentScreen();
+  }
+};
 
 window.handleModelTelemetryFilterChange = function(modelName) {
   AtomXState.activeModelFilter = modelName;

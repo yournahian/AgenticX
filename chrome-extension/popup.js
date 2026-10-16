@@ -844,6 +844,21 @@ function updateTelegramProgressUI(raidState) {
         tgCountdown.style.display = 'none';
       }
     }
+  } else if (raidState.stateBadge === 'DAILY_LIMIT' || raidState.stateBadge === 'DAILY LIMIT' || raidState.stateBadge === 'RATE_LIMITED') {
+    if (runBtn) { runBtn.style.display = 'inline-flex'; runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
+    if (cleanBtn) cleanBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (tgStateBadge) {
+      tgStateBadge.textContent = raidState.stateBadge.replace('_', ' ');
+      tgStateBadge.style.background = 'rgba(239, 68, 68, 0.25)';
+      tgStateBadge.style.color = '#EF4444';
+      tgStateBadge.style.border = '1px solid rgba(239, 68, 68, 0.6)';
+    }
+    if (tgStatus) tgStatus.textContent = raidState.statusText || '🛑 Stopped: Twitter Daily Post Limit reached.';
+    if (tgCountdown) tgCountdown.style.display = 'none';
   } else if (raidState.isStopped) {
     if (runBtn) { runBtn.style.display = 'inline-flex'; runBtn.disabled = false; runBtn.textContent = '▶ Launch'; }
     if (cleanBtn) cleanBtn.style.display = 'inline-flex';
@@ -904,9 +919,9 @@ function updateAgentWorkflowProgressUI(wf) {
       resetBtn: 'resetReplyBackQueueBtn'
     },
     unfollow: {
-      card: 'unfollowProgressCard', badge: 'unfollowStateBadge', ind: null,
-      done: 'unfollowCountSuccess', col: 'unfollowCountTotal', skip: 'unfollowCountFailed',
-      bar: null, status: 'unfollowLiveStatusText', cd: 'unfollowCountdownText',
+      card: 'unfollowProgressCard', badge: 'unfollowStateBadge', ind: 'unfollowProgressText',
+      done: 'unfollowCountDone', col: null, skip: 'unfollowCountSkipped',
+      bar: 'unfollowProgressBar', status: 'unfollowLiveStatusText', cd: 'unfollowCountdownText',
       startBtn: 'runAutoUnfollowBtn', stopBtn: 'stopAutoUnfollowBtn',
       pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn',
       resetBtn: 'resetUnfollowQueueBtn'
@@ -935,6 +950,14 @@ function updateAgentWorkflowProgressUI(wf) {
       pauseBtn: 'pauseNicheEngagerBtn', skipBtn: 'skipNicheEngagerBtn',
       resetBtn: 'resetNicheEngagerBtn'
     },
+    tgliker: {
+      card: 'tgLikerProgressCard', badge: 'tgLikerStateBadge', ind: 'tgLikerQueueIndicator',
+      done: 'tgLikerCountLiked', col: 'tgLikerCountReposted', skip: 'tgLikerCountSkipped',
+      bar: 'tgLikerProgressBar', status: 'tgLikerLiveStatusText', cd: 'tgLikerCountdownText',
+      startBtn: 'runTgLikerBtn', stopBtn: 'stopTgLikerBtn',
+      pauseBtn: 'pauseTgLikerBtn', skipBtn: 'skipTgLikerBtn',
+      resetBtn: 'resetTgLikerBtn'
+    },
     tg: {
       card: 'telegramProgressCard', badge: 'tgStateBadge', ind: null,
       done: 'tgDoneCount', col: 'tgTotalCount', skip: 'tgSkippedCount',
@@ -956,6 +979,7 @@ function updateAgentWorkflowProgressUI(wf) {
     else if (t.includes('reciprocator')) agentId = 'reciprocator';
     else if (t.includes('feed') || t.includes('home')) agentId = 'feedengager';
     else if (t.includes('niche')) agentId = 'nicheengager';
+    else if (t.includes('tgliker') || t.includes('tg liker') || t.includes('raid')) agentId = 'tgliker';
   }
   if (!agentId) {
     const activePanel = document.querySelector('.agent-panel-content:not([style*="display: none"])');
@@ -989,15 +1013,85 @@ function updateAgentWorkflowProgressUI(wf) {
   const done = (wf.successCount !== undefined) ? wf.successCount : (wf.done || 0);
   const skipped = (wf.ignoredCount !== undefined) ? wf.ignoredCount : (wf.skipped || 0);
 
-  if (ind) ind.textContent = `${(agentId === 'replyback') ? 'Reply' : ((agentId === 'sorsa') ? 'Account' : 'Profile')} ${Math.min(current + 1, total)}/${total}`;
+  const targetLabel = (agentId === 'replyback') ? 'Reply' : ((agentId === 'sorsa') ? 'Account' : ((agentId === 'feedengager' || agentId === 'nicheengager' || agentId === 'tgliker') ? 'Post' : 'Profile'));
+  const currentStep = (done + skipped >= total) ? total : Math.min(Math.max(current + 1, done + skipped + 1), total);
+  if (ind) ind.textContent = `${targetLabel} ${done + skipped >= total ? `${total}/${total}` : `${currentStep}/${total}`}`;
   if (doneEl) doneEl.textContent = String(done);
   if (colEl) colEl.textContent = String(total);
   if (skipEl) skipEl.textContent = String(skipped);
+  if (agentId === 'tgliker') {
+    const lkEl = document.getElementById('tgLikerCountLiked');
+    const rpEl = document.getElementById('tgLikerCountReposted');
+    const bmEl = document.getElementById('tgLikerCountBookmarked');
+    if (lkEl && wf.liked !== undefined) lkEl.textContent = String(wf.liked);
+    if (rpEl && wf.reposted !== undefined) rpEl.textContent = String(wf.reposted);
+    if (bmEl && wf.bookmarked !== undefined) bmEl.textContent = String(wf.bookmarked);
+  }
 
-  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-  if (bar) bar.style.width = `${wf.active ? Math.max(5, pct) : (done + skipped >= total ? 100 : pct)}%`;
+  const isWorkflowRateLimited = wf.stateBadge === 'DAILY_LIMIT' || wf.stateBadge === 'DAILY LIMIT' || wf.stateBadge === 'RATE_LIMITED';
+  const isWorkflowCompleted = !isWorkflowRateLimited && (wf.stateBadge === 'DONE' || (done + skipped >= total && total > 0));
+  const isWorkflowStopped = !isWorkflowRateLimited && (wf.isStopped || wf.stateBadge === 'STOPPED');
 
-  if (wf.active) {
+  if (isWorkflowRateLimited) {
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    if (badge) {
+      badge.textContent = wf.stateBadge.replace('_', ' ');
+      badge.style.background = 'rgba(239, 68, 68, 0.25)';
+      badge.style.color = '#EF4444';
+      badge.style.border = '1px solid rgba(239, 68, 68, 0.6)';
+    }
+    if (status) status.textContent = wf.statusText || '🛑 Stopped: Twitter Daily Post Limit reached.';
+    if (cd) cd.style.display = 'none';
+  } else if (isWorkflowCompleted) {
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    if (badge) {
+      badge.textContent = 'DONE';
+      badge.style.background = 'rgba(16, 185, 129, 0.2)';
+      badge.style.color = '#10B981';
+      badge.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+    }
+    if (status) status.textContent = wf.statusText || `✓ Completed! ${done} processed, ${skipped} skipped.`;
+    if (cd) cd.style.display = 'none';
+    if (bar) bar.style.width = '100%';
+    if (agentId === 'tgliker') {
+      const contBox = document.getElementById('tgLikerContinueBox');
+      const contInfo = document.getElementById('tgLikerContinueInfo');
+      if (contBox) contBox.style.display = 'flex';
+      if (contInfo) contInfo.textContent = `${done} previously handled`;
+    }
+  } else if (isWorkflowStopped) {
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (resetBtn) resetBtn.style.display = 'inline-flex';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    if (badge) {
+      badge.textContent = 'STOPPED';
+      badge.style.background = 'rgba(100, 116, 139, 0.2)';
+      badge.style.color = '#94A3B8';
+      badge.style.border = '1px solid rgba(100, 116, 139, 0.4)';
+    }
+    if (status) status.textContent = wf.statusText || 'Workflow stopped by user.';
+    if (cd) cd.style.display = 'none';
+    if (agentId === 'tgliker') {
+      const contBox = document.getElementById('tgLikerContinueBox');
+      const contInfo = document.getElementById('tgLikerContinueInfo');
+      if (contBox) contBox.style.display = 'flex';
+      if (contInfo) contInfo.textContent = `${done} previously handled`;
+    }
+  } else if (wf.active) {
+    if (agentId === 'tgliker') {
+      const contBox = document.getElementById('tgLikerContinueBox');
+      if (contBox) contBox.style.display = 'none';
+    }
     if (startBtn) startBtn.style.display = 'none';
     if (resetBtn) resetBtn.style.display = 'none';
     if (stopBtn) stopBtn.style.display = 'inline-flex';
@@ -1011,7 +1105,12 @@ function updateAgentWorkflowProgressUI(wf) {
       pauseBtn.style.color = wf.isPaused ? '#D1FAE5' : '#FEF3C7';
     }
     if (skipBtn) skipBtn.style.display = 'inline-flex';
-    if (badge) badge.textContent = wf.isPaused ? 'PAUSED' : (wf.stateBadge || 'RUNNING');
+    if (badge) {
+      badge.textContent = wf.isPaused ? 'PAUSED' : (wf.stateBadge || 'RUNNING');
+      badge.style.background = wf.isPaused ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.15)';
+      badge.style.color = wf.isPaused ? '#FBBF24' : '#10B981';
+      badge.style.border = wf.isPaused ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid rgba(16, 185, 129, 0.4)';
+    }
     if (status && wf.statusText) status.textContent = wf.statusText;
     if (cd) {
       if (wf.countdownText) {
@@ -1021,25 +1120,8 @@ function updateAgentWorkflowProgressUI(wf) {
         cd.style.display = 'none';
       }
     }
-  } else if (wf.isStopped || wf.stateBadge === 'STOPPED') {
-    if (startBtn) startBtn.style.display = 'inline-flex';
-    if (resetBtn) resetBtn.style.display = 'inline-flex';
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (pauseBtn) pauseBtn.style.display = 'none';
-    if (skipBtn) skipBtn.style.display = 'none';
-    if (badge) badge.textContent = 'STOPPED';
-    if (status) status.textContent = wf.statusText || 'Workflow stopped by user.';
-    if (cd) cd.style.display = 'none';
-  } else if (done + skipped >= total && total > 0) {
-    if (startBtn) startBtn.style.display = 'inline-flex';
-    if (resetBtn) resetBtn.style.display = 'inline-flex';
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (pauseBtn) pauseBtn.style.display = 'none';
-    if (skipBtn) skipBtn.style.display = 'none';
-    if (badge) badge.textContent = 'DONE';
-    if (status) status.textContent = `✓ Completed! ${done} processed, ${skipped} skipped.`;
-    if (cd) cd.style.display = 'none';
-    if (bar) bar.style.width = '100%';
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    if (bar) bar.style.width = `${Math.max(5, pct)}%`;
   }
 }
 
@@ -1051,6 +1133,8 @@ function updateAllStopButtonsUI() {
     { startBtn: 'runReplyBackBtn', resetBtn: 'resetReplyBackQueueBtn', stopBtn: 'stopReplyBackBtn', pauseBtn: 'pauseReplyBackBtn', skipBtn: 'skipReplyBackBtn', badge: 'replyBackStateBadge', status: 'replyBackLiveStatusText' },
     { startBtn: 'runAutoUnfollowBtn', resetBtn: 'resetUnfollowQueueBtn', stopBtn: 'stopAutoUnfollowBtn', pauseBtn: 'pauseAutoUnfollowBtn', skipBtn: 'skipAutoUnfollowBtn', badge: 'unfollowStateBadge', status: 'unfollowLiveStatusText' },
     { startBtn: 'runReciprocatorBtn', resetBtn: 'resetReciprocatorQueueBtn', stopBtn: 'stopReciprocatorBtn', pauseBtn: 'pauseReciprocatorBtn', skipBtn: 'skipReciprocatorBtn', badge: 'reciprocatorStateBadge', status: 'reciprocatorLiveStatusText' },
+    { startBtn: 'runFeedEngagerBtn', resetBtn: 'resetFeedEngagerBtn', stopBtn: 'stopFeedEngagerBtn', pauseBtn: 'pauseFeedEngagerBtn', skipBtn: 'skipFeedEngagerBtn', badge: 'feedEngagerStateBadge', status: 'feedEngagerLiveStatusText' },
+    { startBtn: 'runNicheEngagerBtn', resetBtn: 'resetNicheEngagerBtn', stopBtn: 'stopNicheEngagerBtn', pauseBtn: 'pauseNicheEngagerBtn', skipBtn: 'skipNicheEngagerBtn', badge: 'nicheEngagerStateBadge', status: 'nicheEngagerLiveStatusText' },
     { startBtn: 'runTgEngageBtn', resetBtn: 'resetTelegramQueueBtn', cleanBtn: 'cleanTgInputBtn', stopBtn: 'stopTgEngageBtn', pauseBtn: 'pauseTgEngageBtn', skipBtn: 'skipTgEngageBtn', badge: 'tgStateBadge', status: 'tgLiveStatus' }
   ];
 
@@ -1153,11 +1237,16 @@ async function handleToggleWorkflowPause() {
     }
   }
 
+  const tglData = await chrome.storage.local.get(['tgl_ctrl']).catch(() => ({}));
+  const prevTglCtrl = tglData?.tgl_ctrl || { runId: 0 };
+  const newTglCtrl = { ...prevTglCtrl, state: newPaused ? 'paused' : 'running' };
+
   await chrome.storage.local.set({
     atomx_workflow_paused: newPaused,
     atomx_agent_workflow: wf || null,
     atomx_active_hud: hud || null,
-    atomx_tg_raid: tg || null
+    atomx_tg_raid: tg || null,
+    tgl_ctrl: newTglCtrl
   }).catch(() => null);
 
   chrome.runtime.sendMessage({ type: 'TOGGLE_WORKFLOW_PAUSE', isPaused: newPaused }).catch(() => null);
@@ -1168,7 +1257,12 @@ async function handleToggleWorkflowPause() {
   showExtToast(newPaused ? 'Workflow Paused' : 'Workflow Resumed', newPaused ? '⏸️' : '▶️');
 }
 
+let isPopupSkipDebouncing = false;
 async function handleSkipWorkflowItem() {
+  if (isPopupSkipDebouncing) return;
+  isPopupSkipDebouncing = true;
+  setTimeout(() => { isPopupSkipDebouncing = false; }, 500);
+
   await chrome.storage.local.set({ atomx_skip_current: true }).catch(() => null);
 
   chrome.storage.local.get(['atomx_agent_workflow', 'atomx_active_hud'], (res) => {
@@ -1202,8 +1296,46 @@ async function handleSkipWorkflowItem() {
   showExtToast('Skipping current item...', '⏭️');
 }
 
+function syncRateLimitBannerUI() {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+  chrome.storage.local.get(['atomx_daily_post_limit', 'atomx_rate_limited'], (res) => {
+    const banner = document.getElementById('rateLimitWarningBanner');
+    const titleEl = document.getElementById('rateLimitBannerTitle');
+    const descEl = document.getElementById('rateLimitBannerDesc');
+    if (!banner) return;
+
+    const daily = res?.atomx_daily_post_limit;
+    const rate = res?.atomx_rate_limited;
+
+    if (daily && daily.active) {
+      if (titleEl) titleEl.textContent = 'Twitter Daily Post Limit Reached';
+      if (descEl) {
+        descEl.innerHTML = `<strong>You've hit the daily post limit on Twitter.</strong><br>` +
+          `Twitter response: <em style="color:#FEF08A;">"${daily.reason || "You've hit the daily post limit. Subscribe to Premium for higher limits."}"</em><br>` +
+          `All active tasks have been automatically stopped immediately to protect your account.<br>` +
+          `<span style="font-size:10px; color:#E2E8F0; margin-top:3px; display:inline-block;">👉 Twitter limits daily posts/replies. Please wait until your limit resets before restarting automation.</span>`;
+      }
+      banner.style.display = 'block';
+    } else if (rate && rate.active) {
+      if (titleEl) titleEl.textContent = 'Twitter Rate Limit Encountered';
+      if (descEl) {
+        descEl.innerHTML = `<strong>Twitter rate limit encountered.</strong><br>` +
+          `Twitter response: <em style="color:#FEF08A;">"${rate.reason || 'Rate limit active'}"</em><br>` +
+          `All active tasks have been automatically stopped.<br>` +
+          `<span style="font-size:10px; color:#E2E8F0; margin-top:3px; display:inline-block;">👉 Please wait a few minutes for cooldown before restarting automation.</span>`;
+      }
+      banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+    }
+  });
+}
+
 function initBackgroundWorkflowSync() {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return;
+
+  // Hydrate rate limit banner on popup open
+  syncRateLimitBannerUI();
 
   // Hydrate current state on popup open
   chrome.storage.local.get(['atomx_tg_raid', 'atomx_agent_workflow', 'atomx_active_hud', 'atomx_workflow_paused'], (res) => {
@@ -1247,9 +1379,19 @@ function initBackgroundWorkflowSync() {
     chrome.storage.local.remove('atomx_account_lock_warning').catch(() => null);
   });
 
+  // Wire close button on rate limit / daily limit banner inside popup
+  document.getElementById('closeRateLimitBannerBtn')?.addEventListener('click', () => {
+    const banner = document.getElementById('rateLimitWarningBanner');
+    if (banner) banner.style.display = 'none';
+    chrome.storage.local.remove(['atomx_daily_post_limit', 'atomx_rate_limited']).catch(() => null);
+  });
+
   // Listen to background updates in real-time
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.atomx_daily_post_limit || changes.atomx_rate_limited) {
+      syncRateLimitBannerUI();
+    }
     if (changes.atomx_account_lock_warning) {
       const w = changes.atomx_account_lock_warning.newValue;
       const banner = document.getElementById('accountMismatchBanner');
@@ -1272,9 +1414,13 @@ function initBackgroundWorkflowSync() {
     if (changes.atomx_tg_raid && changes.atomx_tg_raid.newValue) {
       updateTelegramProgressUI(changes.atomx_tg_raid.newValue);
     }
+    if (changes.engagedTweetIds && Array.isArray(changes.engagedTweetIds.newValue)) {
+      state.engagedTweetIds = changes.engagedTweetIds.newValue;
+      updateTgParseSummaryUI();
+    }
     const wf = changes.atomx_agent_workflow?.newValue || changes.atomx_active_hud?.newValue;
     if (wf) {
-      if (wf.isStopped || wf.stateBadge === 'STOPPED') {
+      if (wf.isStopped || wf.stateBadge === 'STOPPED' || wf.stateBadge === 'DAILY_LIMIT' || wf.stateBadge === 'RATE_LIMITED' || wf.stateBadge === 'DAILY LIMIT') {
         updateAllStopButtonsUI();
       }
       updateAgentWorkflowProgressUI(wf);
@@ -1589,12 +1735,14 @@ function renderTonePills() {
   const recipVoiceLabel = document.getElementById('reciprocatorActiveToneLabel');
   const feedVoiceLabel = document.getElementById('feedActiveToneLabel');
   const nicheVoiceLabel = document.getElementById('nicheActiveToneLabel');
+  const unfollowVoiceLabel = document.getElementById('unfollowActiveToneLabel');
   if (tgVoiceLabel) tgVoiceLabel.textContent = activeVoiceText;
   if (sorsaVoiceLabel) sorsaVoiceLabel.textContent = activeVoiceText;
   if (followerVoiceLabel) followerVoiceLabel.textContent = activeVoiceText;
   if (recipVoiceLabel) recipVoiceLabel.textContent = activeVoiceText;
   if (feedVoiceLabel) feedVoiceLabel.textContent = activeVoiceText;
   if (nicheVoiceLabel) nicheVoiceLabel.textContent = activeVoiceText;
+  if (unfollowVoiceLabel) unfollowVoiceLabel.textContent = activeVoiceText;
 
   // Update limit display in drawer
   state.maxCustomTemplates = getPlanMaxCustomTones(state.userPlan);
@@ -1808,58 +1956,131 @@ function initListeners() {
   // Fetch Live Models
   document.getElementById('extFetchModelsBtn')?.addEventListener('click', fetchLiveModels);
 
-  // Centralized Anti-Ban Safety Controls
-  const replyDelaySlider = document.getElementById('extReplyDelaySlider');
-  if (replyDelaySlider) {
-    replyDelaySlider.addEventListener('input', (e) => {
-      const v = Number(e.target.value);
-      const valEl = document.getElementById('valExtReplyDelay');
-      if (valEl) valEl.textContent = `${Math.max(3, v - 2)} - ${v + 4} sec`;
+  // Universal Centralized Safety Settings Sampling Helpers
+  function getSafetyPacingDelay(safety, type = 'replyDelay', fallbackMin = 3, fallbackMax = 8) {
+    if (!safety) return Math.floor(fallbackMin + Math.random() * (fallbackMax - fallbackMin + 1));
+    const minKey = `${type}Min`;
+    const maxKey = `${type}Max`;
+    let min = safety[minKey] !== undefined ? Number(safety[minKey]) : (safety[type] !== undefined ? Number(safety[type]) : fallbackMin);
+    let max = safety[maxKey] !== undefined ? Number(safety[maxKey]) : (safety[type] !== undefined ? Number(safety[type]) : fallbackMax);
+    if (min === 0 && max === 0) return 0; // Strictly respect 0s delay when user configured 0
+    if (min > max) [min, max] = [max, min];
+    return Math.floor(min + Math.random() * (max - min + 1));
+  }
+
+  function getSafetyBatchBreakActions(safety, fallbackMin = 10, fallbackMax = 15) {
+    if (!safety) return fallbackMax;
+    let min = safety.breakActionsMin !== undefined ? Number(safety.breakActionsMin) : (safety.breakActions !== undefined ? Number(safety.breakActions) : fallbackMin);
+    let max = safety.breakActionsMax !== undefined ? Number(safety.breakActionsMax) : (safety.breakActions !== undefined ? Number(safety.breakActions) : fallbackMax);
+    if (min === 0 && max === 0) return 0; // 0 means Take Break After is completely DISABLED!
+    if (min > max) [min, max] = [max, min];
+    const chosen = Math.floor(min + Math.random() * (max - min + 1));
+    return chosen <= 0 ? 0 : chosen;
+  }
+
+  function getSafetyRestDurationSec(safety, fallbackMinMin = 1, fallbackMaxMin = 3) {
+    if (!safety) return 60;
+    let min = safety.restDurationMin !== undefined ? Number(safety.restDurationMin) : (safety.restDuration !== undefined ? Number(safety.restDuration) : fallbackMinMin);
+    let max = safety.restDurationMax !== undefined ? Number(safety.restDurationMax) : (safety.restDuration !== undefined ? Number(safety.restDuration) : fallbackMinMin);
+    if (min > max) [min, max] = [max, min];
+    const chosenMin = min + Math.random() * (max - min);
+    return Math.max(5, Math.round(chosenMin * 60));
+  }
+
+  // Centralized Anti-Ban Safety Controls (Dual Thumb Ranges + Cursor/Typing Controls)
+  function initDualRange(minId, maxId, highlightId, valId, unit, storageKeyMin, storageKeyMax, defaultMin, defaultMax) {
+    const minEl = document.getElementById(minId);
+    const maxEl = document.getElementById(maxId);
+    const highlightEl = document.getElementById(highlightId);
+    const valEl = document.getElementById(valId);
+    if (!minEl || !maxEl) return;
+
+    function render(minVal, maxVal) {
+      const minLimit = parseFloat(minEl.min);
+      const maxLimit = parseFloat(minEl.max);
+      const totalRange = maxLimit - minLimit || 1;
+      const leftPct = Math.max(0, Math.min(100, ((minVal - minLimit) / totalRange) * 100));
+      const rightPct = Math.max(0, Math.min(100, 100 - (((maxVal - minLimit) / totalRange) * 100)));
+      if (highlightEl) {
+        highlightEl.style.left = `${leftPct}%`;
+        highlightEl.style.right = `${rightPct}%`;
+      }
+      if (valEl) {
+        valEl.textContent = `${minVal} - ${maxVal} ${unit}`;
+      }
+    }
+
+    function onMinChange() {
+      let minVal = parseFloat(minEl.value);
+      let maxVal = parseFloat(maxEl.value);
+      if (minVal > maxVal) {
+        maxVal = minVal;
+        maxEl.value = maxVal;
+      }
+      render(minVal, maxVal);
+      save();
+    }
+
+    function onMaxChange() {
+      let minVal = parseFloat(minEl.value);
+      let maxVal = parseFloat(maxEl.value);
+      if (maxVal < minVal) {
+        minVal = maxVal;
+        minEl.value = minVal;
+      }
+      render(minVal, maxVal);
+      save();
+    }
+
+    function save() {
+      const minVal = parseFloat(minEl.value);
+      const maxVal = parseFloat(maxEl.value);
       chrome.storage.local.get(['atomx_safety_settings'], res => {
         const s = res?.atomx_safety_settings || {};
-        s.replyDelay = v;
+        s[storageKeyMin] = minVal;
+        s[storageKeyMax] = maxVal;
+        // Keep single keys for backward compatibility
+        if (storageKeyMin.startsWith('replyDelay')) s.replyDelay = maxVal;
+        if (storageKeyMin.startsWith('profileWait')) s.profileWait = maxVal;
+        if (storageKeyMin.startsWith('breakActions')) s.breakActions = maxVal;
+        if (storageKeyMin.startsWith('restDuration')) s.restDuration = maxVal;
+        chrome.storage.local.set({ atomx_safety_settings: s });
+      });
+    }
+
+    minEl.addEventListener('input', onMinChange);
+    maxEl.addEventListener('input', onMaxChange);
+
+    render(parseFloat(minEl.value), parseFloat(maxEl.value));
+  }
+
+  const cursorSpeedSlider = document.getElementById('extCursorSpeedSlider');
+  const valExtCursorSpeed = document.getElementById('valExtCursorSpeed');
+  if (cursorSpeedSlider) {
+    cursorSpeedSlider.addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      if (valExtCursorSpeed) {
+        valExtCursorSpeed.textContent = (v === 0) ? '0 ms (Instant)' : (v <= 250 ? `${v} ms (Fast)` : (v <= 650 ? `${v} ms (Natural)` : `${v} ms (Cinematic)`));
+      }
+      chrome.storage.local.get(['atomx_safety_settings'], res => {
+        const s = res?.atomx_safety_settings || {};
+        s.cursorSpeed = v;
         chrome.storage.local.set({ atomx_safety_settings: s });
       });
     });
   }
 
-  const profileWaitSlider = document.getElementById('extProfileWaitSlider');
-  if (profileWaitSlider) {
-    profileWaitSlider.addEventListener('input', (e) => {
+  const typingDelaySlider = document.getElementById('extTypingDelaySlider');
+  const valExtTypingDelay = document.getElementById('valExtTypingDelay');
+  if (typingDelaySlider) {
+    typingDelaySlider.addEventListener('input', (e) => {
       const v = Number(e.target.value);
-      const valEl = document.getElementById('valExtProfileWait');
-      if (valEl) valEl.textContent = `${Math.max(5, v - 3)} - ${v + 5} sec`;
+      if (valExtTypingDelay) {
+        valExtTypingDelay.textContent = (v === 0) ? '0 ms (Instant Paste)' : (v <= 60 ? `${v} ms/char (Fast)` : (v <= 140 ? `${v} ms/char (Human)` : `${v} ms/char (Careful)`));
+      }
       chrome.storage.local.get(['atomx_safety_settings'], res => {
         const s = res?.atomx_safety_settings || {};
-        s.profileWait = v;
-        chrome.storage.local.set({ atomx_safety_settings: s });
-      });
-    });
-  }
-
-  const breakActionsSlider = document.getElementById('extBreakActionsSlider');
-  if (breakActionsSlider) {
-    breakActionsSlider.addEventListener('input', (e) => {
-      const v = Number(e.target.value);
-      const valEl = document.getElementById('valExtBreakActions');
-      if (valEl) valEl.textContent = `${v} actions`;
-      chrome.storage.local.get(['atomx_safety_settings'], res => {
-        const s = res?.atomx_safety_settings || {};
-        s.breakActions = v;
-        chrome.storage.local.set({ atomx_safety_settings: s });
-      });
-    });
-  }
-
-  const restDurationSlider = document.getElementById('extRestDurationSlider');
-  if (restDurationSlider) {
-    restDurationSlider.addEventListener('input', (e) => {
-      const v = Number(e.target.value);
-      const valEl = document.getElementById('valExtRestDuration');
-      if (valEl) valEl.textContent = `${v} minutes`;
-      chrome.storage.local.get(['atomx_safety_settings'], res => {
-        const s = res?.atomx_safety_settings || {};
-        s.restDuration = v;
+        s.typingDelay = v;
         chrome.storage.local.set({ atomx_safety_settings: s });
       });
     });
@@ -1867,27 +2088,59 @@ function initListeners() {
 
   // Restore saved safety settings
   chrome.storage.local.get(['atomx_safety_settings'], res => {
-    const s = res?.atomx_safety_settings;
-    if (s) {
-      if (s.replyDelay && replyDelaySlider) {
-        replyDelaySlider.value = s.replyDelay;
-        const valEl = document.getElementById('valExtReplyDelay');
-        if (valEl) valEl.textContent = `${Math.max(3, s.replyDelay - 2)} - ${s.replyDelay + 4} sec`;
+    const s = res?.atomx_safety_settings || {};
+
+    // Restore Reply Delay (min - max)
+    const replyMinEl = document.getElementById('extReplyDelayMin');
+    const replyMaxEl = document.getElementById('extReplyDelayMax');
+    const rMin = s.replyDelayMin !== undefined ? s.replyDelayMin : (s.replyDelay ? Math.max(0, s.replyDelay - 3) : 3);
+    const rMax = s.replyDelayMax !== undefined ? s.replyDelayMax : (s.replyDelay || 6);
+    if (replyMinEl) replyMinEl.value = rMin;
+    if (replyMaxEl) replyMaxEl.value = rMax;
+    initDualRange('extReplyDelayMin', 'extReplyDelayMax', 'highlightReplyDelay', 'valExtReplyDelay', 'sec', 'replyDelayMin', 'replyDelayMax', 3, 6);
+
+    // Restore Profile Wait (min - max)
+    const profMinEl = document.getElementById('extProfileWaitMin');
+    const profMaxEl = document.getElementById('extProfileWaitMax');
+    const pMin = s.profileWaitMin !== undefined ? s.profileWaitMin : (s.profileWait ? Math.max(0, s.profileWait - 5) : 10);
+    const pMax = s.profileWaitMax !== undefined ? s.profileWaitMax : (s.profileWait || 20);
+    if (profMinEl) profMinEl.value = pMin;
+    if (profMaxEl) profMaxEl.value = pMax;
+    initDualRange('extProfileWaitMin', 'extProfileWaitMax', 'highlightProfileWait', 'valExtProfileWait', 'sec', 'profileWaitMin', 'profileWaitMax', 10, 20);
+
+    // Restore Break Actions (min - max)
+    const brkMinEl = document.getElementById('extBreakActionsMin');
+    const brkMaxEl = document.getElementById('extBreakActionsMax');
+    const bMin = s.breakActionsMin !== undefined ? s.breakActionsMin : (s.breakActions ? Math.max(0, s.breakActions - 5) : 10);
+    const bMax = s.breakActionsMax !== undefined ? s.breakActionsMax : (s.breakActions || 15);
+    if (brkMinEl) brkMinEl.value = bMin;
+    if (brkMaxEl) brkMaxEl.value = bMax;
+    initDualRange('extBreakActionsMin', 'extBreakActionsMax', 'highlightBreakActions', 'valExtBreakActions', 'actions', 'breakActionsMin', 'breakActionsMax', 10, 15);
+
+    // Restore Rest Duration (min - max)
+    const restMinEl = document.getElementById('extRestDurationMin');
+    const restMaxEl = document.getElementById('extRestDurationMax');
+    const rdMin = s.restDurationMin !== undefined ? s.restDurationMin : (s.restDuration ? Math.max(0, Math.floor(s.restDuration / 2)) : 1);
+    const rdMax = s.restDurationMax !== undefined ? s.restDurationMax : (s.restDuration || 3);
+    if (restMinEl) restMinEl.value = rdMin;
+    if (restMaxEl) restMaxEl.value = rdMax;
+    initDualRange('extRestDurationMin', 'extRestDurationMax', 'highlightRestDuration', 'valExtRestDuration', 'min', 'restDurationMin', 'restDurationMax', 1, 3);
+
+    // Restore Cursor Speed
+    if (cursorSpeedSlider && s.cursorSpeed !== undefined) {
+      cursorSpeedSlider.value = s.cursorSpeed;
+      const v = Number(s.cursorSpeed);
+      if (valExtCursorSpeed) {
+        valExtCursorSpeed.textContent = (v === 0) ? '0 ms (Instant)' : (v <= 250 ? `${v} ms (Fast)` : (v <= 650 ? `${v} ms (Natural)` : `${v} ms (Cinematic)`));
       }
-      if (s.profileWait && profileWaitSlider) {
-        profileWaitSlider.value = s.profileWait;
-        const valEl = document.getElementById('valExtProfileWait');
-        if (valEl) valEl.textContent = `${Math.max(5, s.profileWait - 3)} - ${s.profileWait + 5} sec`;
-      }
-      if (s.breakActions && breakActionsSlider) {
-        breakActionsSlider.value = s.breakActions;
-        const valEl = document.getElementById('valExtBreakActions');
-        if (valEl) valEl.textContent = `${s.breakActions} actions`;
-      }
-      if (s.restDuration && restDurationSlider) {
-        restDurationSlider.value = s.restDuration;
-        const valEl = document.getElementById('valExtRestDuration');
-        if (valEl) valEl.textContent = `${s.restDuration} minutes`;
+    }
+
+    // Restore Typing Delay
+    if (typingDelaySlider && s.typingDelay !== undefined) {
+      typingDelaySlider.value = s.typingDelay;
+      const v = Number(s.typingDelay);
+      if (valExtTypingDelay) {
+        valExtTypingDelay.textContent = (v === 0) ? '0 ms (Instant Paste)' : (v <= 60 ? `${v} ms/char (Fast)` : (v <= 140 ? `${v} ms/char (Human)` : `${v} ms/char (Careful)`));
       }
     }
   });
@@ -2065,10 +2318,10 @@ const AGENT_META = {
   unfollow: { title: 'Auto Unfollow', icon: '🧹', badge: 'SAFETY', desc: 'Filter non-followers or low Walchain scores with safety delay' },
   creators: { title: 'Favorite Creators Radar', icon: '⭐', badge: 'RADAR', desc: 'Save favorite handles ➔ Instant top early comment spots' },
   defaulter: { title: 'Find Defaulters', icon: '🔍', badge: 'AUDIT POD', desc: 'Scan post comments & detect members who skipped commenting' },
-  tgliveliker: { title: 'TG Live Liker (Proof Rec)', icon: '🔴', badge: 'PROOF REC', desc: 'Continuous raid liker — keeps tab open for screen record proof' },
   reciprocator: { title: 'Commenter Reciprocator', icon: '🤝', badge: 'RECIPROCAL', desc: 'Visits accounts who commented on your post & comments back on their recent posts' },
   feedengager: { title: 'Home Feed Engager', icon: '🏠', badge: 'FEED AI', desc: 'Autonomous engagement on your X Home Timeline with Ad skip & AI voice' },
-  nicheengager: { title: 'Niche Search Engager', icon: '🎯', badge: 'NICHE AI', desc: 'Search any niche keyword (e.g. "follow for follow") & engage posts with Ad skip' }
+  nicheengager: { title: 'Niche Search Engager', icon: '🎯', badge: 'NICHE AI', desc: 'Search any niche keyword (e.g. "follow for follow") & engage posts with Ad skip' },
+  tgliker: { title: 'TG Liker (Raid & Repost)', icon: '⚡', badge: 'MASS RAID', desc: 'Mass Like, Repost & Bookmark on profile reposts, quotes or active tab' }
 };
 
 function extractTwitterListUrl(text) {
@@ -2185,6 +2438,16 @@ function initAgentListeners() {
     if (extracted.length === 0) {
       alert('⚠️ No valid X/Twitter links detected in your pasted text.\nEnsure links contain x.com, twitter.com, or intent/like?tweet_id=...');
       return;
+    }
+
+    // Ensure fresh engagedTweetIds from local storage before filtering
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        const stored = await chrome.storage.local.get(['engagedTweetIds']);
+        if (Array.isArray(stored?.engagedTweetIds)) {
+          state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), ...stored.engagedTweetIds]));
+        }
+      } catch (e) {}
     }
 
     const filtered = filterTweetLinks(extracted);
@@ -2433,7 +2696,12 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     atomx_agent_workflow: stoppedWf,
     atomx_active_hud: stoppedHud,
     atomx_workflow_paused: false,
-    atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true }
+    atomx_tg_raid: { active: false, stateBadge: 'STOPPED', isStopped: true },
+    tgl_ctrl: { state: 'stopped', runId: 0 },
+    tgl_state: {
+      phase: 'stopped',
+      status: '⏹ Stopped by user'
+    }
   }).catch(() => null);
 
   chrome.runtime.sendMessage({ type: 'BG_ABORT_AGENT_WORKFLOW' }).catch(() => null);
@@ -2456,7 +2724,8 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     { id: 'stopAutoUnfollowBtn', agentId: 'unfollow', title: 'Auto Unfollow' },
     { id: 'stopReciprocatorBtn', agentId: 'reciprocator', title: 'Commenter Reciprocator' },
     { id: 'stopFeedEngagerBtn', agentId: 'feedengager', title: 'Home Feed Engager' },
-    { id: 'stopNicheEngagerBtn', agentId: 'nicheengager', title: 'Niche Search Engager' }
+    { id: 'stopNicheEngagerBtn', agentId: 'nicheengager', title: 'Niche Search Engager' },
+    { id: 'stopTgLikerBtn', agentId: 'tgliker', title: 'TG Liker' }
   ];
 
   stopButtonConfigs.forEach(({ id, agentId, title }) => {
@@ -2474,7 +2743,8 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   // Wire all Pause Buttons
   [
     'pauseTgEngageBtn', 'pauseAudienceBuilderBtn', 'pauseSorsaBoosterBtn', 'pauseFollowerIncreaseBtn',
-    'pauseReplyBackBtn', 'pauseAutoUnfollowBtn', 'pauseReciprocatorBtn', 'pauseFeedEngagerBtn', 'pauseNicheEngagerBtn'
+    'pauseReplyBackBtn', 'pauseAutoUnfollowBtn', 'pauseReciprocatorBtn', 'pauseFeedEngagerBtn', 'pauseNicheEngagerBtn',
+    'pauseTgLikerBtn'
   ].forEach(id => {
     document.getElementById(id)?.addEventListener('click', handleToggleWorkflowPause);
   });
@@ -2482,7 +2752,8 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   // Wire all Skip Buttons
   [
     'skipTgEngageBtn', 'skipAudienceBuilderBtn', 'skipSorsaBoosterBtn', 'skipFollowerIncreaseBtn',
-    'skipReplyBackBtn', 'skipAutoUnfollowBtn', 'skipReciprocatorBtn', 'skipFeedEngagerBtn', 'skipNicheEngagerBtn'
+    'skipReplyBackBtn', 'skipAutoUnfollowBtn', 'skipReciprocatorBtn', 'skipFeedEngagerBtn', 'skipNicheEngagerBtn',
+    'skipTgLikerBtn'
   ].forEach(id => {
     document.getElementById(id)?.addEventListener('click', handleSkipWorkflowItem);
   });
@@ -2597,6 +2868,90 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     showExtToast('Niche Search Engager Reset', '🔄');
   });
 
+  // TG Liker Preset Target Buttons
+  document.querySelectorAll('.tgliker-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const inp = document.getElementById('tgLikerTargetCountInput');
+      if (inp) {
+        inp.value = btn.dataset.count;
+        inp.dispatchEvent(new Event('input'));
+      }
+      document.querySelectorAll('.tgliker-preset-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'rgba(59,130,246,0.15)';
+        b.style.borderColor = 'rgba(59,130,246,0.45)';
+        b.style.color = '#60A5FA';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#2563EB';
+      btn.style.borderColor = '#3B82F6';
+      btn.style.color = '#FFFFFF';
+    });
+  });
+
+  // TG Liker Continue Add-More Preset Buttons
+  let tgLikerSelectedAddCount = 20;
+  document.querySelectorAll('.tgliker-cont-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      tgLikerSelectedAddCount = Number(btn.dataset.add) || 20;
+      document.querySelectorAll('.tgliker-cont-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'rgba(15,23,42,0.8)';
+        b.style.borderColor = 'rgba(59,130,246,0.35)';
+        b.style.color = '#93C5FD';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#2563EB';
+      btn.style.borderColor = '#3B82F6';
+      btn.style.color = '#FFFFFF';
+    });
+  });
+
+  document.getElementById('btnTgLikerContinue')?.addEventListener('click', () => {
+    startTgLikerWorkflow(true, tgLikerSelectedAddCount);
+  });
+
+  // TG Liker Launch & Reset Buttons
+  document.getElementById('runTgLikerBtn')?.addEventListener('click', () => startTgLikerWorkflow(false, 0));
+  document.getElementById('resetTgLikerBtn')?.addEventListener('click', () => {
+    chrome.storage.local.remove(['atomx_tgliker_seen', 'atomx_tgliker_last_stats'], () => {
+      const doneEl = document.getElementById('tgLikerCountLiked');
+      const repEl = document.getElementById('tgLikerCountReposted');
+      const bmEl = document.getElementById('tgLikerCountBookmarked');
+      const skipEl = document.getElementById('tgLikerCountSkipped');
+      const qInd = document.getElementById('tgLikerQueueIndicator');
+      const bar = document.getElementById('tgLikerProgressBar');
+      const status = document.getElementById('tgLikerLiveStatusText');
+      const badge = document.getElementById('tgLikerStateBadge');
+      const countdown = document.getElementById('tgLikerCountdownText');
+      const card = document.getElementById('tgLikerProgressCard');
+      const contBox = document.getElementById('tgLikerContinueBox');
+      const startBtn = document.getElementById('runTgLikerBtn');
+      const stopBtn = document.getElementById('stopTgLikerBtn');
+      const pauseBtn = document.getElementById('pauseTgLikerBtn');
+      const skipBtn = document.getElementById('skipTgLikerBtn');
+      const inp = document.getElementById('tgLikerTargetCountInput');
+
+      const defaultCnt = inp ? inp.value || '20' : '20';
+      if (doneEl) doneEl.textContent = '0';
+      if (repEl) repEl.textContent = '0';
+      if (bmEl) bmEl.textContent = '0';
+      if (skipEl) skipEl.textContent = '0';
+      if (qInd) qInd.textContent = `Post 0/${defaultCnt}`;
+      if (bar) bar.style.width = '0%';
+      if (badge) { badge.textContent = 'IDLE'; badge.className = 'badge-mini'; }
+      if (status) status.textContent = 'Ready. Target profile reposts, quotes or active tab.';
+      if (countdown) countdown.style.display = 'none';
+      if (card) card.style.display = 'none';
+      if (contBox) contBox.style.display = 'none';
+      if (startBtn) startBtn.style.display = 'inline-flex';
+      if (stopBtn) stopBtn.style.display = 'none';
+      if (pauseBtn) pauseBtn.style.display = 'none';
+      if (skipBtn) skipBtn.style.display = 'none';
+      showExtToast('TG Liker Reset', '🔄');
+    });
+  });
+
   // Telegram Engage Reset Button
   document.getElementById('resetTelegramQueueBtn')?.addEventListener('click', () => {
     chrome.storage.local.remove(['atomx_tg_engaged_cache', 'atomx_tg_counters', 'atomx_tg_raid', 'atomx_active_hud'], () => {
@@ -2613,9 +2968,10 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
       if (skipEl) skipEl.textContent = '0';
       if (qInd) qInd.textContent = 'Tweet 0/0';
       if (bar) bar.style.width = '0%';
-      if (status) status.textContent = 'Telegram raid queue and counters reset.';
+      if (status) status.textContent = 'Telegram raid queue and active counters reset.';
       if (badge) badge.textContent = 'IDLE';
       if (countdown) countdown.style.display = 'none';
+      updateTgParseSummaryUI?.();
       showExtToast('Telegram Queue Reset', '🔄');
     });
   });
@@ -3152,22 +3508,6 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
 
   document.getElementById('startDefaulterAuditBtn')?.addEventListener('click', startDefaulterAuditWorkflow);
   document.getElementById('stopDefaulterAuditBtn')?.addEventListener('click', stopDefaulterAuditWorkflow);
-
-  // Agent 12: Telegram Live Liker Listeners
-  document.getElementById('tgLiveUseCurrentTabBtn')?.addEventListener('click', async () => {
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com'))) {
-        const inp = document.getElementById('tgLiveRaidInput');
-        if (inp) inp.value = tabs[0].url.split('?')[0];
-        showExtToast('Current Tab Feed Linked', '⚡');
-      }
-    } catch (e) { }
-  });
-
-  document.getElementById('startTgLiveRaidBtn')?.addEventListener('click', startTgLiveRaidWorkflow);
-  document.getElementById('stopTgLiveRaidBtn')?.addEventListener('click', stopTgLiveRaidWorkflow);
-
   // Agent 13: Commenter Reciprocator Listeners
   document.getElementById('reciprocatorUseCurrentTabBtn')?.addEventListener('click', async () => {
     try {
@@ -3318,8 +3658,8 @@ let defaulterActiveTabId = null;
 async function startDefaulterAuditWorkflow() {
   if (!(await ensureVerifiedAccountOrBlock())) return;
 
-  if (state.credits < 5) {
-    alert(`⚠️ Insufficient credits!\nYou need 5 credits to audit post comments and find defaulters, but you have ${state.credits}.\nPlease top up credits in the Credits tab.`);
+  if (state.credits < 1) {
+    alert(`⚠️ Insufficient credits!\nYou need 1 credit to audit post comments and find defaulters, but you have ${state.credits}.\nPlease top up credits in the Credits tab.`);
     switchExtTab('credits');
     return;
   }
@@ -3399,8 +3739,8 @@ async function startDefaulterAuditWorkflow() {
     const defaulters = expectedHandles.filter(h => !commentersSet.has(h) && h !== mainAuthor);
     const compliant = expectedHandles.filter(h => commentersSet.has(h));
 
-    // Deduct 5 credits for successful audit
-    deductCredits(5);
+    // Deduct 1 credit for successful audit (Rule: 1 scan = 1 credit)
+    deductCredits(1, 'Find Defaulters', 'Audit post comments');
 
     if (heading) heading.textContent = `Audit Complete — Found ${defaulters.length} Defaulter${defaulters.length === 1 ? '' : 's'}`;
     if (statExp) statExp.textContent = String(expectedHandles.length);
@@ -3497,129 +3837,6 @@ function stopDefaulterAuditWorkflow() {
   showExtToast('Audit stopped by user', '⏹');
 }
 
-// =========================================================================
-// AGENT 12: TELEGRAM LIVE LIKER (SCREEN-RECORD FRIENDLY RAID)
-// =========================================================================
-let tgLiveWorkingTabId = null;
-
-async function startTgLiveRaidWorkflow() {
-  if (!(await ensureVerifiedAccountOrBlock())) return;
-
-  if (state.credits < 1) {
-    alert('⚠️ Insufficient credits! You need at least 1 credit to run live raid engagement.\nPlease top up credits in the Credits tab.');
-    switchExtTab('credits');
-    return;
-  }
-
-  const rawInput = document.getElementById('tgLiveRaidInput')?.value || '';
-  let tweetLinks = extractTweetLinks(rawInput);
-
-  if (tweetLinks.length === 0) {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
-    if (tabs && tabs[0]?.url && (tabs[0].url.includes('twitter.com') || tabs[0].url.includes('x.com'))) {
-      tweetLinks = [tabs[0].url.split('?')[0]];
-    } else {
-      alert('Please paste raid tweet links or navigate to the target post in your active browser tab.');
-      return;
-    }
-  }
-
-  const actions = {
-    like: document.getElementById('tgLiveOptLike')?.checked ?? true,
-    repost: document.getElementById('tgLiveOptRepost')?.checked ?? true,
-    comment: document.getElementById('tgLiveOptComment')?.checked ?? false,
-    bookmark: document.getElementById('tgLiveOptBookmark')?.checked ?? false,
-    glow: document.getElementById('tgLiveOptGlow')?.checked ?? true
-  };
-
-  const pacingMs = parseInt(document.getElementById('tgLivePacingSelect')?.value, 10) || 3500;
-
-  const startBtn = document.getElementById('startTgLiveRaidBtn');
-  const stopBtn = document.getElementById('stopTgLiveRaidBtn');
-  const statusCard = document.getElementById('tgLiveStatusCard');
-  const statusText = document.getElementById('tgLiveStatusText');
-  const countLiked = document.getElementById('tgLiveCountLiked');
-  const countReposted = document.getElementById('tgLiveCountReposted');
-  const countCommented = document.getElementById('tgLiveCountCommented');
-  const countBookmarked = document.getElementById('tgLiveCountBookmarked');
-
-  if (startBtn) startBtn.style.display = 'none';
-  if (stopBtn) stopBtn.style.display = 'block';
-  if (statusCard) statusCard.style.display = 'block';
-  if (statusText) statusText.textContent = `Starting Live Raid (Target 1 of ${tweetLinks.length})...`;
-
-  let totalLiked = 0, totalReposted = 0, totalCommented = 0, totalBookmarked = 0;
-  state.isAborted = false;
-
-  updateAgentConsole('Live Raid Active', 'Recording-friendly tab created. Tab will stay open for proof recording.');
-
-  try {
-    // 1. REUSE TAB SO SCREEN RECORDER CAN CAPTURE IT IN-PLACE
-    const initialTabId = await getOrCreateReusedTab(tgLiveWorkingTabId, tweetLinks[0]);
-    tgLiveWorkingTabId = initialTabId;
-
-    for (let i = 0; i < tweetLinks.length; i++) {
-      if (state.isAborted) break;
-
-      const currentUrl = tweetLinks[i];
-      if (statusText) statusText.textContent = `Recording Tweet ${i + 1} of ${tweetLinks.length}...`;
-
-      if (i > 0) {
-        await chrome.tabs.update(tgLiveWorkingTabId, { url: currentUrl, active: true });
-      }
-
-      await waitForTabComplete(tgLiveWorkingTabId);
-      await sleep(2500); // Wait for tweet rendering
-
-      if (state.isAborted) break;
-
-      const raidRes = await new Promise((resolve) => {
-        chrome.tabs.sendMessage(tgLiveWorkingTabId, {
-          type: 'EXECUTE_LIVE_RAID_ENGAGEMENT',
-          actions,
-          delay: pacingMs,
-          style: state.selectedTone || 'Bullish (5-10 words)',
-          stylePrompt: state.selectedTonePrompt || null
-        }, (res) => resolve(res || { success: false }));
-      });
-
-      if (raidRes.success) {
-        deductCredits(1);
-        if (raidRes.liked) totalLiked++;
-        if (raidRes.reposted) totalReposted++;
-        if (raidRes.commented) totalCommented++;
-        if (raidRes.bookmarked) totalBookmarked++;
-
-        if (countLiked) countLiked.textContent = String(totalLiked);
-        if (countReposted) countReposted.textContent = String(totalReposted);
-        if (countCommented) countCommented.textContent = String(totalCommented);
-        if (countBookmarked) countBookmarked.textContent = String(totalBookmarked);
-
-        updateAgentConsole('Raid Executed', `Live action completed on tweet ${i + 1}. Liked: ${raidRes.liked}, Reposted: ${raidRes.reposted}, Commented: ${raidRes.commented || false}`);
-      }
-
-      // Safe pacing delay so screen recording captures the full interaction
-      await sleep(pacingMs);
-    }
-
-    if (statusText) {
-      statusText.textContent = state.isAborted
-        ? `Stopped. Tab kept open for recording proof!`
-        : `✓ Raid Complete! Tab is left open for screen record proof.`;
-    }
-    showExtToast('Raid finished — tab left open for proof!', '🎥');
-
-    // NOTE: WE DELIBERATELY DO NOT CLOSE THE TAB! TAB STAYS OPEN AS REQUESTED!
-
-  } catch (err) {
-    console.error('Live raid error:', err);
-    if (statusText) statusText.textContent = 'Raid Error: ' + err.message;
-  } finally {
-    if (startBtn) startBtn.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'none';
-  }
-}
-
 function stopTgLiveRaidWorkflow() {
   state.isAborted = true;
   const startBtn = document.getElementById('startTgLiveRaidBtn');
@@ -3659,7 +3876,6 @@ async function startCommenterReciprocatorWorkflow() {
 
   const maxCount = Number(document.getElementById('reciprocatorMaxCount')?.value || 10);
   const postsCount = document.getElementById('reciprocatorPostsPerProfileSelect')?.value || 'random';
-  const commentLikeDelayMs = Number(document.getElementById('reciprocatorLikeDelaySelect')?.value || 4000);
   const tone = state.selectedTone || 'Bullish (5-10 words)';
   const tonePrompt = state.selectedTonePrompt || '';
   const optLike = document.getElementById('reciprocatorOptLike')?.checked ?? true;
@@ -3726,7 +3942,6 @@ async function startCommenterReciprocatorWorkflow() {
       maxCount,
       postsCount,
       postsPerProfile: postsCount,
-      commentLikeDelayMs,
       likePosts: optLike,
       replyPosts: optComment,
       repostPosts: optRepost,
@@ -3925,6 +4140,286 @@ async function startNicheSearchEngagerWorkflow() {
       verifiedXHandle: (state.verifiedXHandle || '').replace(/^@/, '').trim()
     }
   });
+}
+
+// =========================================================================
+// AGENT 16: TG LIKER WORKFLOW ENGINE (MASS RAID, REPOSTS & QUOTES ENGAGER)
+// =========================================================================
+const TGL_RESERVED_HANDLES = new Set(['home', 'i', 'explore', 'search', 'notifications', 'messages', 'settings', 'compose',
+  'intent', 'hashtag', 'login', 'signup', 'tos', 'privacy', 'jobs', 'share', 'account', 'lists',
+  'communities', 'premium', 'grok', 'about']);
+
+function parseTgLikerTargets(raw) {
+  const out = [];
+  const seen = new Set();
+  const push = (t) => { if (!seen.has(t.key)) { seen.add(t.key); out.push(t); } };
+  const text = String(raw || '');
+  let m;
+
+  // 1) tweet (status) link
+  const reStatus = /(?:https?:\/\/)?(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{5,25})/gi;
+  while ((m = reStatus.exec(text)) !== null) {
+    push({ kind: 'status', key: 's' + m[2], handle: m[1].toLowerCase() === 'i' ? null : m[1], id: m[2] });
+  }
+
+  // 2) profile link (x.com/username or x.com/username/reposts)
+  const reProfile = /(?:https?:\/\/)?(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})((?:\/[^\s]*)?)/gi;
+  while ((m = reProfile.exec(text)) !== null) {
+    const handle = m[1];
+    const rest = (m[2] || '').toLowerCase();
+    if (TGL_RESERVED_HANDLES.has(handle.toLowerCase())) continue;
+    if (rest.startsWith('/status')) continue;
+    push({ kind: 'profile', key: 'p' + handle.toLowerCase(), handle });
+  }
+
+  // 3) plain @username
+  const reAt = /(?:^|\s)@([A-Za-z0-9_]{1,15})(?=\s|$)/g;
+  while ((m = reAt.exec(text)) !== null) {
+    push({ kind: 'profile', key: 'p' + m[1].toLowerCase(), handle: m[1] });
+  }
+  return out;
+}
+
+function buildTgLikerTarget(t, section) {
+  let mode = section || 'auto';
+  if (mode === 'auto') mode = t.kind === 'profile' ? 'profile_reposts' : 'quotes';
+
+  const profile = (h) => mode === 'profile_all'
+    ? { url: `https://x.com/${h}`, label: `@${h} profile` }
+    : { url: `https://x.com/${h}/reposts`, label: `@${h} reposts` };
+
+  if (t.kind === 'profile') return profile(t.handle);
+  if (mode.startsWith('profile') && t.handle) return profile(t.handle);
+
+  const base = `https://x.com/${t.handle || 'i'}/status/${t.id}`;
+  if (mode === 'replies') return { url: base, label: 'Replies' };
+  return { url: `${base}/quotes`, label: 'Quotes' };
+}
+
+let isStartingTgLikerWorkflow = false;
+async function startTgLikerWorkflow(continueMode = false, addMoreCount = 0) {
+  if (isStartingTgLikerWorkflow) return;
+  isStartingTgLikerWorkflow = true;
+  const launchBtn = document.getElementById('runTgLikerBtn');
+  if (launchBtn) launchBtn.style.pointerEvents = 'none';
+
+  try {
+    if (!(await ensureVerifiedAccountOrBlock())) {
+      if (launchBtn) launchBtn.style.pointerEvents = 'auto';
+      return;
+    }
+
+    const rawTarget = (document.getElementById('tgLikerTargetInput')?.value || '').trim();
+  const section = document.getElementById('tgLikerSectionSelect')?.value || 'auto';
+  const optLike = document.getElementById('tgLikerOptLike')?.checked ?? true;
+  const optRepost = document.getElementById('tgLikerOptRepost')?.checked ?? false;
+  const optBookmark = document.getElementById('tgLikerOptBookmark')?.checked ?? false;
+  const speedMs = Number(document.getElementById('tgLikerSpeedSelect')?.value ?? 2000);
+  let targetCount = Number(document.getElementById('tgLikerTargetCountInput')?.value ?? 20);
+  const continuousLoop = document.getElementById('tgLikerContinuousLoop')?.checked ?? true;
+
+  // Smart Break Engine inputs
+  const breakOn = document.getElementById('tgLikerBreakOn')?.checked ?? true;
+  let evMin = parseInt(document.getElementById('tgLikerEvMin')?.value, 10) || 25;
+  let evMax = parseInt(document.getElementById('tgLikerEvMax')?.value, 10) || 40;
+  if (evMax < evMin) [evMin, evMax] = [evMax, evMin];
+
+  let bsMin = parseInt(document.getElementById('tgLikerBsMin')?.value, 10) || 45;
+  let bsMax = parseInt(document.getElementById('tgLikerBsMax')?.value, 10) || 120;
+  if (bsMax < bsMin) [bsMin, bsMax] = [bsMax, bsMin];
+
+  const lbOn = document.getElementById('tgLikerLbOn')?.checked ?? true;
+  let lbEvMin = parseInt(document.getElementById('tgLikerLbEvMin')?.value, 10) || 100;
+  let lbEvMax = parseInt(document.getElementById('tgLikerLbEvMax')?.value, 10) || 150;
+  if (lbEvMax < lbEvMin) [lbEvMin, lbEvMax] = [lbEvMax, lbEvMin];
+
+  let lbMinMin = parseInt(document.getElementById('tgLikerLbMinMin')?.value, 10) || 5;
+  let lbMinMax = parseInt(document.getElementById('tgLikerLbMinMax')?.value, 10) || 10;
+  if (lbMinMax < lbMinMin) [lbMinMin, lbMinMax] = [lbMinMax, lbMinMin];
+
+  const hourly = parseInt(document.getElementById('tgLikerHourly')?.value, 10) || 0;
+
+  if (!optLike && !optRepost && !optBookmark) {
+    showExtToast('Select at least one action (Like, Repost, or Bookmark)', '⚠️');
+    return;
+  }
+
+  // Active X tab detection
+  const twTab = await getActiveTwitterTab();
+  const isX = !!(twTab && /^https:\/\/(x|twitter)\.com\//i.test(twTab.url || ''));
+
+  let parsed = parseTgLikerTargets(rawTarget);
+  if (!parsed.length && isX && twTab?.url) {
+    parsed = parseTgLikerTargets(twTab.url);
+  }
+  if (!parsed.length) {
+    showExtToast('Paste profile link (x.com/username) or tweet link, or open an X tab.', '⚠️');
+    return;
+  }
+
+  const targets = parsed.map(t => buildTgLikerTarget(t, section));
+
+  let prevCount = 0;
+  let prevStats = { liked: 0, reposted: 0, bookmarked: 0, skipped: 0 };
+  if (continueMode) {
+    const statsRes = await chrome.storage.local.get(['atomx_tgliker_last_stats']).catch(() => ({}));
+    prevCount = Number(statsRes?.atomx_tgliker_last_stats?.handled) || 0;
+    prevStats = statsRes?.atomx_tgliker_last_stats || prevStats;
+    targetCount = prevCount + (Number(addMoreCount) || 20);
+    const targetInp = document.getElementById('tgLikerTargetCountInput');
+    if (targetInp) targetInp.value = String(targetCount);
+  }
+
+  const startBtn = document.getElementById('runTgLikerBtn');
+  const stopBtn = document.getElementById('stopTgLikerBtn');
+  const pauseBtn = document.getElementById('pauseTgLikerBtn');
+  const skipBtn = document.getElementById('skipTgLikerBtn');
+  const progressCard = document.getElementById('tgLikerProgressCard');
+  const stateBadge = document.getElementById('tgLikerStateBadge');
+  const queueIndicator = document.getElementById('tgLikerQueueIndicator');
+  const barEl = document.getElementById('tgLikerProgressBar');
+  const likedEl = document.getElementById('tgLikerCountLiked');
+  const repostedEl = document.getElementById('tgLikerCountReposted');
+  const bookmarkedEl = document.getElementById('tgLikerCountBookmarked');
+  const skipEl = document.getElementById('tgLikerCountSkipped');
+  const statusText = document.getElementById('tgLikerLiveStatusText');
+  const countdownEl = document.getElementById('tgLikerCountdownText');
+
+  if (startBtn) startBtn.style.display = 'none';
+  if (stopBtn) stopBtn.style.display = 'inline-flex';
+  if (pauseBtn) pauseBtn.style.display = 'inline-flex';
+  if (skipBtn) skipBtn.style.display = 'inline-flex';
+  if (progressCard) progressCard.style.display = 'block';
+
+  const displayTarget = targetCount > 0 ? targetCount : '∞';
+  if (stateBadge) stateBadge.textContent = 'RUNNING';
+  if (likedEl) likedEl.textContent = String(prevStats.liked || 0);
+  if (repostedEl) repostedEl.textContent = String(prevStats.reposted || 0);
+  if (bookmarkedEl) bookmarkedEl.textContent = String(prevStats.bookmarked || 0);
+  if (skipEl) skipEl.textContent = String(prevStats.skipped || 0);
+  if (barEl) barEl.style.width = '5%';
+  if (countdownEl) countdownEl.style.display = 'none';
+  if (queueIndicator) queueIndicator.textContent = `Post ${prevCount}/${displayTarget}`;
+  if (statusText) statusText.textContent = continueMode
+    ? `Continuing TG Liker from previous position (+${addMoreCount} posts)...`
+    : `Launching TG Liker raid... Navigating & engaging.`;
+
+  syncFloatingHud(null, {
+    title: 'TG Liker (Raid & Repost)',
+    stateBadge: 'RUNNING',
+    indicator: `Post ${prevCount}/${displayTarget}`,
+    done: prevCount,
+    collected: targetCount,
+    skipped: prevStats.skipped || 0,
+    progressPercent: 5,
+    statusText: `Preparing TG Liker mass raid...`
+  });
+
+  // 1. Resolve target URL & select exactly ONE tab to use
+  const targetUrl = targets[0].url;
+  const normPath = (p) => { try { return new URL(p).pathname.replace(/\/+$/, '').toLowerCase(); } catch (e) { return ''; } };
+
+  let tabId = null;
+  if (isX && twTab?.id) {
+    tabId = twTab.id;
+    if (normPath(twTab.url) !== normPath(targetUrl)) {
+      await chrome.tabs.update(tabId, { url: targetUrl, active: true });
+    }
+  } else {
+    // Check for any open Twitter / X tab in any window to reuse
+    const openTwitterTabs = await chrome.tabs.query({ url: ['*://*.x.com/*', '*://*.twitter.com/*'] }).catch(() => []);
+    if (openTwitterTabs && openTwitterTabs.length > 0 && openTwitterTabs[0].id) {
+      tabId = openTwitterTabs[0].id;
+      await chrome.tabs.update(tabId, { url: targetUrl, active: true });
+    } else {
+      // Create EXACTLY ONE new tab directly on targetUrl (never creates about:blank)
+      const t = await chrome.tabs.create({ url: targetUrl, active: true });
+      tabId = t.id;
+    }
+  }
+
+  const cfg = {
+    tabId,
+    targets,
+    actions: { like: optLike, repost: optRepost, bookmark: optBookmark },
+    speedMs,
+    loop: continuousLoop,
+    breaks: { enabled: breakOn, everyMin: evMin, everyMax: evMax, secMin: bsMin, secMax: bsMax },
+    longBreak: { enabled: lbOn, everyMin: lbEvMin, everyMax: lbEvMax, minMin: lbMinMin, minMax: lbMinMax },
+    hourlyMax: hourly,
+    maxPosts: targetCount
+  };
+
+  const runId = Date.now();
+  const first = cfg.breaks.enabled ? evMin + Math.floor(Math.random() * (evMax - evMin + 1)) : 0;
+  const firstLong = cfg.longBreak.enabled ? lbEvMin + Math.floor(Math.random() * (lbEvMax - lbEvMin + 1)) : 0;
+
+  const statePatch = {
+    phase: 'running',
+    targetIndex: 0,
+    round: 1,
+    total: continueMode ? prevCount : 0,
+    onBreak: false,
+    wait: null,
+    sinceBreak: 0,
+    breakAt: first,
+    sinceLong: 0,
+    longAt: firstLong,
+    stats: continueMode ? prevStats : { liked: 0, reposted: 0, bookmarked: 0, skipped: 0 },
+    status: continueMode ? `Continuing... (+${addMoreCount} posts)` : 'Starting...'
+  };
+
+  const storageSet = {
+    tgl_cfg: cfg,
+    tgl_ctrl: { state: 'running', runId },
+    tgl_state: statePatch,
+    atomx_workflow_paused: false,
+    atomx_agent_workflow: {
+      agentId: 'tgliker',
+      title: 'TG Liker (Raid & Repost)',
+      active: true,
+      isStopped: false,
+      stateBadge: 'RUNNING',
+      statusText: statePatch.status,
+      total: targetCount,
+      successCount: statePatch.total,
+      liked: statePatch.stats.liked || 0,
+      reposted: statePatch.stats.reposted || 0,
+      bookmarked: statePatch.stats.bookmarked || 0,
+      ignoredCount: statePatch.stats.skipped || 0,
+      options: cfg
+    }
+  };
+
+  if (!continueMode) {
+    storageSet.tgl_seen = {};
+  }
+  await chrome.storage.local.set(storageSet);
+
+  // Send message to background so background knows working tab (zero tab actions from bg)
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'tgliker',
+    title: 'TG Liker (Raid & Repost)',
+    tabId,
+    items: [],
+    options: {
+      ...cfg,
+      continueMode,
+      prevCount,
+      addMoreCount
+    }
+  }).catch(() => null);
+
+  // Trigger engine on active tab directly if already navigated
+  chrome.tabs.sendMessage(tabId, { type: 'START_TG_LIKER_ENGINE', cfg }).catch(() => null);
+  } finally {
+    setTimeout(() => {
+      isStartingTgLikerWorkflow = false;
+      const btn = document.getElementById('runTgLikerBtn');
+      if (btn) btn.style.pointerEvents = 'auto';
+    }, 1200);
+  }
 }
 
 // =========================================================================
@@ -4714,7 +5209,6 @@ function loadSorsaCuratedList(listKey) {
     if (hint) hint.style.display = 'none';
     const count = item.targets.length;
     if (badge) badge.textContent = `${count} accounts ready (${item.name})`;
-    showExtToast(`Loaded ${count} accounts (${item.name})`, '⭐');
   } else {
     delete textarea.dataset.hiddenHandles;
     delete state.sorsaCuratedTargets;
@@ -5217,7 +5711,7 @@ async function startFollowersIncreaseWorkflow() {
 
   const listId = extractTwitterListId(targetUrl);
   const canonicalListUrl = listId ? `https://x.com/i/lists/${listId}` : targetUrl;
-  const searchFeedUrl = listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : targetUrl;
+  const searchFeedUrl = listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} -filter:replies -filter:retweets`)}&f=live` : targetUrl;
 
   const backendUrl = await getBackendUrl();
   const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
@@ -5230,7 +5724,7 @@ async function startFollowersIncreaseWorkflow() {
     tabId,
     items: [],
     options: {
-      feedUrl: canonicalListUrl,
+      feedUrl: searchFeedUrl,
       targetListUrl: canonicalListUrl,
       searchFeedUrl,
       listId,
@@ -5512,21 +6006,27 @@ async function startAutoUnfollowWorkflow() {
   }
 
   if (state.credits < 1) {
-    alert('⚠️ Insufficient credits!\nYou need at least 1 credit for unfollow operations (1 credit per 10 unfollows).\nPlease top up in the Credits tab.');
+    alert('⚠️ Insufficient credits!\nYou need at least 1 credit for unfollow operations (1 credit per 5 unfollows).\nPlease top up in the Credits tab.');
     switchExtTab('credits');
     return;
   }
 
   const targetLimit = Number(document.getElementById('unfollowMaxCountInput')?.value || document.getElementById('unfollowMaxCount')?.value || 25);
-  const delaySec = Number(document.getElementById('unfollowCustomDelayInput')?.value || document.getElementById('unfollowDelaySelect')?.value || 15);
-  const batchCount = Number(document.getElementById('unfollowBatchCountInput')?.value || 15);
-  const breakDuration = Number(document.getElementById('unfollowBreakDurationInput')?.value || 60);
   const scoreThreshold = Number(document.getElementById('unfollowScoreThresholdInput')?.value || 30);
   const rawWhitelist = document.getElementById('unfollowWhitelistInput')?.value || '';
   const whitelistList = rawWhitelist.split(/[,\n]/).map(w => w.trim()).filter(Boolean);
 
+  // Read centralized Global Safety controls
+  const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+  const safety = safetyRes?.atomx_safety_settings || {};
+  const delaySec = Math.max(3, Number(safety.profileWait) || 15);
+  const batchCount = Math.max(2, Number(safety.batchCount) || 15);
+  const breakDuration = Math.max(5, Number(safety.restDuration ? safety.restDuration * 60 : 0) || 60);
+
   const startBtn = document.getElementById('runAutoUnfollowBtn');
   const stopBtn = document.getElementById('stopAutoUnfollowBtn');
+  const pauseBtn = document.getElementById('pauseAutoUnfollowBtn');
+  const skipBtn = document.getElementById('skipAutoUnfollowBtn');
   const progressCard = document.getElementById('unfollowProgressCard');
   const stateBadge = document.getElementById('unfollowStateBadge');
   const barEl = document.getElementById('unfollowProgressBar');
@@ -5540,162 +6040,62 @@ async function startAutoUnfollowWorkflow() {
   state.isAborted = false;
   if (startBtn) startBtn.style.display = 'none';
   if (stopBtn) stopBtn.style.display = 'inline-block';
+  if (pauseBtn) pauseBtn.style.display = 'inline-block';
+  if (skipBtn) skipBtn.style.display = 'inline-block';
   if (progressCard) progressCard.style.display = 'block';
 
-  if (stateBadge) stateBadge.textContent = 'FILTER_SELECTED';
+  if (stateBadge) stateBadge.textContent = 'RUNNING';
   if (doneEl) doneEl.textContent = '0';
   if (skipEl) skipEl.textContent = '0';
   if (failEl) failEl.textContent = '0';
   if (barEl) barEl.style.width = '0%';
   if (progressText) progressText.textContent = `0 / ${targetLimit}`;
   if (countdownEl) countdownEl.style.display = 'none';
+  if (statusText) statusText.textContent = 'Connecting to Following list...';
 
-  // Load persisted processed accounts to prevent re-processing
-  let persistedUnfollowed = [];
-  try {
-    const stored = await chrome.storage.local.get(['atomx_unfollowed_accounts']).catch(() => ({}));
-    if (Array.isArray(stored?.atomx_unfollowed_accounts)) persistedUnfollowed = stored.atomx_unfollowed_accounts;
-  } catch (e) {}
-  const processedHandlesSet = new Set(persistedUnfollowed.map(h => h.toLowerCase()));
-
-  // Determine user handle for Following URL
-  const verifiedHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').trim();
-  const followingUrl = verifiedHandle ? `https://x.com/${verifiedHandle}/following` : 'https://x.com/following';
-
-  let shouldCloseWorkingTab = false;
-  let unfollowedCount = 0;
-  let skippedCount = 0;
-  let failedCount = 0;
-  let consecutiveScrolls = 0;
-
-  try {
-    if (statusText) statusText.textContent = `Opening following list: ${followingUrl}...`;
-    autoUnfollowWorkingTabId = await getOrCreateReusedTab(autoUnfollowWorkingTabId, followingUrl);
-    await waitForTabComplete(autoUnfollowWorkingTabId);
-    await sleep(3000);
-
-    if (state.isAborted) return;
-
-    if (stateBadge) stateBadge.textContent = 'FOLLOWING_LOADED';
-    if (statusText) statusText.textContent = `Following list loaded! Starting smart filtering loop...`;
-    await sleep(1200);
-
-    while (!state.isAborted && unfollowedCount < targetLimit) {
-      if (stateBadge) stateBadge.textContent = 'UNFOLLOWING';
-
-      const stepRes = await new Promise((resolve) => {
-        chrome.tabs.sendMessage(autoUnfollowWorkingTabId, {
-          type: 'EXECUTE_AUTO_UNFOLLOW_STEP',
-          criteria: { notFollowing, lowScore },
-          scoreThreshold,
-          whitelist: whitelistList,
-          processedHandles: Array.from(processedHandlesSet)
-        }, (res) => resolve(res || { success: false, error: 'No response from tab' }));
-      });
-
-      if (state.isAborted) break;
-
-      if (stepRes.action === 'UNFOLLOWED') {
-        consecutiveScrolls = 0;
-        unfollowedCount++;
-        if (stepRes.handle) {
-          processedHandlesSet.add(stepRes.handle.toLowerCase());
-          persistedUnfollowed.push(stepRes.handle);
-        }
-
-        if (doneEl) doneEl.textContent = unfollowedCount;
-        const pct = Math.min(100, Math.round((unfollowedCount / targetLimit) * 100));
-        if (barEl) barEl.style.width = `${pct}%`;
-        if (progressText) progressText.textContent = `${unfollowedCount} / ${targetLimit}`;
-        if (statusText) statusText.textContent = `✓ Unfollowed @${stepRes.handle} (Non-follower / Filter match).`;
-
-        // Credit cost: 1 credit per 10 unfollows (deducted in batches of 10)
-        if (unfollowedCount % 10 === 0) {
-          deductCredits(1);
-          if (statusText) statusText.textContent += ` [1 Credit deducted for 10 unfollows]`;
-        }
-
-        // Persist progress
-        await chrome.storage.local.set({ atomx_unfollowed_accounts: persistedUnfollowed }).catch(() => null);
-
-        // Check if target limit reached
-        if (unfollowedCount >= targetLimit) {
-          break;
-        }
-
-        // RULE: Custom Batch Break vs Normal Pacing Break
-        if (batchCount > 0 && unfollowedCount % batchCount === 0) {
-          if (stateBadge) stateBadge.textContent = 'BATCH_BREAK';
-          if (countdownEl) countdownEl.style.display = 'block';
-          for (let s = breakDuration; s > 0; s--) {
-            if (state.isAborted) break;
-            const min = Math.floor(s / 60);
-            const sec = s % 60;
-            const secStr = sec < 10 ? '0' + sec : sec;
-            const timeStr = min > 0 ? `${min}m ${secStr}s` : `${sec}s`;
-            if (statusText) statusText.textContent = `☕ Safety Batch Break: Pausing ${timeStr} after ${unfollowedCount} unfollows...`;
-            if (countdownEl) countdownEl.textContent = `☕ Break: ${timeStr} remaining...`;
-            await sleep(1000);
-          }
-          if (countdownEl) countdownEl.style.display = 'none';
-        } else {
-          // Custom pacing delay
-          if (stateBadge) stateBadge.textContent = 'WAITING';
-          if (countdownEl) countdownEl.style.display = 'block';
-          for (let s = delaySec; s > 0; s--) {
-            if (state.isAborted) break;
-            if (statusText) statusText.textContent = `Pacing safety delay (${s}s) before next account...`;
-            if (countdownEl) countdownEl.textContent = `⏱️ Pause: ${s}s remaining...`;
-            await sleep(1000);
-          }
-          if (countdownEl) countdownEl.style.display = 'none';
-        }
-      } else if (stepRes.action === 'SKIPPED') {
-        consecutiveScrolls = 0;
-        skippedCount++;
-        if (stepRes.handle) processedHandlesSet.add(stepRes.handle.toLowerCase());
-        if (skipEl) skipEl.textContent = skippedCount;
-        if (statusText) statusText.textContent = `Skipped @${stepRes.handle || 'account'} (${stepRes.reason || 'Protected'}).`;
-        await sleep(800);
-      } else if (stepRes.action === 'SCROLLED') {
-        consecutiveScrolls++;
-        if (statusText) statusText.textContent = `Auto-scrolling following list (${consecutiveScrolls})...`;
-        await sleep(1600);
-        if (consecutiveScrolls >= 5) {
-          // List ended (no more accounts found after 5 consecutive scrolls)
-          if (statusText) statusText.textContent = `End of following list reached!`;
-          break;
-        }
-      } else if (stepRes.action === 'FAILED') {
-        failedCount++;
-        if (stepRes.handle) processedHandlesSet.add(stepRes.handle.toLowerCase());
-        if (failEl) failEl.textContent = failedCount;
-        if (statusText) statusText.textContent = `Failed on @${stepRes.handle || 'account'}: ${stepRes.error || 'Unknown error'}.`;
-        await sleep(1200);
-      } else {
-        await sleep(2000);
+  let verifiedHandle = (state.verifiedXHandle || state.user?.handle || '').replace(/^@/, '').trim();
+  if (!verifiedHandle) {
+    const stored = await chrome.storage.local.get(['verifiedXHandle']).catch(() => ({}));
+    if (stored?.verifiedXHandle) verifiedHandle = stored.verifiedXHandle.replace(/^@/, '').trim();
+  }
+  if (!verifiedHandle) {
+    const twitterTabs = await chrome.tabs.query({ url: ['*://x.com/*', '*://twitter.com/*'] }).catch(() => []);
+    if (twitterTabs && twitterTabs[0]?.id) {
+      const probeRes = await safeSendTabMessage(twitterTabs[0].id, { type: 'CHECK_CURRENT_LOGGED_IN_X_HANDLE' });
+      if (probeRes?.rawHandle) {
+        verifiedHandle = probeRes.rawHandle.replace(/^@/, '').trim();
+        state.verifiedXHandle = verifiedHandle;
+        chrome.storage.local.set({ verifiedXHandle });
       }
     }
-
-    if (!state.isAborted) {
-      if (stateBadge) stateBadge.textContent = 'DONE';
-      if (barEl) barEl.style.width = '100%';
-      if (countdownEl) countdownEl.style.display = 'none';
-      if (statusText) statusText.textContent = `✓ Auto Unfollow finished! Unfollowed: ${unfollowedCount}, Skipped: ${skippedCount}, Failed: ${failedCount}.`;
-      alert(`🧹 Auto Unfollow Cycle Finished!\n\n• Target: ${targetLimit}\n• Successfully Unfollowed: ${unfollowedCount}\n• Skipped (Follows back / Whitelisted): ${skippedCount}\n• Failed: ${failedCount}\n• Total Credits Deducted: ${Math.floor(unfollowedCount / 10)} Credit(s)\n\nDesigned within safety limits with pacing delays and long breaks.`);
-    } else {
-      if (stateBadge) stateBadge.textContent = 'STOPPED';
-      if (statusText) statusText.textContent = 'Auto Unfollow stopped by user.';
-    }
-  } catch (err) {
-    console.error('Auto Unfollow error:', err);
-    if (stateBadge) stateBadge.textContent = 'FAILED';
-    alert('Auto Unfollow error: ' + err.message);
-  } finally {
-    if (startBtn) startBtn.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'none';
-    if (countdownEl) countdownEl.style.display = 'none';
   }
+
+  const followingUrl = verifiedHandle ? `https://x.com/${verifiedHandle}/following` : '';
+
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const tabId = activeTabs && activeTabs[0]?.id;
+
+  chrome.runtime.sendMessage({
+    type: 'BG_START_AGENT_WORKFLOW',
+    agentId: 'unfollow',
+    title: 'Auto Unfollow',
+    tabId,
+    items: [],
+    options: {
+      feedUrl: followingUrl,
+      targetLimit,
+      targetCount: targetLimit,
+      delaySec,
+      batchCount,
+      breakDuration,
+      criteria: { notFollowing, lowScore },
+      scoreThreshold,
+      whitelist: whitelistList,
+      verifiedXHandle: verifiedHandle,
+      style: state.selectedTone || 'Bullish (5-10 words)',
+      stylePrompt: state.selectedTonePrompt || null
+    }
+  });
 }
 
 function openAgentDetailView(agentId) {
@@ -5900,6 +6300,7 @@ async function loadServerState() {
   // Instant UI render from local cache
   updateCreditUI();
   renderCreatorChips();
+  updateTgParseSummaryUI?.();
 
   // If there's an alleged user session or pending request, verify directly with server!
   if (state.user || state.verifiedXHandle || state.pendingRequest) {
@@ -6004,9 +6405,10 @@ async function syncServerStateNetwork() {
 
     // Parallel balance and engaged tweets sync for this specific verified account
     const balUrl = `${backendUrl}/api/credits/balance?handle=${encodeURIComponent(cleanHandle)}&email=${encodeURIComponent(email)}`;
+    const engUrl = `${backendUrl}/api/tweets/engaged?handle=${encodeURIComponent(cleanHandle)}`;
     const [balRes, engRes] = await Promise.allSettled([
       fetch(balUrl, { credentials: 'omit' }),
-      fetch(`${backendUrl}/api/tweets/engaged`, { credentials: 'omit' })
+      fetch(engUrl, { credentials: 'omit' })
     ]);
 
     if (balRes.status === 'fulfilled') {
@@ -6034,6 +6436,7 @@ async function syncServerStateNetwork() {
         if (typeof chrome !== 'undefined' && chrome.storage?.local) {
           chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
         }
+        updateTgParseSummaryUI?.();
       }
     }
 
@@ -6243,6 +6646,24 @@ async function ensureVerifiedAccountOrBlock() {
     }
     return false;
   }
+
+  // Check if Twitter Daily Post Limit or Rate Limit is currently active
+  try {
+    const limits = await new Promise(r => chrome.storage.local.get(['atomx_daily_post_limit', 'atomx_rate_limited'], r));
+    const dailyLimit = limits?.atomx_daily_post_limit;
+    const rateLimit = limits?.atomx_rate_limited;
+    if (dailyLimit?.active) {
+      const proceed = confirm(`🛑 Twitter Daily Post Limit Detected!\n\nTwitter previously flagged your account with:\n"${dailyLimit.reason || "You've hit the daily post limit. Subscribe to Premium for higher limits."}"\n\nStarting automation now may fail or risk account suspension.\n\nDo you want to ignore and force proceed anyway?`);
+      if (!proceed) return false;
+      // If user confirms, clear limit flag so they can proceed
+      chrome.storage.local.remove(['atomx_daily_post_limit', 'atomx_rate_limited']).catch(() => null);
+    } else if (rateLimit?.active) {
+      const proceed = confirm(`🛑 Twitter Rate Limit Detected!\n\nTwitter previously flagged:\n"${rateLimit.reason || 'Rate limit active'}"\n\nDo you want to ignore and force proceed anyway?`);
+      if (!proceed) return false;
+      chrome.storage.local.remove(['atomx_rate_limited']).catch(() => null);
+    }
+  } catch (e) {}
+
   return true;
 }
 
@@ -7025,7 +7446,7 @@ async function handleExtLogout() {
   await checkAccountVerificationLock();
 }
 
-function updateTgParseSummaryUI() {
+async function updateTgParseSummaryUI() {
   const inputEl = document.getElementById('tgLinksInput');
   const summaryEl = document.getElementById('tgParseSummary');
   const countBadge = document.getElementById('tgFreshCountBadge');
@@ -7036,6 +7457,16 @@ function updateTgParseSummaryUI() {
   if (!raw.trim()) {
     summaryEl.style.display = 'none';
     return;
+  }
+
+  // Ensure state.engagedTweetIds has latest data from local storage
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    try {
+      const stored = await chrome.storage.local.get(['engagedTweetIds']);
+      if (Array.isArray(stored?.engagedTweetIds)) {
+        state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), ...stored.engagedTweetIds]));
+      }
+    } catch (e) {}
   }
 
   const extracted = extractTweetLinks(raw);
@@ -7051,7 +7482,7 @@ function updateTgParseSummaryUI() {
   }
 }
 
-function handleCleanTgInput() {
+async function handleCleanTgInput() {
   const inputEl = document.getElementById('tgLinksInput');
   if (!inputEl) return;
   const raw = inputEl.value;
@@ -7060,12 +7491,47 @@ function handleCleanTgInput() {
     alert('No valid X/Twitter links detected in the text.');
     return;
   }
+
+  // Ensure state.engagedTweetIds has latest data from local storage
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    try {
+      const stored = await chrome.storage.local.get(['engagedTweetIds']);
+      if (Array.isArray(stored?.engagedTweetIds)) {
+        state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), ...stored.engagedTweetIds]));
+      }
+    } catch (e) {}
+  }
+
   const filtered = filterTweetLinks(extracted);
   const cleanList = (filtered.freshTweets.length > 0 ? filtered.freshTweets : extracted).map(t => t.canonicalUrl);
   const uniqueClean = Array.from(new Set(cleanList));
   inputEl.value = uniqueClean.join('\n');
-  updateTgParseSummaryUI();
-  alert(`✓ Cleaned input!\nKept ${uniqueClean.length} canonical link(s).\nAll Telegram timestamps, usernames, post numbers (#), and emojis have been stripped.`);
+
+  // Update summary elements reflecting the clean action
+  const summaryEl = document.getElementById('tgParseSummary');
+  const countBadge = document.getElementById('tgFreshCountBadge');
+  const breakdownEl = document.getElementById('tgBreakdownText');
+  if (summaryEl) summaryEl.style.display = 'block';
+  if (countBadge) {
+    countBadge.textContent = `${uniqueClean.length} Fresh`;
+    countBadge.style.color = uniqueClean.length > 0 ? '#10B981' : '#F59E0B';
+  }
+  if (breakdownEl) {
+    if (filtered.alreadyEngagedCount > 0 || filtered.duplicateCount > 0) {
+      breakdownEl.textContent = `Cleaned: ${uniqueClean.length} Fresh · Original: ${filtered.totalFound} · Already Engaged Removed: ${filtered.alreadyEngagedCount} · Duplicates Removed: ${filtered.duplicateCount}`;
+    } else {
+      breakdownEl.textContent = `Extracted: ${uniqueClean.length} · Duplicates Skipped: 0 · Already Engaged Skipped: 0`;
+    }
+  }
+
+  let msg = `✓ Cleaned input!\nKept ${uniqueClean.length} fresh canonical link(s).\nAll Telegram timestamps, usernames, post numbers (#), and emojis have been stripped.`;
+  if (filtered.alreadyEngagedCount > 0) {
+    msg += `\n\n🛡️ ${filtered.alreadyEngagedCount} already-engaged link(s) were automatically filtered out to save your time & credits.`;
+  }
+  if (filtered.duplicateCount > 0) {
+    msg += `\n\n✂️ ${filtered.duplicateCount} duplicate link(s) were removed.`;
+  }
+  alert(msg);
 }
 
 function updateCreditUI() {
@@ -7405,20 +7871,12 @@ async function handleAutoReplyEngage() {
     // Handle auto-ignore rule: post already liked and commented
     if (result && result.result && result.result.ignored) {
       logReplyConsole('✓ Auto-Ignored', result.result.reason || 'Already completed');
-      if (result.shouldClose && result.targetTabId) {
-        chrome.tabs?.remove(result.targetTabId).catch(() => null);
-      }
       alert(`ℹ️ Post Auto-Ignored:\n\n${result.result.reason}\n\nSince this post was already completed, no actions were performed and 0 credits were deducted.`);
       return;
     }
 
     // Engagement succeeded: deduct credit now
     deductCredits(1);
-
-    if (result && result.shouldClose && result.targetTabId) {
-      await sleep(1500);
-      chrome.tabs?.remove(result.targetTabId).catch(() => null);
-    }
 
     if (extracted.length === 1) {
       const tid = extracted[0].tweetId;
@@ -7468,10 +7926,6 @@ document.getElementById('autoPostReplyBtn')?.addEventListener('click', async () 
 
     updateAgentConsole('Auto-Posting', 'Opening tweet on X and submitting comment...');
     const result = await runAutonomousActionOnTweet(targetUrl, actions, replyText);
-
-    if (result && result.shouldClose && result.targetTabId) {
-      setTimeout(() => chrome.tabs?.remove(targetTabId), 1500);
-    }
 
     deductCredits(1);
     updateAgentConsole('✓ Posted Successfully', 'Reply typed and posted on X.com!');
@@ -7615,6 +8069,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
           if (chrome.storage?.local) chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
 
 
+          await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
           syncFloatingHud(tgWorkingTabId, {
             title: 'Telegram Group Engage', stateBadge: 'ENGAGING',
             indicator: `Tweet ${i + 1}/${total}`, done: successCount,
@@ -7629,7 +8084,10 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
         if (tgDoneEl) tgDoneEl.textContent = String(successCount);
 
         // Deduct credit & persist engaged tweet ID
-        deductCredits(1);
+        if (!actions.comment) {
+          // If actions.comment is true, 1 credit was already atomically deducted by the AI reply generation backend!
+          deductCredits(1, 'Telegram Raid', `Engaged @${t.handle || 'user'}`);
+        }
         state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
         if (chrome.storage?.local) chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
 
@@ -7654,22 +8112,47 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
           statusText: `${indexStr} ✓ Engaged @${t.handle || 'user'}`
         });
 
-        // Anti-ban randomized pacing sleep before next tweet
+        // Anti-ban randomized pacing sleep or safety batch rest break before next tweet
         if (i < total - 1 && !state.isAborted) {
-          const pacingSleep = Math.max(3, state.delaySeconds + Math.floor(Math.random() * 4 - 2));
+          const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
+          const safety = safetyRes?.atomx_safety_settings || {};
+          const breakAfter = getSafetyBatchBreakActions(safety, 10, 15);
+          const isBatchBreak = breakAfter > 0 && successCount > 0 && successCount % breakAfter === 0;
+
+          const waitDurationSec = isBatchBreak
+            ? getSafetyRestDurationSec(safety, 1, 3)
+            : getSafetyPacingDelay(safety, 'profileWait', 10, 20);
+
+          if (tgStateBadge) tgStateBadge.textContent = isBatchBreak ? 'BATCH_BREAK' : 'PACING';
           if (tgCountdown) tgCountdown.style.display = 'block';
-          for (let sec = pacingSleep; sec > 0; sec--) {
+
+          for (let sec = waitDurationSec; sec > 0; sec--) {
             if (state.isAborted) break;
-            if (tgStatus) tgStatus.textContent = `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`;
-            if (tgCountdown) tgCountdown.textContent = `Next tweet in 0:${String(sec).padStart(2, '0')}`;
+            const min = Math.floor(sec / 60);
+            const s = sec % 60;
+            const timeStr = min > 0 ? `${min}:${String(s).padStart(2, '0')}` : `0:${String(s).padStart(2, '0')}`;
+
+            if (isBatchBreak) {
+              if (tgStatus) tgStatus.textContent = `☕ Safety Batch Break: Resting ${timeStr} after ${successCount} tweets...`;
+              if (tgCountdown) tgCountdown.textContent = `☕ Break: ${timeStr} remaining...`;
+            } else {
+              if (tgStatus) tgStatus.textContent = `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`;
+              if (tgCountdown) tgCountdown.textContent = `Next tweet in ${timeStr}`;
+            }
+
             syncFloatingHud(null, {
-              title: 'Telegram Group Engage', stateBadge: 'PACING',
-              indicator: `Tweet ${i + 1}/${total}`, done: successCount,
-              collected: total, skipped: ignoredCount,
+              title: 'Telegram Group Engage',
+              stateBadge: isBatchBreak ? 'BATCH_BREAK' : 'PACING',
+              indicator: `Tweet ${i + 1}/${total}`,
+              done: successCount,
+              collected: total,
+              skipped: ignoredCount,
               progressPercent: donePercent,
-              statusText: `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`
+              statusText: isBatchBreak
+                ? `☕ Safety Batch Break: Resting ${timeStr} after ${successCount} tweets...`
+                : `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`
             });
-            logger(`Pacing Safety Delay (${indexStr})`, `Waiting ${sec}s before next post...`, `${i + 1}/${total}`);
+            logger(isBatchBreak ? 'Safety Batch Rest' : `Pacing Safety Delay (${indexStr})`, `Waiting ${timeStr} before next post...`, `${i + 1}/${total}`);
             await sleep(1000);
           }
           if (tgCountdown) tgCountdown.style.display = 'none';

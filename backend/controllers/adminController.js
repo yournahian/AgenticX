@@ -368,13 +368,19 @@ exports.getStats = async (req, res) => {
       return sum + val;
     }, 0);
 
+    const multiProviderService = require('../services/multiProviderService');
+    const apiLogs = await multiProviderService.getApiLogs().catch(() => []);
+    const ledgerDeductionsCount = ledger.filter(l => l.amount < 0 || (l.action || '').toLowerCase().includes('reply') || (l.action || '').toLowerCase().includes('ai') || (l.reason || '').toLowerCase().includes('reply')).length;
+    const logsSuccessCount = apiLogs.filter(l => l.status === 'SUCCESS' && (!l.statusCode || l.statusCode < 400)).length;
+    const totalAIGenCount = Math.max(ledgerDeductionsCount, logsSuccessCount, apiLogs.length);
+
     res.json({
       totalUsers: users.length,
       activeUsers: users.filter(u => u.status === 'ACTIVE').length,
       suspendedUsers: users.filter(u => u.status === 'SUSPENDED').length,
       pendingRequests: requests.filter(r => r.status === 'PENDING').length,
       totalCreditsCirculating: users.reduce((acc, u) => acc + (u.credits || 0), 0),
-      totalAIGenerations: ledger.filter(l => (l.action || '').toLowerCase().includes('reply')).length,
+      totalAIGenerations: totalAIGenCount,
       mrr: `$${mrrTotal}`,
       revenue: `$${totalRevenue.toFixed(0)}`
     });

@@ -1,7 +1,7 @@
 {
   "activeProvider": "groq",
-  "activeModel": "qwen/qwen3.8-27b",
-  "lastUpdated": "2026-10-12T22:50:00.000Z",
+  "activeModel": "allam-2-7b",
+  "lastUpdated": "2026-10-12T23:11:00.000Z",
   "updatedBy": "Admin Control Center",
   "apiKeys": {
     "gemini": ""
