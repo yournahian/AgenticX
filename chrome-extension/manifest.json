@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ATOMX ENGAGE — Twitter Growth Extension",
+  "name": "Twixor — Twitter Growth Extension",
   "version": "1.0.0",
-  "description": "Autonomous AI engagement, Sorsa booster, and audience growth for Twitter/X.",
+  "description": "Autonomous AI engagement, Score Accelerator, and CrowdFi growth for Twitter/X.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -11,7 +11,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "ATOMX ENGAGE",
+    "default_title": "Twixor",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

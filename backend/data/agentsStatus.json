@@ -1,35 +1,35 @@
 {
   "telegram": {
     "id": "telegram",
-    "name": "Telegram Group Engage",
+    "name": "TG Pulse",
     "icon": "✈️",
     "enabled": true,
     "reason": ""
   },
   "audience": {
     "id": "audience",
-    "name": "Audience Builder",
+    "name": "CrowdFi",
     "icon": "👥",
     "enabled": true,
     "reason": ""
   },
   "sorsa": {
     "id": "sorsa",
-    "name": "Sorsa Score Booster",
+    "name": "Score Accelerator",
     "icon": "⚡",
     "enabled": true,
     "reason": ""
   },
   "followers": {
     "id": "followers",
-    "name": "Followers Growth",
+    "name": "GrowthFi",
     "icon": "📈",
     "enabled": true,
     "reason": ""
   },
   "replyback": {
     "id": "replyback",
-    "name": "Reply Back Loop",
+    "name": "ReplyWave",
     "icon": "🔄",
     "enabled": true,
     "reason": ""
@@ -43,7 +43,7 @@
   },
   "creators": {
     "id": "creators",
-    "name": "Favorite Creators Radar",
+    "name": "CreatorX",
     "icon": "⭐",
     "enabled": true,
     "reason": ""

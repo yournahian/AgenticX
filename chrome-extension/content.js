@@ -2893,7 +2893,7 @@ let currentHudState = {
   active: false,
   isStopped: false,
   stateBadge: 'READY',
-  title: 'AtomX Agent',
+  title: 'Twixor Agent',
   indicator: '',
   done: 0,
   collected: 0,
@@ -5528,7 +5528,7 @@ async function executeReplyBackCycle(params = {}) {
 
     // Update Floating HUD
     updateFloatingHud({
-      title: 'Reply Back Loop',
+      title: 'ReplyWave',
       stateBadge: 'REPLYING',
       indicator: `Comment ${i + 1}/${snapshotQueue.length}`,
       done: doneCount,
@@ -7844,6 +7844,11 @@ async function discoverTopEngagedListTweets(params = {}) {
       const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
       if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
 
+      // STRICT: Root post only, skip retweets / reposts
+      const socialContext = art.querySelector('div[data-testid="socialContext"], span[data-testid="socialContext"]');
+      const isRetweet = !!socialContext || !!art.querySelector('svg[data-testid="icon-retweet"]') || /reposted|retweeted/i.test(socialContext?.innerText || '') || /reposted|retweeted/i.test(artText.slice(0, 120));
+      if (isRetweet) continue;
+
       const replyBtn = art.querySelector('button[data-testid="reply"], div[data-testid="reply"]');
       const repliesCount = extractTwitterMetric(replyBtn) || 0;
 
@@ -7886,7 +7891,7 @@ async function discoverTopEngagedListTweets(params = {}) {
     // Provide live scan progress on HUD
     const maxRepliesFound = Array.from(topTweetsMap.values()).reduce((max, t) => Math.max(max, t.repliesCount || 0), 0);
     updateFloatingHud({
-      title: 'Audience Builder',
+      title: 'CrowdFi',
       stateBadge: 'SCANNING',
       statusText: `Scanning list (${freshness})... Found ${topTweetsMap.size} posts (Highest: ${maxRepliesFound} comments)`
     });
@@ -8118,7 +8123,7 @@ async function discoverTopActiveListTweets(params = {}) {
     if (isNewest && candidateMap.size >= targetCount) {
       console.log(`[ATOMX FOLLOWERS] Found ${candidateMap.size} newest posts directly from top of timeline. Scan complete.`);
       updateFloatingHud({
-        title: 'Followers Increase',
+        title: 'GrowthFi',
         agentId: 'followers',
         stateBadge: 'ENGAGING',
         statusText: `Selected top ${Math.min(candidateMap.size, targetCount)} newest posts. Starting engagement...`,
@@ -8146,7 +8151,7 @@ async function discoverTopActiveListTweets(params = {}) {
 
     if (isNewest) {
       updateFloatingHud({
-        title: 'Followers Increase',
+        title: 'GrowthFi',
         agentId: 'followers',
         stateBadge: 'ENGAGING',
         statusText: `Getting newest posts... Found ${candidateMap.size}/${targetCount}`,
@@ -8155,7 +8160,7 @@ async function discoverTopActiveListTweets(params = {}) {
     } else {
       const maxReplies = Array.from(candidateMap.values()).reduce((m, c) => Math.max(m, c.repliesCount || 0), 0);
       updateFloatingHud({
-        title: 'Followers Increase',
+        title: 'GrowthFi',
         agentId: 'followers',
         stateBadge: 'SCANNING',
         statusText: `Scanning list (${freshness})... Found ${candidateMap.size} posts (Highest: ${maxReplies} comments)`,
@@ -8296,7 +8301,7 @@ async function executeFollowersListCycle(params = {}) {
 
     const statusMsg = `Engaging post [${engagedCount + 1}/${targetCount}] by @${authorHandle || 'user'}...`;
     updateFloatingHud({
-      title: 'Followers Increase',
+      title: 'GrowthFi',
       stateBadge: 'ENGAGING',
       indicator: `${engagedCount}/${targetCount}`,
       done: engagedCount,
@@ -8430,7 +8435,7 @@ async function executeFollowersListCycle(params = {}) {
     }
 
     updateFloatingHud({
-      title: 'Followers Increase',
+      title: 'GrowthFi',
       stateBadge: engagedCount >= targetCount ? 'DONE' : 'ENGAGING',
       indicator: `${engagedCount}/${targetCount}`,
       done: engagedCount,
@@ -8629,7 +8634,7 @@ async function executeFollowersListCycle(params = {}) {
       }
 
       updateFloatingHud({
-        title: 'Followers Increase',
+        title: 'GrowthFi',
         stateBadge: 'SCANNING',
         statusText: `Scanning (${freshness}). Found ${candidateMap.size} unengaged posts (${skippedCount} skipped)...`,
         skipped: skippedCount
@@ -8643,7 +8648,7 @@ async function executeFollowersListCycle(params = {}) {
       console.log(`[ATOMX FOLLOWERS] No unengaged posts found in timeframe (${freshness}).`);
       const emptyMsg = `No unengaged posts found in selected timeframe (${freshness}).`;
       updateFloatingHud({
-        title: 'Followers Increase',
+        title: 'GrowthFi',
         stateBadge: 'DONE',
         statusText: emptyMsg,
         timerBadge: '✓ Finished',
@@ -8812,7 +8817,7 @@ async function executeFollowersListCycle(params = {}) {
       console.log(`[ATOMX FOLLOWERS] No unengaged posts found in current feed.`);
       const emptyMsg = `No unengaged posts found in current list feed.`;
       updateFloatingHud({
-        title: 'Followers Increase',
+        title: 'GrowthFi',
         stateBadge: 'DONE',
         statusText: emptyMsg,
         timerBadge: '✓ Finished',

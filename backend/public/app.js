@@ -6969,13 +6969,13 @@ async function renderAdminAgentControls(container) {
     await fetchAdminAgentStatus();
   }
   const agents = AtomXState.agentStatusMap || {
-    telegram: { id: 'telegram', name: 'Telegram Group Engage', icon: '✈️', enabled: true, reason: '' },
-    audience: { id: 'audience', name: 'Audience Builder', icon: '👥', enabled: true, reason: '' },
-    sorsa: { id: 'sorsa', name: 'Sorsa Score Booster', icon: '⚡', enabled: true, reason: '' },
-    followers: { id: 'followers', name: 'Followers Growth', icon: '📈', enabled: true, reason: '' },
-    replyback: { id: 'replyback', name: 'Reply Back Loop', icon: '🔄', enabled: true, reason: '' },
+    telegram: { id: 'telegram', name: 'TG Pulse', icon: '✈️', enabled: true, reason: '' },
+    audience: { id: 'audience', name: 'CrowdFi', icon: '👥', enabled: true, reason: '' },
+    sorsa: { id: 'sorsa', name: 'Score Accelerator', icon: '⚡', enabled: true, reason: '' },
+    followers: { id: 'followers', name: 'GrowthFi', icon: '📈', enabled: true, reason: '' },
+    replyback: { id: 'replyback', name: 'ReplyWave', icon: '🔄', enabled: true, reason: '' },
     unfollow: { id: 'unfollow', name: 'Auto Clean & Unfollow', icon: '🧹', enabled: true, reason: '' },
-    creators: { id: 'creators', name: 'Favorite Creators Radar', icon: '⭐', enabled: true, reason: '' },
+    creators: { id: 'creators', name: 'CreatorX', icon: '⭐', enabled: true, reason: '' },
     defaulter: { id: 'defaulter', name: 'Find Defaulter', icon: '🔍', enabled: true, reason: '' },
     reciprocator: { id: 'reciprocator', name: 'Commenter Reciprocator', icon: '🤝', enabled: true, reason: '' },
     feedengager: { id: 'feedengager', name: 'Home Feed Engager', icon: '🏠', enabled: true, reason: '' },

@@ -1011,9 +1011,9 @@ async function processTgRaidStep() {
       console.log(`[ATOMX BG] TG Raid ${indexStr}: Skipped by user!`);
       const skippedItems = Array.isArray(raid.skippedItems) ? [...raid.skippedItems] : [];
       skippedItems.push({
-        url: tweet.canonicalUrl,
-        handle: tweet.handle,
-        tweetId: tweet.tweetId,
+        url: tweet.canonicalUrl || tweet.url || (tweet.tweetId ? `https://x.com/i/status/${tweet.tweetId}` : ''),
+        handle: tweet.handle || '',
+        tweetId: tweet.tweetId || '',
         reason: 'Skipped by user'
       });
       const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1, skippedItems };
@@ -1076,10 +1076,10 @@ async function processTgRaidStep() {
 
       // Add to skipped items for user visibility in panel
       skippedItems.push({
-        url: tweet.canonicalUrl,
-        handle: tweet.handle,
-        tweetId: tweet.tweetId,
-        reason: skipReason
+        url: tweet.canonicalUrl || tweet.url || (tweet.tweetId ? `https://x.com/i/status/${tweet.tweetId}` : ''),
+        handle: tweet.handle || '',
+        tweetId: tweet.tweetId || '',
+        reason: skipReason || 'Post skipped or unavailable'
       });
 
       // Save to engagedTweetIds if confirmed already engaged on Twitter or satisfied
@@ -1174,11 +1174,18 @@ async function processTgRaidStep() {
     }
 
   } catch (err) {
-    console.warn(`[ATOMX BG] TG Raid error on ${tweet.canonicalUrl}:`, err);
+    console.warn(`[ATOMX BG] TG Raid error on ${tweet?.canonicalUrl || tweet?.url}:`, err);
     if (tgRaidWorkingTabId) {
       tgRaidWorkingTabId = null;
     }
-    const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1 };
+    const skippedItems = Array.isArray(raid.skippedItems) ? [...raid.skippedItems] : [];
+    skippedItems.push({
+      url: tweet?.canonicalUrl || tweet?.url || (tweet?.tweetId ? `https://x.com/i/status/${tweet.tweetId}` : ''),
+      handle: tweet?.handle || '',
+      tweetId: tweet?.tweetId || '',
+      reason: `Error: ${err?.message || 'Execution error'}`
+    });
+    const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1, skippedItems };
     await chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
     setTimeout(() => processTgRaidStep(), 1500);
   } finally {
@@ -1375,7 +1382,7 @@ async function syncTgHud(raid, statusText, stateBadge = 'ENGAGING', progressPerc
     timerBadge
   };
   const activeHud = {
-    title: 'Telegram Group Engage',
+    title: 'TG Pulse',
     stateBadge,
     indicator: `Tweet ${currentIndex}/${total}`,
     done: successCount,
@@ -2543,7 +2550,8 @@ async function processAgentWorkflowStep() {
     // ─────────────────────────────────────────────────────────────────────
     if (isNewestFirst) {
       const searchFeedUrl = options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} -filter:replies -filter:retweets`)}&f=live` : null);
-      const primaryFeedUrl = searchFeedUrl || options.targetListUrl || options.feedUrl || (listId ? `https://x.com/i/lists/${listId}` : 'https://x.com/home');
+      const canonicalListUrl = options.targetListUrl || options.feedUrl || (listId ? `https://x.com/i/lists/${listId}` : 'https://x.com/home');
+      const primaryFeedUrl = searchFeedUrl || canonicalListUrl;
 
       await syncAgentHud(workflow, `Opening filtered search feed for newest pure posts...`, 'ENGAGING', 10);
       try {
@@ -2614,9 +2622,9 @@ async function processAgentWorkflowStep() {
     // BRANCH B: "MOST ACTIVE" (Scan within timeframe, rank by replies, queue top posts)
     // ─────────────────────────────────────────────────────────────────────
     else {
-      const searchUrl = (options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} -filter:replies -filter:retweets`)}&f=live` : null));
+      const searchFeedUrl = options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} -filter:replies -filter:retweets`)}&f=live` : null);
       const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : (options.feedUrl || 'https://x.com'));
-      const primaryFeedUrl = searchUrl || canonicalListUrl;
+      const primaryFeedUrl = searchFeedUrl || canonicalListUrl;
 
       await syncAgentHud(workflow, `Opening filtered search feed for top active posts (${options.freshness || '1h'})...`, 'SCANNING', 10);
       try {
@@ -2693,13 +2701,13 @@ async function processAgentWorkflowStep() {
   // =========================================================================
   if (agentId === 'audience') {
     const listId = options.listId;
-    const searchUrl = options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} lang:en -filter:retweets -filter:replies exclude:replies`)}&f=live` : null);
-    const canonicalListUrl = options.targetListUrl || (listId ? `https://x.com/i/lists/${listId}` : null);
-    const primaryFeedUrl = searchUrl || canonicalListUrl || options.feedUrl || 'https://x.com';
+    const searchFeedUrl = options.searchFeedUrl || (listId ? `https://x.com/search?q=${encodeURIComponent(`list:${listId} -filter:replies -filter:retweets`)}&f=live` : null);
+    const canonicalListUrl = options.targetListUrl || options.feedUrl || (listId ? `https://x.com/i/lists/${listId}` : 'https://x.com');
+    const primaryFeedUrl = searchFeedUrl || canonicalListUrl;
     const targetCount = Number(options.targetCount) || 10;
     const verifiedXHandle = options.verifiedXHandle || (await chrome.storage.local.get(['verifiedXHandle'])).verifiedXHandle;
 
-    await syncAgentHud(workflow, `Opening Twitter List to discover top engaged posts...`, 'SCANNING', 10);
+    await syncAgentHud(workflow, `Opening filtered search feed to discover top engaged posts...`, 'SCANNING', 10);
     try {
       const tabId = await getOrCreateReusedTab(agentWorkflowWorkingTabId, primaryFeedUrl);
       agentWorkflowWorkingTabId = tabId;
@@ -2717,8 +2725,12 @@ async function processAgentWorkflowStep() {
       }, 60000);
 
       let topTweets = Array.isArray(topTweetsRes?.topTweets) ? topTweetsRes.topTweets : [];
-      if (topTweets.length === 0 && options.searchFeedUrl && options.searchFeedUrl !== primaryFeedUrl) {
-        await getOrCreateReusedTab(tabId, options.searchFeedUrl);
+
+      // Fallback: If 0 tweets in search feed (e.g. list has low original post activity), check list timeline directly
+      if (topTweets.length === 0 && canonicalListUrl && primaryFeedUrl !== canonicalListUrl) {
+        console.log('[ATOMX BG] Search feed yielded 0 tweets. Checking list timeline directly...');
+        await syncAgentHud(workflow, `Checking list timeline directly for active posts...`, 'SCANNING', 15);
+        await getOrCreateReusedTab(tabId, canonicalListUrl);
         await waitForTabLoad(tabId, 15000);
         await delay(3000);
         topTweetsRes = await sendMessageToTab(tabId, {
