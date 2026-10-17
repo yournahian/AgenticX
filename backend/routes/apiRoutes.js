@@ -129,4 +129,9 @@ router.post('/admin/offers', requireAdmin, adminController.saveOffer);
 // Universal Version & Update Engine
 router.get('/system/version', adminController.getSystemVersion);
 
+// Agent Status & Killswitch Management (Admin on/off with custom maintenance reason)
+router.get('/agents/status', adminController.getAgentStatus);
+router.get('/admin/agents/status', requireAdmin, adminController.getAgentStatus);
+router.post('/admin/agents/status', requireAdmin, adminController.saveAgentStatus);
+
 module.exports = router;

@@ -18,13 +18,30 @@ const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const attachedDebuggerTabs = new Set();
+const recTabs = new Set();
+const castPorts = new Map(); // tabId -> port
 
 if (typeof chrome !== 'undefined' && chrome.debugger && chrome.debugger.onDetach) {
   chrome.debugger.onDetach.addListener((source, reason) => {
     if (source?.tabId) {
       attachedDebuggerTabs.delete(source.tabId);
+      recTabs.delete(source.tabId);
+      castPorts.delete(source.tabId);
       console.log(`[ATOMX CDP] Debugger detached from tab ${source.tabId} (${reason}).`);
     }
+  });
+}
+
+if (typeof chrome !== 'undefined' && chrome.debugger && chrome.debugger.onEvent) {
+  chrome.debugger.onEvent.addListener((src, method, params) => {
+    if (method !== 'Page.screencastFrame' || !src || src.tabId == null) return;
+    const port = castPorts.get(src.tabId);
+    sendCdpCommand(src.tabId, 'Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+    if (!port) return;
+    const md = params.metadata || {};
+    try {
+      port.postMessage({ type: 'frame', data: params.data, w: md.deviceWidth, h: md.deviceHeight, ts: md.timestamp });
+    } catch (e) {}
   });
 }
 
@@ -54,6 +71,7 @@ async function attachDebuggerSafely(tabId) {
 
 async function detachDebuggerSafely(tabId) {
   if (typeof chrome === 'undefined' || !chrome.debugger || !tabId) return;
+  if (recTabs.has(tabId)) return; // Keep attached if active recording screencast
   try {
     if (attachedDebuggerTabs.has(tabId)) {
       attachedDebuggerTabs.delete(tabId);
@@ -61,6 +79,14 @@ async function detachDebuggerSafely(tabId) {
       console.log(`[ATOMX CDP] Debugger detached from tab ${tabId}`);
     }
   } catch (e) {}
+}
+
+async function stopCast(tabId) {
+  if (tabId == null) return;
+  castPorts.delete(tabId);
+  try { await sendCdpCommand(tabId, 'Page.stopScreencast'); } catch (e) {}
+  recTabs.delete(tabId);
+  await detachDebuggerSafely(tabId);
 }
 
 function sendCdpCommand(tabId, method, params = {}) {
@@ -292,8 +318,10 @@ async function getOrCreateReusedTab(existingTabId, targetUrl) {
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[ATOMX BG] Extension installed.');
-  chrome.storage.local.get(['credits'], (res) => {
+  chrome.storage.local.get(['credits', 'atomx_safety_settings'], (res) => {
     if (res.credits === undefined) chrome.storage.local.set({ credits: 10000 });
+    const resolvedSafety = getResolvedSafetySettings(res?.atomx_safety_settings || {});
+    chrome.storage.local.set({ atomx_safety_settings: resolvedSafety });
   });
   chrome.contextMenus.create({
     id: 'atomx-generate-reply',
@@ -306,6 +334,37 @@ chrome.runtime.onInstalled.addListener(() => {
 // POPUP LIFECYCLE (Guaranteed detection when popup closes to show Floating HUD)
 // ─────────────────────────────────────────────
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.sender && port.sender.id !== chrome.runtime.id) return;
+
+  if (port.name === 'screencast') {
+    let tabId = null;
+    port.onMessage.addListener(async (m) => {
+      try {
+        if (m.cmd === 'start') {
+          tabId = Number(m.tabId);
+          recTabs.add(tabId);
+          await attachDebuggerSafely(tabId);
+          castPorts.set(tabId, port);
+          await sendCdpCommand(tabId, 'Page.startScreencast', {
+            format: 'jpeg',
+            quality: m.quality || 88,
+            maxWidth: m.maxWidth || 1920,
+            maxHeight: m.maxHeight || 1200,
+            everyNthFrame: 1
+          });
+          port.postMessage({ type: 'started' });
+        }
+        if (m.cmd === 'stop') await stopCast(tabId);
+      } catch (e) {
+        recTabs.delete(tabId);
+        castPorts.delete(tabId);
+        try { port.postMessage({ type: 'error', error: String((e && e.message) || e) }); } catch (x) {}
+      }
+    });
+    port.onDisconnect.addListener(() => { if (tabId != null) stopCast(tabId); });
+    return;
+  }
+
   if (port.name === 'atomx_popup_lifecycle') {
     chrome.storage.local.set({ atomx_popup_open: true }).catch(() => null);
     // When popup opens, instantly hide Floating HUD on tabs so they don't overlap
@@ -429,6 +488,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const tabId = request.tabId || sender?.tab?.id;
     if (tabId) detachDebuggerSafely(tabId);
     sendResponse({ ok: true });
+    return true;
+  }
+
+  // ── TabCapture MediaStream ID for Recording ─────────────────────────
+  if (request.type === 'tabstream') {
+    (async () => {
+      try {
+        const id = await chrome.tabCapture.getMediaStreamId({ targetTabId: Number(request.tabId) });
+        sendResponse({ ok: true, id });
+      } catch (e) {
+        sendResponse({ ok: false, error: String((e && e.message) || e) });
+      }
+    })();
+    return true;
+  }
+
+  // ── Trusted Native Input Actions (Wheel / Detach) ────────────────────
+  if (request.type === 'trusted') {
+    const tabId = request.tabId || sender?.tab?.id;
+    (async () => {
+      try {
+        if (request.action === 'detach') {
+          if (tabId) detachDebuggerSafely(tabId);
+          sendResponse({ ok: true });
+          return;
+        }
+        if (request.action === 'wheel') {
+          await attachDebuggerSafely(tabId);
+          await sendCdpCommand(tabId, 'Input.dispatchMouseEvent', {
+            type: 'mouseWheel',
+            x: Number(request.x) || 400,
+            y: Number(request.y) || 400,
+            deltaX: 0,
+            deltaY: Number(request.dy) || 0,
+            pointerType: 'mouse'
+          });
+          sendResponse({ ok: true });
+          return;
+        }
+        sendResponse({ ok: false, error: 'unknown action' });
+      } catch (e) {
+        sendResponse({ ok: false, error: String((e && e.message) || e) });
+      }
+    })();
     return true;
   }
 
@@ -767,6 +870,17 @@ async function handleAiReplyGeneration(request, sendResponse) {
 let tgRaidWorkingTabId = null;
 
 async function handleStartTgRaid(request, sendResponse) {
+  // Check if telegram agent is disabled by admin
+  try {
+    const statusRes = await chrome.storage.local.get(['atomx_agent_status_map']).catch(() => ({}));
+    const tgStatus = statusRes?.atomx_agent_status_map?.['telegram'];
+    if (tgStatus && tgStatus.enabled === false) {
+      const reason = tgStatus.reason ? ` Reason: ${tgStatus.reason}` : '';
+      sendResponse({ ok: false, error: `Telegram Group Engage is disabled by administrator.${reason}` });
+      return;
+    }
+  } catch (e) {}
+
   const { tweets, actions, options = {} } = request;
   if (!tweets || tweets.length === 0) { sendResponse({ ok: false, error: 'No tweets.' }); return; }
 
@@ -780,12 +894,13 @@ async function handleStartTgRaid(request, sendResponse) {
     successCount: 0,
     ignoredCount: 0,
     skippedCommentsCount: 0,
+    skippedItems: [],
     total,
     startedAt: Date.now()
   };
 
   await chrome.storage.local.remove(['atomx_hud_dismissed', 'atomx_rate_limited', 'atomx_daily_post_limit']).catch(() => null);
-  await chrome.storage.local.set({ atomx_tg_raid: raidState, atomx_skip_current: false });
+  await chrome.storage.local.set({ atomx_tg_raid: raidState, atomx_skip_current: false, atomx_workflow_paused: false });
   await syncTgHud(raidState, `Starting Telegram Raid engagement (${total} tweets)...`, 'ENGAGING', 5);
 
   // Keepalive heartbeat so service worker stays alive
@@ -894,10 +1009,17 @@ async function processTgRaidStep() {
 
     if (recheckStored?.atomx_skip_current) {
       console.log(`[ATOMX BG] TG Raid ${indexStr}: Skipped by user!`);
-      const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1 };
+      const skippedItems = Array.isArray(raid.skippedItems) ? [...raid.skippedItems] : [];
+      skippedItems.push({
+        url: tweet.canonicalUrl,
+        handle: tweet.handle,
+        tweetId: tweet.tweetId,
+        reason: 'Skipped by user'
+      });
+      const updatedRaid = { ...raid, currentIndex: currentIndex + 1, ignoredCount: ignoredCount + 1, skippedItems };
       await chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
       if (updatedRaid.currentIndex < total) {
-        setTimeout(() => processTgRaidStep(), 150);
+        setTimeout(() => processTgRaidStep(), 800);
       } else {
         await finishTgRaid(updatedRaid);
       }
@@ -944,11 +1066,21 @@ async function processTgRaidStep() {
     let newSuccessCount = successCount;
     let newIgnoredCount = ignoredCount;
     let newSkippedComments = raid.skippedCommentsCount || 0;
+    const skippedItems = Array.isArray(raid.skippedItems) ? [...raid.skippedItems] : [];
+    const skipReason = isIgnored ? (result?.commentSkipReason || result?.reason || (result?.error ? `Error: ${result.error}` : 'Comments restricted or post unavailable')) : null;
 
     if (isIgnored) {
       newIgnoredCount++;
       if (result?.commentSkipped) newSkippedComments++;
-      console.log(`[ATOMX BG] TG Raid ${indexStr}: Auto-ignored/skipped — ${result?.reason || 'unfulfilled'}`);
+      console.log(`[ATOMX BG] TG Raid ${indexStr}: Auto-ignored/skipped — ${skipReason}`);
+
+      // Add to skipped items for user visibility in panel
+      skippedItems.push({
+        url: tweet.canonicalUrl,
+        handle: tweet.handle,
+        tweetId: tweet.tweetId,
+        reason: skipReason
+      });
 
       // Save to engagedTweetIds if confirmed already engaged on Twitter or satisfied
       const rLower = (result?.reason || '').toLowerCase();
@@ -982,13 +1114,14 @@ async function processTgRaidStep() {
       currentIndex: currentIndex + 1,
       successCount: newSuccessCount,
       ignoredCount: newIgnoredCount,
-      skippedCommentsCount: newSkippedComments
+      skippedCommentsCount: newSkippedComments,
+      skippedItems
     };
     await chrome.storage.local.set({ atomx_tg_raid: updatedRaid, atomx_skip_current: false });
 
     // HUD update with result
     const statusLabel = isIgnored
-      ? `${indexStr} Skipped ${displayCurrent} (already done)`
+      ? `${indexStr} Skipped ${displayCurrent} (${result?.commentSkipReason || result?.reason || 'already done'})`
       : `${indexStr} ✓ Engaged ${displayCurrent}`;
 
     await syncTgHud(
@@ -1003,18 +1136,24 @@ async function processTgRaidStep() {
 
     // Schedule anti-ban pacing delay or safety batch rest break before next tweet
     if (updatedRaid.currentIndex < total) {
-      if (result?.skipped || result?.aborted) {
-        // Immediate jump to next tweet on user skip/abort without artificial pacing delay
-        setTimeout(() => processTgRaidStep(), 150);
+      if (recheckStored?.atomx_skip_current) {
+        // User explicitly clicked the Skip button on HUD -> transition swiftly
+        setTimeout(() => processTgRaidStep(), 800);
+      } else if (result?.skipped || result?.aborted || isIgnored) {
+        // Auto-skipped (comments restricted, post unavailable, already done, etc.)
+        // Pacing delay 3s with active countdown timer so user sees live visual countdown
+        console.log(`[ATOMX BG] TG Raid: Tweet was skipped (${skipReason}). Waiting 3s cooldown before next tweet...`);
+        await schedulePacingCountdown(3, updatedRaid, currentIndex + 1, total, nextInfo || 'Next post');
       } else {
         const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
         const safety = safetyRes?.atomx_safety_settings || {};
-        const breakAfter = getSafetyBatchBreakActions(safety, 10, 15);
+        const isBatchBreak = shouldTakeSafetyBatchBreak(newSuccessCount, updatedRaid, safety, 10, 15);
 
         // Check if batch rest is due
-        if (breakAfter > 0 && newSuccessCount > 0 && newSuccessCount % breakAfter === 0) {
+        if (isBatchBreak) {
+          await chrome.storage.local.set({ atomx_tg_raid: updatedRaid });
           const restSec = getSafetyRestDurationSec(safety, 1, 3);
-          console.log(`[ATOMX BG] TG Raid: Batch of ${breakAfter} tweets complete. Taking safety break of ${restSec}s...`);
+          console.log(`[ATOMX BG] TG Raid: Batch complete at ${newSuccessCount} tweets. Taking safety break of ${restSec}s...`);
           await schedulePacingCountdown(
             restSec,
             updatedRaid,
@@ -1023,7 +1162,9 @@ async function processTgRaidStep() {
             `Safety Batch Break: Resting ${Math.round(restSec / 60)}m...`
           );
         } else {
+          await chrome.storage.local.set({ atomx_tg_raid: updatedRaid });
           const delaySec = getSafetyPacingDelay(safety, 'profileWait', 10, 20);
+          console.log(`[ATOMX BG] TG Raid: Anti-ban wait delay ${delaySec}s before next tweet...`);
           await schedulePacingCountdown(delaySec, updatedRaid, currentIndex + 1, total, nextInfo);
         }
       }
@@ -1046,6 +1187,11 @@ async function processTgRaidStep() {
 }
 
 async function schedulePacingCountdown(delaySec, raid, completedIndex, total, nextActionText = '') {
+  if (delaySec <= 0) {
+    setTimeout(() => processTgRaidStep(), 200);
+    return;
+  }
+
   for (let sec = delaySec; sec > 0; sec--) {
     let recheckStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_workflow_paused', 'atomx_skip_current']).catch(() => ({}));
     if (!recheckStored?.atomx_tg_raid?.active) return; // Aborted
@@ -1060,7 +1206,7 @@ async function schedulePacingCountdown(delaySec, raid, completedIndex, total, ne
     // If workflow is paused, freeze and hold here until resumed
     while (recheckStored?.atomx_workflow_paused || recheckStored?.atomx_tg_raid?.isPaused) {
       await syncTgHud(
-        recheckStored.atomx_tg_raid,
+        recheckStored?.atomx_tg_raid || raid,
         '⏸️ Workflow Paused by User',
         'PAUSED',
         Math.round((completedIndex / total) * 100),
@@ -1083,23 +1229,42 @@ async function schedulePacingCountdown(delaySec, raid, completedIndex, total, ne
     const s = sec % 60;
     const timeStr = min > 0 ? `${min}:${String(s).padStart(2, '0')}` : `0:${String(s).padStart(2, '0')}`;
     const isBatchBreak = sec > 60 || (nextActionText && nextActionText.includes('Batch Break'));
+    const isSkippedCooldown = nextActionText && nextActionText.includes('skipped');
+
     const statusMsg = isBatchBreak
       ? `☕ Safety Batch Break: Resting ${timeStr} after ${completedIndex} tweets...`
-      : `Anti-ban delay: ${sec}s before ${nextActionText || ('tweet ' + (completedIndex + 1) + '/' + total)}...`;
+      : (isSkippedCooldown
+          ? `⚠️ Skipped post cooldown: ${sec}s before ${nextActionText || ('tweet ' + (completedIndex + 1) + '/' + total)}...`
+          : `⏳ Profile Wait (Between Accounts): ${sec}s before ${nextActionText || ('tweet ' + (completedIndex + 1) + '/' + total)}...`);
+
+    const countdownLabel = isBatchBreak
+      ? `☕ Break: ${timeStr}`
+      : (isSkippedCooldown ? `Cooldown: ${timeStr}` : `Profile Wait: ${timeStr}`);
 
     await syncTgHud(
-      recheckStored.atomx_tg_raid,
+      recheckStored?.atomx_tg_raid || raid,
       statusMsg,
       isBatchBreak ? 'BATCH_BREAK' : 'PACING',
       Math.round((completedIndex / total) * 100),
-      isBatchBreak ? `☕ Break: ${timeStr}` : `Next tweet in ${timeStr}`,
-      nextActionText || `Tweet ${completedIndex + 1}/${total}`,
+      countdownLabel,
+      countdownLabel,
       `⏱️ ${timeStr}`
     );
     await delay(1000);
   }
 
-  // PACING FINISHED: DIRECTLY CALL processTgRaidStep() so it continues without getting stuck!
+  // PACING FINISHED: Clear countdown text before processing next tweet
+  const curRaid = (await chrome.storage.local.get(['atomx_tg_raid']).catch(() => ({})))?.atomx_tg_raid || raid;
+  await syncTgHud(
+    curRaid,
+    `Anti-ban delay complete. Navigating to next tweet...`,
+    'ENGAGING',
+    Math.round((completedIndex / total) * 100),
+    '',
+    nextActionText || `Tweet ${completedIndex + 1}/${total}`,
+    '⚡ Active'
+  );
+
   setTimeout(() => processTgRaidStep(), 200);
 }
 
@@ -1319,40 +1484,137 @@ async function verifyTabAccountLock(tabId, expectedHandle, workflow) {
   return { ok: true };
 }
 
+function getResolvedSafetySettings(rawSafety = {}) {
+  const s = { ...rawSafety };
+
+  // 1. Reply Delay (seconds)
+  let rMin = s.replyDelayMin !== undefined ? Number(s.replyDelayMin) : (s.replyDelay !== undefined ? Math.max(0, Number(s.replyDelay) - 3) : 3);
+  let rMax = s.replyDelayMax !== undefined ? Number(s.replyDelayMax) : (s.replyDelay !== undefined ? Number(s.replyDelay) : 6);
+  if (isNaN(rMin)) rMin = 3;
+  if (isNaN(rMax)) rMax = 6;
+  if (rMin > rMax) [rMin, rMax] = [rMax, rMin];
+  s.replyDelayMin = rMin;
+  s.replyDelayMax = rMax;
+  s.replyDelay = rMax;
+
+  // 2. Profile Wait (seconds)
+  let pMin = s.profileWaitMin !== undefined ? Number(s.profileWaitMin) : (s.profileWait !== undefined ? Math.max(0, Number(s.profileWait) - 10) : 10);
+  let pMax = s.profileWaitMax !== undefined ? Number(s.profileWaitMax) : (s.profileWait !== undefined ? Number(s.profileWait) : 20);
+  if (isNaN(pMin)) pMin = 10;
+  if (isNaN(pMax)) pMax = 20;
+  if (pMin > pMax) [pMin, pMax] = [pMax, pMin];
+  s.profileWaitMin = pMin;
+  s.profileWaitMax = pMax;
+  s.profileWait = pMax;
+
+  // 3. Break Actions (actions count)
+  let bMin = s.breakActionsMin !== undefined ? Number(s.breakActionsMin) : (s.breakActions !== undefined ? Math.max(0, Number(s.breakActions) - 5) : 10);
+  let bMax = s.breakActionsMax !== undefined ? Number(s.breakActionsMax) : (s.breakActions !== undefined ? Number(s.breakActions) : 15);
+  if (isNaN(bMin)) bMin = 10;
+  if (isNaN(bMax)) bMax = 15;
+  if (bMin > bMax) [bMin, bMax] = [bMax, bMin];
+  s.breakActionsMin = bMin;
+  s.breakActionsMax = bMax;
+  s.breakActions = bMax;
+
+  // 4. Rest Duration (minutes)
+  let rdMin = s.restDurationMin !== undefined ? Number(s.restDurationMin) : (s.restDuration !== undefined ? Math.max(0, Number(s.restDuration) - 1) : 1);
+  let rdMax = s.restDurationMax !== undefined ? Number(s.restDurationMax) : (s.restDuration !== undefined ? Number(s.restDuration) : 3);
+  if (isNaN(rdMin)) rdMin = 1;
+  if (isNaN(rdMax)) rdMax = 3;
+  if (rdMin > rdMax) [rdMin, rdMax] = [rdMax, rdMin];
+  s.restDurationMin = rdMin;
+  s.restDurationMax = rdMax;
+  s.restDuration = rdMax;
+
+  return s;
+}
+
 function getSafetyPacingDelay(safety, type = 'replyDelay', fallbackMin = 3, fallbackMax = 8) {
-  if (!safety) return Math.floor(fallbackMin + Math.random() * (fallbackMax - fallbackMin + 1));
-  if (safety.cursorSpeed !== undefined && Number(safety.cursorSpeed) === 0) return 0; // Strictly 0 in Instant mode
+  const resolved = getResolvedSafetySettings(safety);
   const minKey = `${type}Min`;
   const maxKey = `${type}Max`;
-  let min = safety[minKey] !== undefined ? Number(safety[minKey]) : (safety[type] !== undefined ? Number(safety[type]) : fallbackMin);
-  let max = safety[maxKey] !== undefined ? Number(safety[maxKey]) : (safety[type] !== undefined ? Number(safety[type]) : fallbackMax);
-  if (min === 0 && max === 0) return 0; // Strictly respect 0s delay when user configured 0
-  if (safety[type] === 0) return 0;
-  if (min > max) [min, max] = [max, min];
-  return Math.floor(min + Math.random() * (max - min + 1));
+  const min = resolved[minKey] !== undefined ? resolved[minKey] : fallbackMin;
+  const max = resolved[maxKey] !== undefined ? resolved[maxKey] : fallbackMax;
+  if (min === 0 && max === 0) return 0;
+  const low = Math.min(min, max);
+  const high = Math.max(min, max);
+  const chosen = Math.floor(low + Math.random() * (high - low + 1));
+  console.log(`[ATOMX BG] Dynamic safety delay for ${type}: chosen ${chosen}s from range [${low}s - ${high}s]`);
+  return chosen;
 }
 
 function getSafetyBatchBreakActions(safety, fallbackMin = 10, fallbackMax = 15) {
-  if (!safety) return fallbackMax;
-  let min = safety.breakActionsMin !== undefined ? Number(safety.breakActionsMin) : (safety.breakActions !== undefined ? Number(safety.breakActions) : fallbackMin);
-  let max = safety.breakActionsMax !== undefined ? Number(safety.breakActionsMax) : (safety.breakActions !== undefined ? Number(safety.breakActions) : fallbackMax);
-  if (min === 0 && max === 0) return 0; // 0 means Take Break After is completely DISABLED!
-  if (min > max) [min, max] = [max, min];
-  const chosen = Math.floor(min + Math.random() * (max - min + 1));
-  return chosen <= 0 ? 0 : chosen;
+  const resolved = getResolvedSafetySettings(safety);
+  const min = resolved.breakActionsMin !== undefined ? resolved.breakActionsMin : fallbackMin;
+  const max = resolved.breakActionsMax !== undefined ? resolved.breakActionsMax : fallbackMax;
+  if (min === 0 && max === 0) return 0;
+  const low = Math.min(min, max);
+  const high = Math.max(min, max);
+  return Math.floor(low + Math.random() * (high - low + 1));
+}
+
+function shouldTakeSafetyBatchBreak(currentSuccessCount, stateObj, safety, fallbackMin = 10, fallbackMax = 15) {
+  const resolved = getResolvedSafetySettings(safety);
+  const min = resolved.breakActionsMin !== undefined ? resolved.breakActionsMin : fallbackMin;
+  const max = resolved.breakActionsMax !== undefined ? resolved.breakActionsMax : fallbackMax;
+  if (min === 0 && max === 0) return false;
+
+  if (!stateObj || typeof stateObj !== 'object') return false;
+
+  const low = Math.min(min, max);
+  const high = Math.max(min, max);
+
+  // Initialize or re-randomize nextBreakInterval if not yet set
+  if (!stateObj.nextBreakInterval || stateObj.nextBreakInterval <= 0) {
+    stateObj.nextBreakInterval = Math.floor(low + Math.random() * (high - low + 1));
+    console.log(`[ATOMX BG] Initial batch break scheduled after ${stateObj.nextBreakInterval} actions (range ${low}-${high}).`);
+  }
+
+  const lastBreak = Number(stateObj.lastBreakSuccessCount || 0);
+  const actionsSinceBreak = currentSuccessCount - lastBreak;
+
+  if (currentSuccessCount > 0 && actionsSinceBreak >= stateObj.nextBreakInterval) {
+    stateObj.lastBreakSuccessCount = currentSuccessCount;
+    stateObj.nextBreakInterval = Math.floor(low + Math.random() * (high - low + 1));
+    console.log(`[ATOMX BG] Batch break triggered at ${currentSuccessCount} actions! Next break scheduled after ${stateObj.nextBreakInterval} actions.`);
+    return true;
+  }
+
+  return false;
 }
 
 function getSafetyRestDurationSec(safety, fallbackMinMin = 1, fallbackMaxMin = 3) {
-  if (!safety) return 60;
-  let min = safety.restDurationMin !== undefined ? Number(safety.restDurationMin) : (safety.restDuration !== undefined ? Number(safety.restDuration) : fallbackMinMin);
-  let max = safety.restDurationMax !== undefined ? Number(safety.restDurationMax) : (safety.restDuration !== undefined ? Number(safety.restDuration) : fallbackMaxMin);
-  if (min > max) [min, max] = [max, min];
-  const chosenMin = min + Math.random() * (max - min);
-  return Math.max(5, Math.round(chosenMin * 60));
+  const resolved = getResolvedSafetySettings(safety);
+  let minMin = resolved.restDurationMin !== undefined ? resolved.restDurationMin : fallbackMinMin;
+  let maxMin = resolved.restDurationMax !== undefined ? resolved.restDurationMax : fallbackMaxMin;
+  if (minMin === 0 && maxMin === 0) return 0;
+  if (minMin > maxMin) [minMin, maxMin] = [maxMin, minMin];
+
+  const minSec = Math.round(minMin * 60);
+  const maxSec = Math.round(maxMin * 60);
+
+  const chosenSec = Math.floor(minSec + Math.random() * (maxSec - minSec + 1));
+  console.log(`[ATOMX BG] Dynamic batch rest duration: chosen ${chosenSec}s (${Math.round(chosenSec / 60)}m) from range [${minMin}m - ${maxMin}m]`);
+  return Math.max(5, chosenSec);
 }
 
 async function handleStartAgentWorkflow(request, sendResponse) {
   const { agentId, title, items = [], options = {}, tabId } = request;
+
+  // Check if agent is disabled by admin
+  if (agentId) {
+    try {
+      const statusRes = await chrome.storage.local.get(['atomx_agent_status_map']).catch(() => ({}));
+      const aStatus = statusRes?.atomx_agent_status_map?.[agentId];
+      if (aStatus && aStatus.enabled === false) {
+        const reason = aStatus.reason ? ` Reason: ${aStatus.reason}` : '';
+        sendResponse({ ok: false, error: `${title || agentId} is temporarily disabled by administrator.${reason}` });
+        return;
+      }
+    } catch (e) {}
+  }
+
   if ((!items || items.length === 0) && !(agentId === 'reciprocator' && options.postUrl) && !(agentId === 'feedengager') && !(agentId === 'nicheengager') && !(agentId === 'tgliker') && !(options.feedUrl) && !(agentId === 'followers') && !(agentId === 'audience') && !(agentId === 'unfollow')) {
     sendResponse({ ok: false, error: 'No targets/items provided.' });
     return;
@@ -1726,11 +1988,13 @@ async function processAgentWorkflowStep() {
 
         if (!isIgnored) {
           const safety = safetyBg?.atomx_safety_settings || {};
-          const breakAfter = getSafetyBatchBreakActions(safety, 10, 15);
-          if (breakAfter > 0 && workflow.successCount > 0 && workflow.successCount % breakAfter === 0) {
+          const isBatchBreak = shouldTakeSafetyBatchBreak(workflow.successCount, workflow, safety, 10, 15);
+          if (isBatchBreak) {
+            await chrome.storage.local.set({ atomx_agent_workflow: workflow });
             const restSec = getSafetyRestDurationSec(safety, 1, 3);
             await scheduleAgentPacingCountdown(restSec, workflow, workflow.successCount, isAllFound ? currentTotalDone : targetCount, `Safety Batch Break: Resting ${Math.round(restSec / 60)}m...`);
           } else {
+            await chrome.storage.local.set({ atomx_agent_workflow: workflow });
             const delaySec = getSafetyPacingDelay(safety, 'profileWait', 10, 20);
             if (delaySec > 0) {
               await scheduleAgentPacingCountdown(delaySec, workflow, workflow.successCount, isAllFound ? currentTotalDone : targetCount, `Next commenter from your post`);
@@ -1944,8 +2208,9 @@ async function processAgentWorkflowStep() {
           if (workflow.successCount < targetCount) {
             const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
             const safety = safetyRes?.atomx_safety_settings || {};
-            const breakAfter = getSafetyBatchBreakActions(safety, 10, 15);
-            if (breakAfter > 0 && workflow.successCount > 0 && workflow.successCount % breakAfter === 0) {
+            const isBatchBreak = shouldTakeSafetyBatchBreak(workflow.successCount, workflow, safety, 10, 15);
+            if (isBatchBreak) {
+              await chrome.storage.local.set({ atomx_agent_workflow: workflow });
               const restSec = getSafetyRestDurationSec(safety, 1, 3);
               await scheduleAgentPacingCountdown(
                 restSec,
@@ -1955,7 +2220,8 @@ async function processAgentWorkflowStep() {
                 `Safety Batch Break: Resting ${Math.round(restSec / 60)}m...`
               );
             } else {
-              const randomizedDelay = getSafetyPacingDelay(safety, 'replyDelay', 3, 6);
+              await chrome.storage.local.set({ atomx_agent_workflow: workflow });
+              const randomizedDelay = getSafetyPacingDelay(safety, 'profileWait', 10, 20);
               await scheduleAgentPacingCountdown(
                 randomizedDelay,
                 workflow,
@@ -2173,8 +2439,9 @@ async function processAgentWorkflowStep() {
           if (workflow.successCount < targetCount) {
             const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
             const safety = safetyRes?.atomx_safety_settings || {};
-            const breakAfter = getSafetyBatchBreakActions(safety, 10, 15);
-            if (workflow.successCount > 0 && workflow.successCount % breakAfter === 0) {
+            const isBatchBreak = shouldTakeSafetyBatchBreak(workflow.successCount, workflow, safety, 10, 15);
+            if (isBatchBreak) {
+              await chrome.storage.local.set({ atomx_agent_workflow: workflow });
               const restSec = getSafetyRestDurationSec(safety, 1, 3);
               await scheduleAgentPacingCountdown(
                 restSec,
@@ -2184,7 +2451,8 @@ async function processAgentWorkflowStep() {
                 `Safety Batch Break: Resting ${Math.round(restSec / 60)}m...`
               );
             } else {
-              const randomizedDelay = getSafetyPacingDelay(safety, 'replyDelay', 3, 6);
+              await chrome.storage.local.set({ atomx_agent_workflow: workflow });
+              const randomizedDelay = getSafetyPacingDelay(safety, 'profileWait', 10, 20);
               await scheduleAgentPacingCountdown(
                 randomizedDelay,
                 workflow,
@@ -2656,11 +2924,13 @@ async function processAgentWorkflowStep() {
           if (!isIgnored) {
             const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
             const safety = safetyRes?.atomx_safety_settings || {};
-            const breakAfter = getSafetyBatchBreakActions(safety, 10, 15);
-            if (workflow.successCount > 0 && workflow.successCount % breakAfter === 0) {
+            const isBatchBreak = shouldTakeSafetyBatchBreak(workflow.successCount, workflow, safety, 10, 15);
+            if (isBatchBreak) {
+              await chrome.storage.local.set({ atomx_agent_workflow: workflow });
               const restSec = getSafetyRestDurationSec(safety, 1, 3);
               await scheduleAgentPacingCountdown(restSec, workflow, workflow.successCount, targetCount, `Safety Batch Break: Resting ${Math.round(restSec / 60)}m...`);
             } else {
+              await chrome.storage.local.set({ atomx_agent_workflow: workflow });
               const delaySec = getSafetyPacingDelay(safety, 'profileWait', 10, 20);
               await scheduleAgentPacingCountdown(delaySec, workflow, workflow.successCount, targetCount, `Next commenter from post`);
             }
@@ -2856,12 +3126,14 @@ async function processAgentWorkflowStep() {
           // Check if batch rest is due
           const curSafetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
           const curSafety = curSafetyRes?.atomx_safety_settings || safety;
-          const dynamicBreakAfter = getSafetyBatchBreakActions(curSafety, 10, 15);
-          if (workflow.successCount > 0 && workflow.successCount % dynamicBreakAfter === 0) {
+          const isBatchBreak = shouldTakeSafetyBatchBreak(workflow.successCount, workflow, curSafety, 10, 15);
+          if (isBatchBreak) {
+            await chrome.storage.local.set({ atomx_agent_workflow: workflow });
             const dynamicRestSec = getSafetyRestDurationSec(curSafety, 1, 3);
-            console.log(`[ATOMX BG] Batch of ${dynamicBreakAfter} unfollows complete. Taking safety break of ${dynamicRestSec}s...`);
+            console.log(`[ATOMX BG] Batch of unfollows complete at ${workflow.successCount}. Taking safety break of ${dynamicRestSec}s...`);
             await scheduleAgentPacingCountdown(dynamicRestSec, workflow, workflow.successCount, targetCount, `Safety Batch Break: Resting ${Math.round(dynamicRestSec / 60)}m...`);
           } else {
+            await chrome.storage.local.set({ atomx_agent_workflow: workflow });
             const jitterDelay = getSafetyPacingDelay(curSafety, 'profileWait', 10, 20);
             await scheduleAgentPacingCountdown(jitterDelay, workflow, workflow.successCount, targetCount, `Next account in Following list`);
           }
@@ -3142,14 +3414,11 @@ async function processAgentWorkflowStep() {
     if (!targetReached && updatedWorkflow.currentIndex < updatedWorkflow.items.length) {
       // Read centralized Anti-Ban Safety controls
       const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
-      const safety = safetyRes?.atomx_safety_settings || {};
-      const breakActions = getSafetyBatchBreakActions(safety, 10, 15);
-      const restDurationSec = getSafetyRestDurationSec(safety, 1, 3);
-
+      const isBatchBreak = shouldTakeSafetyBatchBreak(updatedWorkflow.successCount, updatedWorkflow, safety, 10, 15);
       const nextIdx = updatedWorkflow.currentIndex;
-      // Automatic Batching: if breakActions is enabled (> 0) and total > breakActions, rest after every batch of breakActions
-      if (breakActions > 0 && total > breakActions && nextIdx % breakActions === 0) {
-        await scheduleAgentPacingCountdown(restDurationSec, updatedWorkflow, nextIdx, total, `Batch of ${breakActions} complete. Resting ${Math.round(restDurationSec / 60)}m...`);
+      if (isBatchBreak) {
+        const restDurationSec = getSafetyRestDurationSec(safety, 1, 3);
+        await scheduleAgentPacingCountdown(restDurationSec, updatedWorkflow, nextIdx, total, `Safety Batch Break: Resting ${Math.round(restDurationSec / 60)}m...`);
       } else if (agentId === 'followers' && Date.now() - (workflow.startedAt || 0) > 2 * 3600 * 1000) {
         // Followers Increase: 30m recovery pause after 2 hours
         await scheduleAgentPacingCountdown(30 * 60, updatedWorkflow, nextIdx, total, `Natural Schedule: 30m recovery pause after 2 hours...`);
@@ -3221,14 +3490,22 @@ async function scheduleAgentPacingCountdown(delaySec, workflow, completedIndex, 
       if (!recheck?.atomx_workflow_paused && !recheck?.atomx_agent_workflow?.isPaused) break;
     }
 
-    const timeStr = `0:${String(sec).padStart(2, '0')}`;
+    const min = Math.floor(sec / 60);
+    const s = sec % 60;
+    const timeStr = min > 0 ? `${min}:${String(s).padStart(2, '0')}` : `0:${String(s).padStart(2, '0')}`;
+    const isBatchBreak = sec > 60 || (nextActionText && nextActionText.includes('Batch Break'));
+    const statusMsg = isBatchBreak
+      ? `☕ Safety Batch Break: Resting ${timeStr} after ${completedIndex} targets...`
+      : `⏳ Profile Wait (Between Accounts): ${sec}s before ${nextActionText || ('target ' + (completedIndex + 1) + '/' + total)}...`;
+    const countdownLabel = isBatchBreak ? `☕ Break: ${timeStr}` : `Profile Wait: ${timeStr}`;
+
     await syncAgentHud(
       recheck.atomx_agent_workflow,
-      `Safety Delay: ${sec}s before ${nextActionText || ('target ' + (completedIndex + 1) + '/' + total)}...`,
-      'PACING',
+      statusMsg,
+      isBatchBreak ? 'BATCH_BREAK' : 'PACING',
       Math.round((completedIndex / total) * 100),
-      `Next target in ${timeStr}`,
-      nextActionText || `Target ${completedIndex + 1}/${total}`,
+      countdownLabel,
+      countdownLabel,
       `⏱️ ${timeStr}`
     );
     await delay(1000);
@@ -3330,8 +3607,20 @@ async function abortAgentWorkflow() {
 async function delay(ms) {
   const start = Date.now();
   while (Date.now() - start < ms) {
-    const s = await chrome.storage.local.get(['atomx_skip_current', 'atomx_agent_workflow']).catch(() => ({}));
-    if (s?.atomx_skip_current || s?.atomx_agent_workflow?.isStopped) break;
+    const s = await chrome.storage.local.get(['atomx_skip_current', 'atomx_agent_workflow', 'atomx_tg_raid', 'atomx_rate_limited']).catch(() => ({}));
+    if (s?.atomx_skip_current) break;
+    if (s?.atomx_rate_limited?.active) break;
+
+    const tg = s?.atomx_tg_raid;
+    const wf = s?.atomx_agent_workflow;
+
+    // Only abort if the currently active workflow is stopped
+    if (tg?.active) {
+      if (tg.isStopped || tg.stateBadge === 'STOPPED' || tg.stateBadge === 'RATE_LIMITED' || tg.stateBadge === 'DAILY_LIMIT') break;
+    } else if (wf?.active) {
+      if (wf.isStopped || wf.stateBadge === 'STOPPED' || wf.stateBadge === 'RATE_LIMITED' || wf.stateBadge === 'DAILY_LIMIT') break;
+    }
+
     const chunk = Math.min(100, ms - (Date.now() - start));
     if (chunk <= 0) break;
     await new Promise(r => setTimeout(r, chunk));
@@ -3382,8 +3671,12 @@ async function waitForTabLoad(tabId, maxTimeout = 12000, expectedSubstring = '')
 
   // 2. Active content script ping verification (up to 6 attempts)
   for (let p = 0; p < 6; p++) {
-    const skipCheck = await chrome.storage.local.get(['atomx_skip_current', 'atomx_agent_workflow']).catch(() => ({}));
-    if (skipCheck?.atomx_skip_current || skipCheck?.atomx_agent_workflow?.isStopped) return true;
+    const skipCheck = await chrome.storage.local.get(['atomx_skip_current', 'atomx_agent_workflow', 'atomx_tg_raid']).catch(() => ({}));
+    if (skipCheck?.atomx_skip_current) return true;
+    const tg = skipCheck?.atomx_tg_raid;
+    const wf = skipCheck?.atomx_agent_workflow;
+    if (tg?.active && (tg.isStopped || tg.stateBadge === 'STOPPED')) return true;
+    if (wf?.active && (wf.isStopped || wf.stateBadge === 'STOPPED')) return true;
 
     const isReady = await new Promise((res) => {
       chrome.tabs.sendMessage(tabId, { type: 'PING' }, (resp) => {

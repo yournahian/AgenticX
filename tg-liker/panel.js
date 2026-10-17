@@ -58,7 +58,47 @@
   }
 
   // ------------------------------------------------------------ form save / load
-  const FIELDS = ['links', 'section', 'speed', 'evMin', 'evMax', 'bsMin', 'bsMax', 'hourly', 'maxPosts', 'lbEvMin', 'lbEvMax', 'lbMinMin', 'lbMinMax'];
+  const FIELDS = ['links', 'section', 'speed', 'evMin', 'evMax', 'bsMin', 'bsMax', 'hourly', 'maxPosts', 'lbEvMin', 'lbEvMax', 'lbMinMin', 'lbMinMax', 'stopText', 'stopPick'];
+
+  // ---- Stop at post: picked post (id) ba likha text (@handle + lekha) ba tweet link
+  function buildStop() {
+    const raw = ($('stopText').value || '').trim();
+    if (!raw) return null;
+    try {
+      const pk = JSON.parse($('stopPick').value || 'null');
+      if (pk && pk.label === raw && (pk.id || pk.handle)) return { id: pk.id || null, handle: pk.handle || '', text: pk.text || '' };
+    } catch (e) {}
+    const ms = raw.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{5,25})/i);
+    if (ms) return { id: ms[2], handle: ms[1], text: '' };
+    // trailing '#2' = 2nd match (ek-i lekha duita post thakle)
+    let nth = 1, body = raw;
+    const mn = body.match(/\s#(\d{1,2})\s*$/);
+    if (mn) { nth = Math.max(1, parseInt(mn[1], 10)); body = body.slice(0, mn.index).trim(); }
+    const mh = body.match(/^@([A-Za-z0-9_]{1,15})\s*(.*)$/s);
+    if (mh) return { id: null, handle: mh[1], text: mh[2].replace(/^[\s\-\u2013\u2014|:\u00b7]+/, '').trim(), nth };
+    return { id: null, handle: '', text: body, nth };
+  }
+
+  async function pickStop() {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const t = tabs && tabs[0];
+    if (!t || !/^https:\/\/(x|twitter)\.com\//i.test(t.url || '')) { $('stopInfo').textContent = '⚠ Age X tab e jao (jekhane post ta dekha jay), tarpor Pick chapo.'; return; }
+    chrome.tabs.sendMessage(t.id, { type: 'pickstop' }, (r) => {
+      if (chrome.runtime.lastError || !r) { $('stopInfo').textContent = '⚠ Page e extension load hoyni — X tab ta F5 diye abar Pick chapo.'; return; }
+      $('stopInfo').textContent = '👆 X page e jai post e thamte chao oi post e click koro (Esc = cancel).';
+    });
+  }
+
+  chrome.storage.onChanged.addListener((ch, area) => {
+    if (area !== 'local' || !ch.tgl_stoppick || !ch.tgl_stoppick.newValue) return;
+    const v = ch.tgl_stoppick.newValue;
+    const label = v.handle ? `@${v.handle}${v.text ? ' — ' + v.text.slice(0, 60) : ''}` : (v.text || v.id);
+    $('stopPick').value = JSON.stringify({ id: v.id, handle: v.handle, text: v.text, label });
+    $('stopText').value = label;
+    $('stopInfo').textContent = '✓ Stop point set: ' + label;
+    saveForm();
+  });
+
   const CHECKS = ['aLike', 'aRepost', 'aBookmark', 'loop', 'brkOn', 'lbOn'];
 
   async function loadForm() {
@@ -162,7 +202,53 @@
       $('contNew').textContent = n > 0 ? `Limit: ${st.total} ➔ ${st.total + n}` : '';
       document.querySelectorAll('#presets .pre').forEach((b) => b.classList.toggle('on', parseInt(b.dataset.n, 10) === n));
     }
+
+    // ---- Reset button: shudhu job na cholle ----
+    $('btnReset').classList.toggle('hide', active);
+    // ---- Break now: shudhu job cholle ----
+    $('btnBreakNow').disabled = !active;
+    $('bnMin').disabled = false;
+
+    // ---- Last post result + warning ----
+    const ll = $('lastLine');
+    if (st.last && (active || st.total)) {
+      const ic = { like: '❤️', repost: '🔁', bookmark: '🔖' };
+      const part = (k) => {
+        const r = st.last[k] || 'off';
+        if (r === 'off') return '';
+        const cls = r === 'ok' ? 'ok' : (r.startsWith('fail') ? 'fail' : 'skip');
+        const sym = r === 'ok' ? '✓' : (r.startsWith('fail') ? '✗' : '↷');
+        return `${ic[k]} <b class="${cls}">${sym}</b>`;
+      };
+      ll.innerHTML = 'Last post: ' + ['like', 'bookmark', 'repost'].map(part).filter(Boolean).join(' &nbsp; ') +
+        (st.failed && (st.failed.like || st.failed.repost || st.failed.bookmark)
+          ? `<br><span style="font-size:11px">Fail: ❤️${st.failed.like} 🔖${st.failed.bookmark} 🔁${st.failed.repost}</span>` : '');
+      ll.classList.remove('hide');
+    } else { ll.classList.add('hide'); }
+
+    const nl = $('noteLine');
+    let noteText = st.note || '';
+    if (!noteText && st.last) {
+      const bad = Object.keys(st.last).filter((k) => String(st.last[k]).startsWith('fail'));
+      if (bad.length) noteText = '⚠ ' + bad.map((k) => ({ like: '❤️', repost: '🔁', bookmark: '🔖' }[k] + ' ' + String(st.last[k]).replace(/^fail: /, ''))).join(' • ');
+    }
+    nl.textContent = noteText;
+    nl.classList.toggle('hide', !noteText);
+
+    renderClock();
   }
+
+  // ⏱ running time (pause er shomoy thame thake)
+  function renderClock() {
+    const el = $('clock');
+    const active = (ctrl.state === 'running' || ctrl.state === 'paused') && st.phase === 'running';
+    if (!active || !st.startedAt) { el.classList.add('hide'); return; }
+    const now = Date.now();
+    const ms = now - st.startedAt - (st.pausedMs || 0) - (st.pausedAt ? now - st.pausedAt : 0);
+    el.textContent = '⏱ ' + fmtTime(Math.max(0, ms / 1000));
+    el.classList.remove('hide');
+  }
+  setInterval(renderClock, 1000);
 
   async function refresh() {
     const d = await chrome.storage.local.get([K.ctrl, K.state, K.cfg]);
@@ -227,7 +313,8 @@
       breaks: { enabled: $('brkOn').checked, everyMin: evMin, everyMax: evMax, secMin: bsMin, secMax: bsMax },
       longBreak: { enabled: $('lbOn').checked, everyMin: lbEvMin, everyMax: lbEvMax, minMin: lbMinMin, minMax: lbMinMax },
       hourlyMax: num('hourly', 0, 0),
-      maxPosts: num('maxPosts', 0, 0)
+      maxPosts: num('maxPosts', 0, 0),
+      stop: buildStop()
     };
 
     // tab thik koro: X tab hole ota, na hole notun tab
@@ -253,6 +340,7 @@
       [K.seen]: {},    // notun Start = notun kore shuru (ager "seen" post bhule jao)
       [K.state]: {
         phase: 'running', targetIndex: 0, round: 1, total: 0, onBreak: false, wait: null,
+        startedAt: Date.now(), pausedMs: 0, pausedAt: null, failed: { like: 0, repost: 0, bookmark: 0 }, off: {}, last: null, note: '',
         sinceBreak: 0, breakAt: first, sinceLong: 0, longAt: firstLong,
         stats: { liked: 0, reposted: 0, bookmarked: 0, skipped: 0 },
         status: 'Starting...'
@@ -285,9 +373,29 @@
     await chrome.storage.local.set({
       [K.cfg]: cfg,
       [K.ctrl]: { state: 'running', runId: Date.now() },
-      [K.state]: { ...S, phase: 'running', onBreak: false, wait: null, status: `Continuing... (+${n} post)` }
+      [K.state]: { ...S, phase: 'running', onBreak: false, wait: null, off: {}, note: '', startedAt: Date.now(), pausedMs: 0, pausedAt: null, status: `Continuing... (+${n} post)` }
     });
     await chrome.tabs.update(tabId, { url: cfg.targets[idx].url, active: true });
+  }
+
+  // 🔄 Reset: counter, continue-memory (seen list) shob muche idle e fire jay (cholar shomoy kaj kore na)
+  async function resetAll() {
+    if ((ctrl.state === 'running' || ctrl.state === 'paused') && st.phase === 'running') return;
+    if (!confirm('Reset korbe? Counter ar "Add more" er memory (ja ager e kora hoyeche) muche jabe.')) return;
+    await chrome.storage.local.set({
+      [K.ctrl]: { state: 'stopped', runId: Date.now() },
+      [K.seen]: {},
+      [K.state]: { phase: 'idle', total: 0, stats: { liked: 0, reposted: 0, bookmarked: 0, skipped: 0 },
+                   failed: { like: 0, repost: 0, bookmark: 0 }, off: {}, last: null, note: '', wait: null, onBreak: false, status: 'Ready.' }
+    });
+  }
+
+  // ☕ Break now: ekhoni N minute break nao (timer boro kore dekhabe)
+  async function breakNow() {
+    const min = Math.max(1, parseInt($('bnMin').value, 10) || 2);
+    const d = await chrome.storage.local.get(K.ctrl);
+    const c = d[K.ctrl] || { state: 'stopped', runId: 0 };
+    await chrome.storage.local.set({ [K.ctrl]: { ...c, breakNow: { id: Date.now(), sec: min * 60 } } });
   }
 
   async function setCtrl(state) {
@@ -296,11 +404,192 @@
     await chrome.storage.local.set({ [K.ctrl]: { ...c, state } });
   }
 
+
+  // ============================================================ SCROLL RECORDER (like job er theke alada)
+  // Button click -> Chrome er screen/tab picker -> record shuru -> X tab uporer dike smooth scroll -> top e giye auto stop + save.
+  const RK = 'tgl_rec';
+  const rec = { active: false, stream: null, mr: null, chunks: [], mime: '', ext: 'webm', tabId: null, t0: 0, timer: null, stopping: false };
+  const MIMES = [['video/mp4;codecs=avc1.640028,mp4a.40.2', 'mp4'], ['video/mp4;codecs=avc1,mp4a.40.2', 'mp4'], ['video/webm;codecs=vp9,opus', 'webm'], ['video/webm;codecs=vp8,opus', 'webm'],
+                 ['video/mp4;codecs=avc1.640028', 'mp4'], ['video/mp4;codecs=avc1', 'mp4'], ['video/mp4', 'mp4'],
+                 ['video/webm;codecs=vp9', 'webm'], ['video/webm;codecs=vp8', 'webm'], ['video/webm', 'webm']];
+
+  function recStatus(t) { $('recStatus').textContent = t; }
+  function recUI() {
+    $('btnRecStart').classList.toggle('hide', rec.active);
+    $('btnRecStop').classList.toggle('hide', !rec.active);
+    $('recPace').disabled = rec.active; $('recSource').disabled = rec.active; $('recFolder').disabled = rec.active;
+  }
+  async function recLoad() {
+    const d = await chrome.storage.local.get(RK); const f = d[RK];
+    if (!f) return;
+    if (f.pace) $('recPace').value = f.pace;
+    if (f.source) $('recSource').value = f.source;
+    if (f.folder) $('recFolder').value = f.folder;
+  }
+  function recSavePrefs() { chrome.storage.local.set({ [RK]: { pace: $('recPace').value, source: $('recSource').value, folder: $('recFolder').value } }); }
+
+  function recFinalize(reason) {
+    if (!rec.active || rec.stopping) return;
+    rec.stopping = true;
+    clearInterval(rec.timer);
+    if (rec.tabId != null) chrome.tabs.sendMessage(rec.tabId, { type: 'recabort' }, () => void chrome.runtime.lastError);
+    recStatus('💾 Video save hochche...');
+    const mr = rec.mr;
+    if (mr && mr.state !== 'inactive') { try { mr.requestData(); } catch (e) {} try { mr.stop(); } catch (e) {} }
+    else recSave(reason);
+  }
+
+  async function recSave(reason) {
+    try { if (rec.stream) { if (rec.castStop) { rec.castStop(); rec.castStop = null; } rec.stream.getTracks().forEach((t) => t.stop()); } } catch (e) {}
+    try { if (rec.actx) rec.actx.close(); rec.actx = null; } catch (e) {}
+    const blob = new Blob(rec.chunks, { type: rec.mime.split(';')[0] || 'video/webm' });
+    const ext = rec.ext;
+    rec.chunks = []; rec.active = false; rec.stopping = false; rec.stream = null; rec.mr = null; rec.tabId = null;
+    recUI();
+    if (!blob.size) { recStatus('⚠ Video khali — save hoyni.'); return; }
+    const url = URL.createObjectURL(blob);
+    const d = new Date();
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const h12 = d.getHours() % 12 || 12, mm = String(d.getMinutes()).padStart(2, '0'), ap = d.getHours() >= 12 ? 'PM' : 'AM';
+    const stamp = `${h12}.${mm} ${ap} ${d.getDate()} ${MON[d.getMonth()]}`;   // Windows e ':' cholena, tai 11.33 PM 17 Oct
+    const who = (rec.who || 'x').replace(/[^A-Za-z0-9_]/g, '') || 'x';
+    const folder = ($('recFolder').value || 'TG-LIKER').replace(/\\/g, '/').split('/').map((s) => s.replace(/[<>:"|?*\x00-\x1f]/g, '').trim()).filter((s) => s && s !== '.' && s !== '..').join('/') || 'TG-LIKER';
+    const filename = `${folder}/${who} ${stamp}.${ext}`;
+    const mb = (blob.size / 1048576).toFixed(1);
+    let fallback = false;
+    try {
+      await chrome.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' });
+    } catch (e) {
+      fallback = true;   // Save dialog cancel korle video harate na diye Downloads e rakhi
+      try { await chrome.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' }); }
+      catch (e2) { recStatus('⚠ Save fail: ' + ((e2 && e2.message) || e2)); return; }
+    }
+    recStatus(`✓ Video saved (${mb} MB)${fallback ? ` — Downloads/${folder} e` : ''}${reason ? ' • ' + reason : ''}`);
+    setTimeout(() => URL.revokeObjectURL(url), 15 * 60 * 1000);
+  }
+
+  // Picker chhara current tab record: Chrome debugger screencast -> canvas -> MediaStream
+  async function screencastStream(tabId) {
+    return new Promise((resolve, reject) => {
+      const port = chrome.runtime.connect({ name: 'screencast' });
+      const cv = document.createElement('canvas');
+      const ctx = cv.getContext('2d', { alpha: false });
+      let last = null, sized = false, done = false, timer = null;
+      const fail = (err) => { if (done) return; done = true; try { port.disconnect(); } catch (e) {} reject(new Error(err)); };
+      const failT = setTimeout(() => fail('Screencast frame ashe nai (DevTools khola thakle bondho koro)'), 6000);
+      port.onMessage.addListener(async (m) => {
+        if (m.type === 'error') { clearTimeout(failT); fail(m.error); return; }
+        if (m.type !== 'frame') return;
+        try {
+          const bin = atob(m.data); const u8 = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+          const bmp = await createImageBitmap(new Blob([u8], { type: 'image/jpeg' }));
+          if (!sized) {
+            cv.width = bmp.width - (bmp.width % 2); cv.height = bmp.height - (bmp.height % 2);
+            sized = true;
+            timer = setInterval(() => { if (last) ctx.drawImage(last, 0, 0, cv.width, cv.height); }, 1000 / 30);
+            const stream = cv.captureStream(30);
+            stream.__tglStop = () => { clearInterval(timer); try { port.postMessage({ cmd: 'stop' }); } catch (e) {} try { port.disconnect(); } catch (e) {} };
+            clearTimeout(failT);
+            if (!done) { done = true; resolve(stream); }
+          }
+          if (last && last.close) { try { last.close(); } catch (e) {} }
+          last = bmp;
+          ctx.drawImage(bmp, 0, 0, cv.width, cv.height);
+        } catch (e) {}
+      });
+      port.onDisconnect.addListener(() => { if (!done) fail('Screencast disconnect holo'); });
+      port.postMessage({ cmd: 'start', tabId });
+    });
+  }
+
+  async function recStart() {
+    if (rec.active) return;
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const tab = tabs && tabs[0];
+    if (!tab || !/^https:\/\/(x|twitter)\.com\//i.test(tab.url || '')) {
+      recStatus('⚠ Age X (x.com) tab e jao, jekhan theke scroll shuru korbe sekhane thako, tarpor abar chap.');
+      return;
+    }
+    let stream = null, direct = false, castStop = null;
+    const askMode = $('recSource').value === 'ask';
+    // 0) DEFAULT: current X tab ke debugger screencast diye capture (picker/permission lage na)
+    if (!askMode) {
+      try { stream = await screencastStream(tab.id); castStop = stream.__tglStop; direct = true; }
+      catch (e) { stream = null; recStatus('Screencast hoyni (' + ((e && e.message) || e) + ') — porer method try hochche...'); }
+    }
+    // 1) Fallback: tabCapture (extension icon click kora thakle)
+    if (!stream && !askMode) try {
+      const idr = await chrome.runtime.sendMessage({ type: 'tabstream', tabId: tab.id });
+      if (idr && idr.ok && idr.id) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: idr.id, maxFrameRate: 60 } } });
+        direct = true;
+      }
+    } catch (e) { stream = null; }
+    // 2) Chrome picker (Ask mode, ba onno method kaj na korle)
+    if (!stream) {
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60, max: 60 }, displaySurface: 'browser' }, audio: false, selfBrowserSurface: 'exclude', surfaceSwitching: 'include', preferCurrentTab: false });
+      } catch (e) {
+        recStatus('⚠ Record shuru hoyni: ' + ((e && e.message) || e));
+        return;
+      }
+    }
+    // Nirob (silent) audio track jog kori: audio chhara video ke Telegram GIF/animation dhore,
+    // ar group e GIF off thakle send kora jay na. Audio track thakle normal video hoye jay.
+    let actx = null;
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = actx.createOscillator(), gain = actx.createGain(), dest = actx.createMediaStreamDestination();
+      gain.gain.value = 0; osc.connect(gain); gain.connect(dest); osc.start();
+      stream = new MediaStream([...stream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    } catch (e) { actx = null; }
+    let ext = 'webm', mime = '';
+    for (const [m, e] of MIMES) { if (MediaRecorder.isTypeSupported(m)) { mime = m; ext = e; break; } }
+    const mr = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 8000000 });
+    let who = '';
+    try { const a = parseTargets($('links').value).find((t) => t.handle) || parseTargets(tab.url).find((t) => t.handle); who = a ? a.handle : ''; } catch (e) {}
+    Object.assign(rec, { who, active: true, stream, castStop, actx, mr, chunks: [], mime, ext, tabId: tab.id, t0: Date.now(), stopping: false });
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) rec.chunks.push(e.data); };
+    mr.onstop = () => recSave('');
+    stream.getVideoTracks()[0].addEventListener('ended', () => recFinalize('sharing bondho kora hoyechilo'));
+    mr.start(1000);
+    recUI();
+    rec.timer = setInterval(() => recStatus(`🔴 Recording${direct ? ' (current tab)' : ''} ${fmtTime((Date.now() - rec.t0) / 1000)} — scroll hochche...`), 500);
+
+    // Picker bondho howar por ektu shomoy diye X tab e scroll command
+    await new Promise((r) => setTimeout(r, 700));
+    const send = () => new Promise((resolve) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'recscroll', pace: $('recPace').value }, (r) => {
+        if (chrome.runtime.lastError) resolve(null); else resolve(r || { ok: false });
+      });
+    });
+    let r = await send();
+    if (!r) {
+      // Content script nai (extension reload er por page refresh hoyni) -> nijei inject kori, F5 lagbe na
+      try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }); await new Promise((x) => setTimeout(x, 400)); r = await send(); } catch (e) {}
+    }
+    if (!r) { recFinalize(''); recStatus('⚠ X tab e script load hoyni — X tab refresh (F5) kore abar try koro.'); return; }
+    if (!r.ok) { recFinalize(''); recStatus('⚠ Scroll hoyni: ' + (r.error || 'unknown')); return; }
+    recFinalize(r.reachedTop ? 'profile top e pouchhechhe' : 'scroll theme gese');
+  }
+
+  $('btnRecStart').addEventListener('click', recStart);
+  $('btnRecStop').addEventListener('click', () => recFinalize('manually stop'));
+  $('recPace').addEventListener('change', recSavePrefs);
+  $('recSource').addEventListener('change', recSavePrefs);
+  
+  $('recFolder').addEventListener('input', recSavePrefs);
+  recLoad();
+
   $('btnStart').addEventListener('click', start);
   $('btnPause').addEventListener('click', () => setCtrl('paused'));
   $('btnResume').addEventListener('click', () => setCtrl('running'));
   $('btnStop').addEventListener('click', () => setCtrl('stopped'));
   $('btnContinue').addEventListener('click', continueRun);
+  $('btnReset').addEventListener('click', resetAll);
+  $('btnBreakNow').addEventListener('click', breakNow);
+  $('btnPickStop').addEventListener('click', pickStop);
   document.querySelectorAll('#presets .pre').forEach((b) => b.addEventListener('click', () => { $('contN').value = b.dataset.n; render(); }));
   $('contN').addEventListener('input', render);
 

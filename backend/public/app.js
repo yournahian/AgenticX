@@ -1094,8 +1094,8 @@ function navigateToScreen(screenId, preserveScroll = false) {
     if (currentWorkspace) currentWorkspace.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  // Admin Screens Guard: Protect Screens 12, 13, 14, 15, 16, 17, 20, 21, 22, 23 behind Admin Password
-  const adminScreens = ['12', '13', '14', '15', '16', '17', '20', '21', '22', '23'];
+  // Admin Screens Guard: Protect Screens 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24 behind Admin Password
+  const adminScreens = ['12', '13', '14', '15', '16', '17', '20', '21', '22', '23', '24'];
   if (adminScreens.includes(screenId) && !AtomXState.isAdminAuthenticated) {
     renderAdminPasswordGate(contentArea, screenId);
     updateSidebarActiveState(screenId);
@@ -1129,6 +1129,7 @@ function navigateToScreen(screenId, preserveScroll = false) {
     case '21': renderAdminToneStyles(contentArea); break;
     case '22': renderAdminReferrals(contentArea); break;
     case '23': renderAdminAIEngine(contentArea); break;
+    case '24': renderAdminAgentControls(contentArea); break;
     case '18': renderSuspended(contentArea); break;
     case '19': renderSystemStates(contentArea); break;
     case 'arch': renderSystemArchitecture(contentArea); break;
@@ -2962,12 +2963,12 @@ function renderAdminDashboard(container) {
                   <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Throughput distribution (${velocityFilter === 'ALL' ? 'All-Time' : velocityFilter === '1Y' ? 'Past 12 Months' : velocityFilter === '1M' ? 'Past 30 Days' : velocityFilter === '1D' ? 'Today (Hourly)' : 'Past 7 Days (Daily)'})</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                  <div style="display:inline-flex; background:var(--bg-canvas); padding:2px; border-radius:6px; border:1px solid var(--border-subtle); font-size:11px;">
-                    <button class="btn btn-xs ${velocityFilter === '1D' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '1D' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1D')">Today</button>
-                    <button class="btn btn-xs ${velocityFilter === '7D' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '7D' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('7D')">7D</button>
-                    <button class="btn btn-xs ${velocityFilter === '1M' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '1M' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1M')">1M</button>
-                    <button class="btn btn-xs ${velocityFilter === '1Y' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === '1Y' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1Y')">1Y</button>
-                    <button class="btn btn-xs ${velocityFilter === 'ALL' ? 'btn-primary' : 'btn-ghost'}" style="padding:2px 7px; font-size:10px; border-radius:4px; font-weight:700; ${velocityFilter === 'ALL' ? 'background:var(--blue-primary); color:#fff;' : 'color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('ALL')">All Time</button>
+                  <div style="display:inline-flex; background:rgba(255,255,255,0.06); padding:2px; border-radius:6px; border:1px solid rgba(255,255,255,0.12); font-size:11px; gap:2px;">
+                    <button class="btn btn-xs" style="padding:3px 8px; font-size:10px; border-radius:4px; font-weight:700; border:none; outline:none; cursor:pointer; transition:all 0.15s ease; ${velocityFilter === '1D' ? 'background:var(--blue-primary); color:#ffffff;' : 'background:transparent; color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1D')">Today</button>
+                    <button class="btn btn-xs" style="padding:3px 8px; font-size:10px; border-radius:4px; font-weight:700; border:none; outline:none; cursor:pointer; transition:all 0.15s ease; ${velocityFilter === '7D' ? 'background:var(--blue-primary); color:#ffffff;' : 'background:transparent; color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('7D')">7D</button>
+                    <button class="btn btn-xs" style="padding:3px 8px; font-size:10px; border-radius:4px; font-weight:700; border:none; outline:none; cursor:pointer; transition:all 0.15s ease; ${velocityFilter === '1M' ? 'background:var(--blue-primary); color:#ffffff;' : 'background:transparent; color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1M')">1M</button>
+                    <button class="btn btn-xs" style="padding:3px 8px; font-size:10px; border-radius:4px; font-weight:700; border:none; outline:none; cursor:pointer; transition:all 0.15s ease; ${velocityFilter === '1Y' ? 'background:var(--blue-primary); color:#ffffff;' : 'background:transparent; color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('1Y')">1Y</button>
+                    <button class="btn btn-xs" style="padding:3px 8px; font-size:10px; border-radius:4px; font-weight:700; border:none; outline:none; cursor:pointer; transition:all 0.15s ease; ${velocityFilter === 'ALL' ? 'background:var(--blue-primary); color:#ffffff;' : 'background:transparent; color:var(--text-secondary);'}" onclick="window.setVelocityChartFilter('ALL')">All Time</button>
                   </div>
                   <span class="badge badge-primary" style="font-size:10px;">${totalAIGenerations.toLocaleString()} Lifetime</span>
                 </div>
@@ -4944,8 +4945,8 @@ function renderAdminCreditManagement(container) {
             </div>
             <div class="stat-card">
               <div class="stat-label">Ledger Entries</div>
-              <div class="stat-value" style="color:var(--blue-primary); font-size:24px;">${allLedger.length}</div>
-              <div class="stat-meta">Atomic audit log records</div>
+              <div class="stat-value" style="color:var(--blue-primary); font-size:24px;">${Math.max(allLedger.length, AtomXState.adminStats?.totalLedgerCount || 0).toLocaleString()}</div>
+              <div class="stat-meta">Lifetime atomic records</div>
             </div>
           </div>
 
@@ -6946,6 +6947,200 @@ function renderSystemArchitecture(container) {
   `;
 }
 
+// =============================================================
+// SCREEN 24: ADMIN AGENT KILLSWITCH & MAINTENANCE CONTROLS
+// =============================================================
+async function fetchAdminAgentStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/agents/status`);
+    if (res.ok) {
+      const data = await res.json();
+      AtomXState.agentStatusMap = data.agents || {};
+      return AtomXState.agentStatusMap;
+    }
+  } catch (e) {
+    console.warn('Failed to fetch agent status:', e);
+  }
+  return AtomXState.agentStatusMap || {};
+}
+
+async function renderAdminAgentControls(container) {
+  if (!AtomXState.agentStatusMap) {
+    await fetchAdminAgentStatus();
+  }
+  const agents = AtomXState.agentStatusMap || {
+    telegram: { id: 'telegram', name: 'Telegram Group Engage', icon: '✈️', enabled: true, reason: '' },
+    audience: { id: 'audience', name: 'Audience Builder', icon: '👥', enabled: true, reason: '' },
+    sorsa: { id: 'sorsa', name: 'Sorsa Score Booster', icon: '⚡', enabled: true, reason: '' },
+    followers: { id: 'followers', name: 'Followers Growth', icon: '📈', enabled: true, reason: '' },
+    replyback: { id: 'replyback', name: 'Reply Back Loop', icon: '🔄', enabled: true, reason: '' },
+    unfollow: { id: 'unfollow', name: 'Auto Clean & Unfollow', icon: '🧹', enabled: true, reason: '' },
+    creators: { id: 'creators', name: 'Favorite Creators Radar', icon: '⭐', enabled: true, reason: '' },
+    defaulter: { id: 'defaulter', name: 'Find Defaulter', icon: '🔍', enabled: true, reason: '' },
+    reciprocator: { id: 'reciprocator', name: 'Commenter Reciprocator', icon: '🤝', enabled: true, reason: '' },
+    feedengager: { id: 'feedengager', name: 'Home Feed Engager', icon: '🏠', enabled: true, reason: '' },
+    nicheengager: { id: 'nicheengager', name: 'Niche Search Engager', icon: '🎯', enabled: true, reason: '' },
+    tgliker: { id: 'tgliker', name: 'TG Liker (Raid & Repost)', icon: '⚡', enabled: true, reason: '' }
+  };
+
+  const agentKeys = Object.keys(agents);
+  const total = agentKeys.length;
+  const activeCount = agentKeys.filter(k => agents[k].enabled !== false).length;
+  const disabledCount = total - activeCount;
+
+  container.innerHTML = `
+    <div class="app-layout">
+      ${renderAdminSidebarHTML('24')}
+      <div class="app-workspace">
+        <div class="workspace-header">
+          <div>
+            <h1 class="page-title">Agent Killswitch & Maintenance Controls</h1>
+            <p class="page-subtitle">Turn any autonomous agent ON/OFF and provide custom maintenance reasons. When disabled, users opening that agent in the extension will see your custom reason and cannot run it.</p>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-secondary btn-sm" onclick="adminEnableAllAgents()">Enable All</button>
+            <button class="btn btn-primary btn-sm" onclick="saveAllAdminAgentStatus()">Save & Broadcast to Extension</button>
+          </div>
+        </div>
+
+        <div class="workspace-body">
+          <!-- Summary Metrics -->
+          <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom:20px;">
+            <div class="stat-card">
+              <div class="stat-label">TOTAL SUITE AGENTS</div>
+              <div class="stat-value" style="color:var(--blue-primary);">${total}</div>
+              <div class="stat-trend" style="color:var(--text-secondary);">Autonomous Agent Modules</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">ONLINE & ACTIVE</div>
+              <div class="stat-value" style="color:var(--status-success);">${activeCount}</div>
+              <div class="stat-trend" style="color:var(--status-success);">Available to extension users</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">DISABLED / MAINTENANCE</div>
+              <div class="stat-value" style="color:${disabledCount > 0 ? '#EF4444' : 'var(--text-secondary)'};">${disabledCount}</div>
+              <div class="stat-trend" style="color:${disabledCount > 0 ? '#EF4444' : 'var(--text-secondary)'};">${disabledCount > 0 ? 'Blocked with custom message' : 'Zero agents disabled'}</div>
+            </div>
+          </div>
+
+          <!-- Agents List Card Table -->
+          <div class="atomx-card" style="padding: 20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+              <h2 style="font-size:16px; font-weight:700; color:var(--text-primary); margin:0;">Autonomous Agents Status & Reasons</h2>
+              <span style="font-size:12px; color:var(--text-secondary);">Real-time Extension Protection</span>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:14px;">
+              ${agentKeys.map(key => {
+                const a = agents[key];
+                const isOnline = a.enabled !== false;
+                return `
+                  <div class="atomx-card" style="padding:14px 18px; border:1px solid ${isOnline ? 'var(--border-subtle)' : 'rgba(239, 68, 68, 0.4)'}; background:${isOnline ? 'var(--bg-card)' : 'rgba(239, 68, 68, 0.04)'}; border-radius:10px; display:flex; flex-direction:column; gap:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                      <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:22px;">${a.icon || '⚡'}</span>
+                        <div>
+                          <div style="font-size:14px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+                            <span>${a.name || key}</span>
+                            <span style="font-size:10px; font-weight:700; padding:2px 8px; border-radius:12px; ${isOnline ? 'background:rgba(16, 185, 129, 0.15); color:#10B981; border:1px solid rgba(16, 185, 129, 0.3);' : 'background:rgba(239, 68, 68, 0.15); color:#EF4444; border:1px solid rgba(239, 68, 68, 0.4);'}">
+                              ${isOnline ? '● ONLINE' : '● DISABLED'}
+                            </span>
+                          </div>
+                          <span style="font-size:11px; color:var(--text-secondary); font-family:monospace;">ID: ${key}</span>
+                        </div>
+                      </div>
+
+                      <div style="display:flex; align-items:center; gap:14px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; font-size:12.5px; font-weight:600; color:${isOnline ? '#10B981' : '#EF4444'};">
+                          <span>${isOnline ? 'Active (ON)' : 'Disabled (OFF)'}</span>
+                          <input type="checkbox" id="agent-toggle-${key}" ${isOnline ? 'checked' : ''} onchange="handleAdminToggleAgent('${key}', this.checked)" style="width:18px; height:18px; cursor:pointer; accent-color:#10B981;">
+                        </label>
+                        <button class="btn btn-secondary btn-sm" onclick="saveAdminSingleAgent('${key}')" style="padding:4px 10px; font-size:11.5px;">Save</button>
+                      </div>
+                    </div>
+
+                    <!-- Custom Disabled Reason Input -->
+                    <div style="display:flex; align-items:center; gap:10px; margin-top:2px;">
+                      <span style="font-size:11.5px; font-weight:600; color:var(--text-secondary); white-space:nowrap;">Disabled Reason:</span>
+                      <input type="text" id="agent-reason-${key}" value="${a.reason || ''}" placeholder="e.g. Currently undergoing maintenance for Twitter update. Will be back in 2 hours." style="flex:1; padding:7px 12px; border-radius:6px; border:1px solid ${!isOnline && a.reason ? 'rgba(239, 68, 68, 0.5)' : 'var(--border-subtle)'}; background:var(--bg-canvas); color:var(--text-primary); font-size:12px;" oninput="handleAdminAgentReasonInput('${key}', this.value)">
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function handleAdminToggleAgent(key, isChecked) {
+  if (!AtomXState.agentStatusMap) AtomXState.agentStatusMap = {};
+  if (!AtomXState.agentStatusMap[key]) AtomXState.agentStatusMap[key] = { id: key, enabled: true, reason: '' };
+  AtomXState.agentStatusMap[key].enabled = isChecked;
+  const reasonInput = document.getElementById(`agent-reason-${key}`);
+  if (!isChecked && reasonInput && !reasonInput.value.trim()) {
+    reasonInput.value = 'This agent is temporarily disabled by admin for scheduled maintenance.';
+    AtomXState.agentStatusMap[key].reason = reasonInput.value;
+  }
+}
+
+function handleAdminAgentReasonInput(key, val) {
+  if (!AtomXState.agentStatusMap) AtomXState.agentStatusMap = {};
+  if (!AtomXState.agentStatusMap[key]) AtomXState.agentStatusMap[key] = { id: key, enabled: true, reason: '' };
+  AtomXState.agentStatusMap[key].reason = val.trim();
+}
+
+async function saveAdminSingleAgent(key) {
+  const toggle = document.getElementById(`agent-toggle-${key}`);
+  const reasonInput = document.getElementById(`agent-reason-${key}`);
+  const isEnabled = toggle ? toggle.checked : true;
+  const reason = reasonInput ? reasonInput.value.trim() : '';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/agents/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: key, enabled: isEnabled, reason })
+    });
+    if (res.ok) {
+      showToast(`✓ ${key} status saved: ${isEnabled ? 'ONLINE' : 'DISABLED'}!`);
+      const data = await res.json();
+      if (data.agents) AtomXState.agentStatusMap = data.agents;
+      renderAdminAgentControls(document.getElementById('mainContentArea'));
+    }
+  } catch (e) {
+    showToast(`Failed to save agent status: ${e.message}`, 'error');
+  }
+}
+
+async function saveAllAdminAgentStatus() {
+  if (!AtomXState.agentStatusMap) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/agents/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agents: AtomXState.agentStatusMap })
+    });
+    if (res.ok) {
+      showToast('✓ All agent statuses saved & broadcast to Extension!');
+      renderAdminAgentControls(document.getElementById('mainContentArea'));
+    }
+  } catch (e) {
+    showToast(`Failed to save: ${e.message}`, 'error');
+  }
+}
+
+function adminEnableAllAgents() {
+  if (!AtomXState.agentStatusMap) return;
+  Object.keys(AtomXState.agentStatusMap).forEach(k => {
+    AtomXState.agentStatusMap[k].enabled = true;
+    AtomXState.agentStatusMap[k].reason = '';
+  });
+  saveAllAdminAgentStatus();
+}
+
 // -------------------------------------------------------------
 // REUSABLE SIDEBARS & NAVIGATION HELPERS
 // -------------------------------------------------------------
@@ -7081,6 +7276,11 @@ function renderAdminSidebarHTML(activeId) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           <span>Referral Management</span>
           <span class="badge badge-info" style="margin-left:auto; font-size:10px; padding:1px 5px;">150+</span>
+        </div>
+        <div class="nav-item ${activeId === '24' ? 'active' : ''}" onclick="navigateToScreen('24')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Agent Controls</span>
+          <span class="badge badge-info" style="margin-left:auto; font-size:10px; padding:1px 5px;">SWITCH</span>
         </div>
 
         <div class="nav-item" onclick="adminWipeAllUserData()" style="color:var(--status-error); margin-top:8px; cursor:pointer;" title="Reset all users & data fresh">

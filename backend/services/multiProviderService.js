@@ -1115,7 +1115,7 @@ async function addApiLog(entry) {
   };
 
   recentApiLogs.unshift(logItem);
-  if (recentApiLogs.length > 100) recentApiLogs = recentApiLogs.slice(0, 100);
+  if (recentApiLogs.length > 10000) recentApiLogs = recentApiLogs.slice(0, 10000);
 
   try {
     fs.mkdirSync(path.dirname(LOGS_FILE), { recursive: true });
@@ -1136,7 +1136,7 @@ async function addApiLog(entry) {
         credits_monthly: 0,
         is_popular: false,
         is_active: false,
-        features: recentApiLogs.slice(0, 100)
+        features: recentApiLogs.slice(0, 5000)
       }, { onConflict: 'id' });
     }
   } catch (e) {}
@@ -1199,7 +1199,7 @@ async function getApiLogs() {
     return timeB - timeA;
   });
 
-  recentApiLogs = allLogs.slice(0, 100);
+  recentApiLogs = allLogs.slice(0, 10000);
   return recentApiLogs;
 }
 

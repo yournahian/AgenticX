@@ -101,229 +101,157 @@ To guarantee the bot never attempts to comment on the same skipped post again:
 
 ---
 
-## 5. Detailed Agent Specifications
+## 5. Detailed Specifications for All 12 Agents
 
 ---
 
-### Agent 1: Audience Builder (In-Thread Commentator & Niche Growth Engine)
+### 5.1. Agent 1: Telegram Group Engage (`telegram`)
+- **Primary Goal:** Parse raid and engagement links from Telegram pods/chats and execute humanized engagement (Like, Repost, Bookmark, AI Reply) across all target tweets.
+- **Workflow & Lifecycle:**
+  1. **Input Parsing:** Ingests raw chat messages, links, or text containing `x.com` or `twitter.com` status URLs.
+  2. **Deduplication & Hygiene:** Auto-cleans duplicates and filters out already engaged tweets (`engagedTweetIds`).
+  3. **Execution Loop (Single Reused Tab):**
+     - Navigates to each tweet sequentially in a single persistent browser tab (`tgWorkingTabId`).
+     - Auto-Like: Moves glowing virtual cursor, hovers, and pulses rose (`simulateHumanLikeClick`).
+     - Auto-Repost: Clicks retweet, awaits confirmation dropdown, confirms repost (`simulateHumanRepostClick`).
+     - Auto-Bookmark: Clicks bookmark button without skipping (`isBookmarked` validation).
+     - Auto-Comment (AI Voice): Contextually generates AI reply via `/api/generate-reply` using the selected tone, sanitizes prompt, types with human micro-cadence, and single-clicks submit with no duplicate click retries.
+  4. **Credit Cost:** 1 credit per AI comment (atomically deducted on server). Pure Like/Repost raids are governed by platform settings.
+  5. **HUD Controls:** Live Floating HUD shows Done, Collected, Skipped, Pause/Resume, Stop, and Skip.
+
+---
+
+### 5.2. Agent 2: Audience Builder (`audience`)
 - **Primary Goal:** Identify high-intent, active commentators inside curated Twitter Lists and niche communities to build a high-signal, reciprocal audience.
 - **Feed Ingestion & Filtering:**
-  - When given a Twitter List URL (`https://x.com/i/lists/{listId}`), the engine extracts the `listId` and builds a filtered live search feed:
-    ```text
-    https://x.com/search?q=list:{listId} lang:en -filter:retweets -filter:replies exclude:replies&f=live
-    ```
-  - This ensures only original, highly engaging parent posts appear during candidate discovery.
-- **Workflow & Lifecycle:**
-  1. **Phase 1: Discover High-Engagement Seed Posts (`DISCOVER_TOP_ENGAGED_LIST_TWEETS`):**
-     - Scans candidate posts within the user-specified freshness window (`15m`, `30m`, `1h`, `2h`, `6h`, `12h`, `24h`).
-     - Extracts the reply count for each post using `extractTwitterMetric(replyBtn)`.
-     - Selects the top parent posts with the highest reply velocity.
-  2. **Phase 2: In-Thread Comment Exploration (Single-Tab Reused Loop):**
-     - Navigates directly to the target post URL in the **SAME tab** (never opens child tabs).
-     - Hydrates comment section via gentle human-like downward scrolling.
-     - Scans comment articles (`article[data-testid="tweet"]`) under the focal tweet.
-     - **Comment Filtering Rules:**
-       - Auto-skip the original tweet author (focus is strictly on active commenters).
-       - Auto-skip the logged-in user's own comments (`getLoggedInUserHandle()`).
-       - Auto-skip previously processed commenters (`alreadyReplied` set and storage history).
-       - Auto-skip spam/bot comments (< 10 chars, spam keywords).
-  3. **Phase 3: Commenter Profile Engagement & Reciprocal Loop:**
-     - Likes the target comment to visibly mark it as inspected.
-     - Smoothly clicks the commenter's profile handle in the **SAME tab**.
-     - On the commenter's profile page:
-       - Verifies the user is not private or already followed (if unfollow mode is not desired).
-       - Locates their topmost original root post (skipping pinned retweets and replies).
-       - Smoothly aligns post to viewport center.
-       - Likes the post (`simulateHumanLikeClick`).
-       - Optionally types and submits an organic AI comment (`postCommentOnTargetArticle`).
-       - Clicks "Follow" (`simulateHumanFollowClick`).
-     - Navigates back (`history.back()` or direct thread URL) to the original comment thread in the **SAME tab**.
-     - Resumes the comment loop for the next candidate until `targetCount` is satisfied.
-- **Safety & Error Guards:**
-  - 1-to-1 Verified Account Enforcement: Aborts immediately if the active logged-in Twitter account doesn't match `verifiedXHandle`.
-  - Single-Tab Reused Architecture: All navigations reuse `agentWorkflowWorkingTabId`.
-  - Skip & Close Guard: Protected by `prevent-tab-close.js` so `window.close()` or Twitter navigation errors never kill the active tab.
+  - When given a Twitter List URL (`https://x.com/i/lists/{listId}`), constructs the live search query:
+    `https://x.com/search?q=list:{listId} lang:en -filter:retweets -filter:replies exclude:replies&f=live`
+- **Execution Flow:**
+  1. Discovers top parent posts within the specified freshness window (`15m` to `24h`).
+  2. Opens each target post in the SAME reused tab and scans commenter articles (`article[data-testid="tweet"]`).
+  3. Filters out the original author, self-comments, and spam bots.
+  4. Likes the comment, visits the commenter's profile, likes their latest original root post, optionally leaves an AI comment, and follows.
+- **Credit Cost:** 1 credit per AI reply generated.
 
 ---
 
-### Agent 3: Home Feed Engager / Auto Pilot (Continuous Timeline Presence)
-- **Primary Goal:** Maintain an authentic, organic daily presence on the user's home timeline (`x.com/home`), interacting with followed accounts and algorithmically curated content without triggering bot patterns.
-- **Feed Source:** Directly operates on `https://x.com/home` (Following or "For you" feed).
-- **Multi-Tier Strict Filtering (Pure Root Posts Only):**
-  1. **Own Posts Filter:** Never likes or replies to posts authored by the logged-in account (`getLoggedInUserHandle()`).
-  2. **Promoted / Ads Filter:** Automatically detects and skips sponsored posts via `[data-testid="placementTracking"]`, "Ad", "Promoted" badges, and sponsored disclosure links.
-  3. **Retweet / Repost Filter:**
-     - Inspects `div[data-testid="socialContext"]` and `svg[data-testid="icon-retweet"]`.
-     - Discards any tweet where text contains `/reposted|retweeted/i`.
-  4. **Reply / Comment Thread Filter:**
-     - Discards any tweet containing "Replying to @...", vertical thread connector lines (`div[style*="width: 2px"]`), or reply header links.
-  5. **Already Engaged / Liked Filter:**
-     - Checks if like button already has `[data-testid="unlike"]`.
-     - Checks memory set `processedTweetIds` and persistent `engagedTweets` / `engagedTweetIds`.
-  6. **Content Quality & Spam Filter:**
-     - Rejects low-effort posts (< 15 characters or < 4 words).
-     - Rejects spam/crypto-bot triggers (`airdrop`, `giveaway bot`, `presale`, `drop wallet`, `whitelist slot`, etc.).
-- **Human Engagement Pipeline:**
-  1. **Centering & Alignment:** Uses `scrollElementIntoViewAndEnsureVisible(art, 'center')` to smoothly bring the post into view. Waits 350ms for layout shifts and sticky navbars to settle.
-  2. **Like Action:** Moves the virtual cursor (`#atomx-virtual-cursor`) along a Bézier trajectory to the like button, hovers, pulses rose (`#F43F5E`), and clicks authentically.
-  3. **Repost Action (Optional):** If enabled, hovers the repost button, clicks, and confirms "Repost".
-  4. **AI Comment Action (Optional):**
-     - Generates contextual reply via backend AI service using the user's selected style prompt (e.g. "Natural & Concise", "Bullish", "Thought-Provoking").
-     - Enforces anti-bot sanitization via `sanitizeClientComment`: strips quote marks, limits word count based on prompt.
-     - Locates reply trigger, focuses composer (inline or modal), and types character-by-character with human micro-delays (35–110ms), punctuation pauses, and typo corrections.
-     - Submits comment via debounced single-click `simulateHumanSubmitClick`.
-     - Completely dismisses dialogs and clears draft buffers.
-  5. **Human Pacing & Rest Interval:**
-     - Executes a realistic pacing countdown (15–35 seconds randomized) between posts.
-     - Updates floating HUD with remaining countdown timer (`⏱️ Next post in Xs...`).
-     - Batches engagements (e.g. 3–5 posts), followed by a leisurely human pause (1–3 minutes) before scrolling.
-- **Skip & Fail-Safe Protocol:**
-  - Clicking HUD Skip (`⏭️`):
-    - Instantly pauses pacing timer.
-    - If a reply modal is open, clicks the close (`X`) button and immediately triggers the authentic **Discard** button (eliminating Twitter's "Save post?" prompt).
-    - Tags post DOM with `data-atomx-skipped="true"`.
-    - Scrolls 500px down to push the skipped post out of the viewport.
-    - **NEVER closes the tab or navigates away.**
+### 5.3. Agent 3: Increase Sorsa Score (`sorsa`)
+- **Primary Goal:** Boost on-chain Sorsa & Walchain influencer score by strategically interacting with top-tier verified creators and high-score Web3 accounts.
+- **Execution Flow:**
+  1. Targets high-weight influencers and curated Sorsa scoring lists.
+  2. Aligns posts to viewport center and executes high-value contextual AI replies formatted to score high on algorithmic quality metrics.
+  3. Follows and bookmarks qualifying posts to establish reciprocal network clusters.
+- **Credit Cost:** 1 credit per generated AI comment.
 
 ---
 
-### Agent 4: Followers Increase Engine (Curated List Growth Platform)
-- **Primary Goal:** Drive reciprocal follower growth by systematically engaging top accounts and authors inside a curated Twitter List.
-- **THE UNBREAKABLE SEARCH LIVE RULE (No Direct Raw List URLs):**
-  > [!CRITICAL]
-  > **Why Raw Twitter List Pages (`x.com/i/lists/{listId}`) Must NEVER Be Used Directly:**
-  > Navigating to raw Twitter List URLs displays an unfiltered stream containing retweets, reposts, and reply chains from all list members. This pollutes the feed and breaks the user requirement for pure, original parent posts.
-  > 
-  > **The Required Solution:**
-  > The engine MUST ALWAYS construct and navigate to Twitter's **Search Live feed** with negative filters:
-  > ```text
-  > https://x.com/search?q=list:{listId} -filter:replies -filter:retweets&f=live
-  > ```
-  > - `list:{listId}`: Scopes search strictly to tweets authored by members of the specified list.
-  > - `-filter:replies`: Hard-filters all replies, comment threads, and conversation snippets.
-  > - `-filter:retweets`: Hard-filters all retweets and reposts.
-  > - `&f=live`: Sorts the search feed in real-time chronological order (latest tweets first).
-  > 
-  > Both `background.js` and `popup.js` must set `feedUrl` and `searchFeedUrl` to this filtered search live URL. The raw canonical list URL is kept only as a metadata reference.
-
-- **Supported Operating Modes:**
-  1. **Newest Tweet First Mode (`sortPriority: 'recent'`):**
-     - **Objective:** Pure chronological top-down engagement from the very top newest post downward.
-     - **Timeframe:** Bypasses strict freshness cutoffs (`1h`, `2h`, etc.) because the Search Live feed is already chronological. It simply engages whatever original post is at the top of the feed down to `targetCount`.
-     - **Execution Flow:**
-       1. Opens `https://x.com/search?q=list:{listId} -filter:replies -filter:retweets&f=live`.
-       2. Scans visible articles on screen.
-       3. Applies strict root post filters (skip own tweets, skip retweets, skip replies, skip already liked/engaged, skip spam).
-       4. Engages the qualifying post:
-          - Like post (virtual cursor rose pulse).
-          - Generate & type AI reply (sanitized via `params?.stylePrompt || params?.style`).
-          - Follow author (if `autoFollow` enabled).
-          - Record `tweetId` in `atomx_follower_engaged_tweets` and author in `atomx_follower_engaged_history`.
-       5. Runs pacing delay (15–25 seconds) with live HUD countdown.
-       6. Advances down to the next post. When visible posts are exhausted, smoothly scrolls down (`smoothScrollAndHydrate(850, 1000)`) to load the next batch.
-       7. Continues until `engagedCount >= targetCount`.
-  2. **Most Active Mode (`sortPriority: 'active'`):**
-     - **Objective:** Identify and engage only the posts with the highest reply velocity within a specific freshness timeframe.
-     - **Freshness Window:** Enforces user-selected cutoff (`15m`, `30m`, `1h`, `2h`, `6h`, `12h`, `24h`, `3d`, `7d`).
-     - **Execution Flow:**
-       1. Opens `https://x.com/search?q=list:{listId} -filter:replies -filter:retweets&f=live`.
-       2. Scans feed down up to 50 smooth scroll passes.
-       3. Filters for timestamp: `Date.now() - postTimestamp <= freshnessMs`.
-       4. Extracts reply count for each post (`extractTwitterMetric(replyBtn)`).
-       5. Sorts qualifying candidate posts descending by reply count (`b.repliesCount - a.repliesCount`).
-       6. Takes top `targetCount` ranked posts and engages them in order.
-
-- **DOM-Level Double Defense:**
-  Even with `-filter:replies -filter:retweets` in the search URL, Twitter's backend occasionally leaks quotes or conversational items. AtomX enforces a mandatory DOM-level filter inside `content.js` before interacting with any tweet:
-  ```javascript
-  // 1. Skip retweets / reposts
-  const socialContext = art.querySelector('div[data-testid="socialContext"], span[data-testid="socialContext"]');
-  const isRetweet = !!socialContext || !!art.querySelector('svg[data-testid="icon-retweet"]') || /reposted|retweeted/i.test(socialContext?.innerText || '');
-  if (isRetweet) continue;
-
-  // 2. Skip comments / replies
-  const artText = (art.innerText || '');
-  const hasReplyingText = /replying to/i.test(artText);
-  const hasThreadConnector = !!art.querySelector('div[style*="width: 2px"], div[style*="width: 0.125rem"]');
-  const hasReplyLink = Array.from(art.querySelectorAll('a, div')).some(el => /replying to/i.test(el.innerText || ''));
-  if (hasReplyingText || hasThreadConnector || hasReplyLink) continue;
-  ```
-
-- **Fault Tolerance & Variable Hygiene:**
-  - **No `ReferenceError: options is not defined`:** Function parameters are named `params = {}`. Any prompt or style extraction must access `params?.stylePrompt || params?.style || stylePrompt || style`.
-  - **Individual Post Try-Catch:** Every call to `performActionsOnTweet` is wrapped in its own `try...catch` block. If an unexpected DOM mutation or network error occurs on post #1, the error is logged, `skippedCount++` is updated, and the loop seamlessly continues to post #2.
+### 5.4. Agent 4: Reply Back Loop (`replyback`) *(Upcoming / Not Live Yet)*
+- **Primary Goal:** Continuous reciprocal auto-pilot for the user's own published tweets—automatically liking and replying to all genuine incoming comments from followers and community members.
+- **Credit Cost:** 1 credit per generated AI reply loop.
 
 ---
 
-### Agent 2: Cold DM / Leads Agent
-- **Primary Goal:** Reach out to qualified prospects with highly personalized direct messages.
-- **Workflow:**
-  1. **Audience Extraction:** Parses author handles from target list or high-intent posts.
-  2. **DM Eligibility Check:** Navigates to user profile or opens DM button to verify open DMs.
-  3. **AI Personalization:** Analyzes bio and recent posts to craft a unique opener.
-  4. **Humanized Typing & Send:** Types the message with realistic cadence and submits.
-  5. **Rate Limiting:** Enforces strict safety cooldowns (e.g. 60–180 seconds between DMs) to protect account standing.
+### 5.5. Agent 5: Followers Increase (`followers`)
+- **Primary Goal:** Drive organic follower growth by systematically engaging top accounts inside curated niche Twitter Lists.
+- **The Search Live Rule:** Never uses raw list pages; always constructs:
+  `https://x.com/search?q=list:{listId} -filter:replies -filter:retweets&f=live`
+- **Supported Modes:**
+  1. **Newest Tweet First (`sortPriority: 'recent'`):** Chronological top-down engagement of original parent posts.
+  2. **Most Active (`sortPriority: 'active'`):** Ranks candidate posts descending by reply velocity within the selected freshness window (`15m` to `7d`) and engages the top ranked targets.
+- **Credit Cost:** 1 credit per generated AI comment.
 
 ---
 
-### Agent 5: Auto Unfollow & Defaulter Clean-Up Engine (Non-Reciprocal Follower Audit)
-- **Primary Goal:** Systematically audit the user's Following list (`https://x.com/{username}/following`), filter out non-reciprocal accounts (accounts that do not follow back or score below threshold), and cleanly unfollow them using humanized virtual cursor actions, safety batching, and full HUD telemetry.
-- **Connection to Global Extensions & Safety Engine:**
-  - **Global AI Voice Connection:** Linked to the user's selected global tone (`selectedTone` & `selectedTonePrompt`) and displays the active voice banner in `popup.html` (`#unfollowActiveToneLabel`).
-  - **Global Safety Engine Integration:** Fully governed by `atomx_safety_settings` (Zero local UI duplicate inputs; all pacing delays, batching breaks, and rest durations are sourced directly from the central Safety Settings):
-    - **Pacing Interval (`profileWait`):** Enforces 15–20s (randomized jitter $\pm 2$s) between unfollows with a real-time HUD countdown (`⏱️ Next target in Xs`).
-    - **Batching & Rest Breaks:** Pauses execution after every user-defined batch (e.g., 15 unfollows) for a dedicated resting duration (`breakDuration` 60s) to prevent platform bot detection.
-    - **Protected Whitelist:** Bypasses any handle contained in the whitelist input (`#unfollowWhitelistInput`).
-    - **Verified Account Lock (`verifyTabAccountLock`):** Strict single-tab lock ensures it only operates when the active Twitter profile matches `verifiedXHandle`.
-  - **Global Scroll Compliance:** All vertical navigations strictly use the **Global Scroll Architecture (`humanSmoothScroll`)**:
-    - Multi-stage cubic ease-out physics with 14–18 micro-steps per flick.
-    - Modal Scroll Guard (`!allowModalScroll` freezes window scroll while confirmation sheet dialog is open).
-    - Post-scroll settlement pauses (400ms – 450ms) to allow Twitter's virtualized list to hydrate new DOM elements without glitching.
-  - **Credit Economics:** 1 credit is automatically deducted per 10 successful unfollows.
-- **Continuous Scan & Unfollow Execution Flow:**
-  > [!IMPORTANT]
-  > **No Premature Halting / Deadlock Bug Fix:**  
-  > Previous implementations stopped or returned on the very first user who followed back, causing the script to repeatedly scroll down without ever unfollowing.  
-  > In the overhauled engine, `executeAutoUnfollowStep` iterates continuously through all `div[data-testid="UserCell"]` nodes in the viewport. When an account follows back (`"Follows you"` badge detected) or is in the whitelist, it logs the account, marks it as evaluated in `autoUnfollowSessionProcessed`, and immediately `continue`s to inspect the subsequent cell.
-- **Step-by-Step Execution Lifecycle:**
-  1. **Tab Navigation:** Background service worker reuses `agentWorkflowWorkingTabId` and navigates directly to `https://x.com/{verifiedXHandle}/following`.
-  2. **Candidate Inspection:**
-     - Checks user cell for `[data-testid="userFollowIndicator"]` or span text containing `"Follows you"`.
-     - Checks whitelist and session history.
-     - Identifies non-reciprocal accounts matching the user's criteria (`notFollowing` or `lowScore`).
-  3. **Centering & Bounding Box Settlement:**
-     - Aligns candidate cell to viewport center via `scrollElementIntoViewAndEnsureVisible(cell, 'center')`.
-     - Waits 350ms for virtualized hydration and layout stabilization.
-  4. **Authentic Virtual Cursor Click:**
-     - Locates Following button: `button[data-testid$="-unfollow"]` or button containing text "Following".
-     - Moves `#atomx-virtual-cursor` over the button with a 400ms pre-click hover dwell.
-     - Depresses the button with a distinct red ripple pulse (`#EF4444`).
-     - Detects and clicks secondary popovers if Twitter presents a revealed "Unfollow @handle" button (Creator Subscribe accounts).
-  5. **Confirmation Sheet Dialog Protocol:**
-     - Waits for Twitter's confirmation sheet (`button[data-testid="confirmationSheetConfirm"]`).
-     - Hovers and clicks the confirmation button with authentic human pointer events.
-     - Waits 800ms for Twitter to acknowledge and detach or update the button state to "Follow".
-  6. **HUD Telemetry & Storage Sync:**
-     - Updates `atomx_active_hud` and `atomx_unfollow_counters` (`done`, `skipped`, `progressPercent`).
-     - Re-evaluates batch break threshold and schedules safety pacing countdowns.
-  7. **Virtualized Feed Hydration:**
-     - Once all visible accounts in the current viewport are processed, performs a physics-based 750px scroll down to hydrate new accounts from Twitter's virtualized list.
-     - Continues until `successCount >= targetCount` or list is completely exhausted.
-
-### 5.7. Agent 16: TG Liker (Mass Raid & Repost Engager)
-1. **Target Ingestion:**
-   - Accepts profile URL / @username (`/reposts` page or main profile), tweet link (Quotes / Replies), or active X tab.
-2. **Selective Execution:**
-   - Multi-action checkboxes: ❤️ Auto-Like, 🔁 Auto-Repost, 🔖 Auto-Bookmark.
-   - Pacing Speeds: Turbo (0ms instant) through Human Natural (1.5s - 6s).
-3. **Anti-Ban Protection:**
-   - Short breaks (every 25-40 posts, 45-120s) and Long breaks (every 100-150 posts, 5-10m).
-4. **Session Continuation:**
-   - Maintains `atomx_tgliker_seen` map across sessions. "Add More Posts" allows seamlessly continuing from where it ended without re-engaging already handled posts.
+### 5.6. Agent 6: Auto Unfollow (`unfollow`)
+- **Primary Goal:** Audit the user's Following list (`https://x.com/{username}/following`), filter non-reciprocal accounts (does not follow back or low score), and cleanly unfollow them.
+- **Credit Economics Rule:**
+  - **5 unfollows = 1 credit** (`workflow.successCount % 5 === 0`).
+  - Recorded in cloud database ledger under action `"Auto Unfollow"`.
+- **Execution Pipeline:**
+  1. Inspects each `div[data-testid="UserCell"]` for `"Follows you"` badge or whitelist status.
+  2. If non-reciprocal: centers cell, hovers Following button, clicks with red pulse, waits for confirmation sheet (`confirmationSheetConfirm`), and clicks confirm.
+  3. Governed by central Safety Controls (15–20s pacing delay, batch breaks).
 
 ---
 
-## 6. HUD (Heads-Up Display) Interaction Architecture
+### 5.7. Agent 7: Favorite Creators Radar (`creators`) *(Upcoming / Not Live Yet)*
+- **Primary Goal:** Monitor specific priority creator handles and place instant, high-visibility comments within seconds of their posts going live.
+- **Credit Cost:** 1 credit per posted AI comment.
+
+---
+
+### 5.8. Agent 8: Find Defaulters (`defaulter`)
+- **Primary Goal:** Comment Pod Auditor—scans all comments under a tweet post URL and cross-references them against an expected member/raid list to detect members who skipped commenting.
+- **Credit Economics Rule:**
+  - **1 scan / use = 1 credit** (`state.credits < 1` check, deducts 1 credit upon completed audit).
+- **Execution Flow:**
+  1. Accepts post URL (or auto-detects active tab).
+  2. Ingests raw handles or chat logs and auto-cleans handles with regex parser.
+  3. Scrolls comments to the end (up to 100 scroll passes), collects unique author handles.
+  4. Generates an instant breakdown of Compliant Members vs Defaulters, with a 1-click "Copy All Defaulters" clipboard tool.
+
+---
+
+### 5.9. Agent 9: Commenter Reciprocator (`reciprocator`)
+- **Primary Goal:** Scans comments on the user's own post, likes unliked comments, visits the commenter's profile, and posts an authentic AI reply on their latest tweet.
+- **Credit Cost:** 1 credit per posted reciprocal AI comment.
+
+---
+
+### 5.10. Agent 10: Home Feed Engager (`feedengager`)
+- **Primary Goal:** Autonomous daily engagement on `https://x.com/home` (Following / For You feed).
+- **Filters:** Strictly skips own tweets, promoted ads, retweets, and reply chains. Pure root posts only.
+- **Credit Cost:** 1 credit per AI comment generated.
+
+---
+
+### 5.11. Agent 11: Niche Search Engager (`nicheengager`)
+- **Primary Goal:** Searches any target keyword (e.g., `"web3 builder"`, `"ai agents"`) on Twitter Search Live and engages original posts with contextual replies.
+- **Credit Cost:** 1 credit per AI comment generated.
+
+---
+
+### 5.12. Agent 12: TG Liker (Raid & Repost) (`tgliker`)
+- **Primary Goal:** High-speed, mass engagement on profile reposts (`/reposts`), quotes, or active X tabs.
+- **Credit Economics Rule:**
+  - **100% Free (0 credits).** No credit deduction is ever performed for TG Liker.
+- **Capabilities:** Multi-action checkboxes (❤️ Like, 🔁 Repost, 🔖 Bookmark), session continuation (`atomx_tgliker_seen`), and Anti-Ban Pacing Breaks.
+
+---
+
+## 6. Credit System & Transaction Economics Specification
+
+The AtomX credit system enforces strict, server-side atomic guarantees:
+
+### 6.1. The Golden Transaction Lifecycle
+```text
+BEGIN
+  1. Resolve User by JWT, handle, or email.
+  2. Check status: If SUSPENDED -> 403 Forbidden.
+  3. Atomic Check & Reserve:
+     UPDATE users SET credits = credits - 1 
+     WHERE id = user.id AND credits >= 1;
+  4. If balance was 0 -> 402 Insufficient credits immediately (Blocks race conditions).
+  5. Dispatch AI Request to Provider (OpenAI, Gemini, Groq, OpenRouter).
+  6. If AI Provider succeeds -> COMMIT transaction, log in credits_ledger, return remainingCredits.
+  7. If AI Provider throws ERROR:
+     ROLLBACK & Auto-Refund:
+     UPDATE users SET credits = credits + 1 WHERE id = user.id;
+     Log 'AI Reply Refund' in credits_ledger.
+     Return 500 without deducting user's credit!
+COMMIT
+```
+
+### 6.2. Credit Deduction Matrix
+- **AI Comment / Reply Generation:** Exactly 1 credit per reply. Pre-reserved to prevent parallel request bypass; auto-refunded on any provider error.
+- **Auto Unfollow Agent:** Exactly 1 credit per 5 successful unfollows (`workflow.successCount % 5 === 0`).
+- **Find Defaulters Agent:** Exactly 1 credit per completed audit run.
+- **TG Liker (Raid & Repost):** 0 credits (Free utility).
+- **Single Source of Truth:** Credit deductions are verified on the backend. When an AI comment is generated, the server deducts the credit; client workflows do not double-deduct.
+
+---
+
+## 7. HUD (Heads-Up Display) Interaction Architecture
 
 The floating HUD (`#atomx-floating-hud`) provides transparent visibility and user control:
 
@@ -331,18 +259,18 @@ The floating HUD (`#atomx-floating-hud`) provides transparent visibility and use
 | :--- | :--- | :--- |
 | **Pause (`⏸️`)** | Temporarily halts workflow | Loops in background checking `atomx_workflow_paused`. Freezes scrolling and clicking. |
 | **Resume (`▶️`)** | Continues workflow | Releases the pause loop; resumes from the current active post. |
-| **Skip (`⏭️`)** | Aborts current post | **Instantly unpauses**, erases any open draft comment, dismisses modal, tags post as skipped, scrolls down, and moves to next tweet. |
-| **Stop (`⏹️`)** | Cancels entire workflow | Sets `isWorkflowAborted = true`, clears storage active flags, removes HUD smoothly. |
+| **Skip (`⏭️`)** | Aborts current post | **Instantly unpauses**, erases any open draft comment, dismisses modal, tags post as skipped, scrolls down, and moves to next tweet cleanly without skipping the subsequent post. |
+| **Stop (`⏹️`)** | Cancels entire workflow | Sets `isWorkflowAborted = true`, clears storage active flags, removes HUD smoothly across tab & extension. |
 
 ---
 
-## 7. Storage Keys Reference
+## 8. Storage Keys Reference
 
 | Storage Key | Type | Description |
 | :--- | :--- | :--- |
 | `atomx_agent_workflow` | `Object` | Active workflow descriptor (agentId, targetCount, successCount, options). |
 | `atomx_workflow_paused` | `Boolean` | Flag indicating if the current execution is paused. |
-| `atomx_skip_current` | `Boolean` | Ephemeral flag signaling immediate skip of the active item. |
+| `atomx_skip_current` | `Boolean` | Ephemeral flag signaling immediate skip of the active item (auto-cleared after each step). |
 | `engagedTweetIds` | `Array<string>` | Master array of all engaged & skipped tweet IDs to prevent duplicate actions. |
 | `atomx_follower_engaged_tweets` | `Object` | Map of `{ tweetId: timestamp }` specific to the Followers Increase engine. |
 | `atomx_tgliker_seen` | `Object` | Map of `{ targetUrl: [tweetIds] }` preserving handled posts for TG Liker continuation. |
@@ -351,3 +279,4 @@ The floating HUD (`#atomx-floating-hud`) provides transparent visibility and use
 
 ---
 *Created and maintained for AtomX AI Agentic Suite.*
+

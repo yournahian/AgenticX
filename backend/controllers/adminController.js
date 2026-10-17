@@ -372,7 +372,9 @@ exports.getStats = async (req, res) => {
     const apiLogs = await multiProviderService.getApiLogs().catch(() => []);
     const ledgerDeductionsCount = ledger.filter(l => l.amount < 0 || (l.action || '').toLowerCase().includes('reply') || (l.action || '').toLowerCase().includes('ai') || (l.reason || '').toLowerCase().includes('reply')).length;
     const logsSuccessCount = apiLogs.filter(l => l.status === 'SUCCESS' && (!l.statusCode || l.statusCode < 400)).length;
-    const totalAIGenCount = Math.max(ledgerDeductionsCount, logsSuccessCount, apiLogs.length);
+    const exactDbAiGens = await db.getAiGenerationsCount().catch(() => 0);
+    const totalAIGenCount = Math.max(ledgerDeductionsCount, logsSuccessCount, apiLogs.length, exactDbAiGens);
+    const totalLedgerCount = Math.max(ledger.length, await db.getLedgerCount().catch(() => 0));
 
     res.json({
       totalUsers: users.length,
@@ -381,6 +383,7 @@ exports.getStats = async (req, res) => {
       pendingRequests: requests.filter(r => r.status === 'PENDING').length,
       totalCreditsCirculating: users.reduce((acc, u) => acc + (u.credits || 0), 0),
       totalAIGenerations: totalAIGenCount,
+      totalLedgerCount,
       mrr: `$${mrrTotal}`,
       revenue: `$${totalRevenue.toFixed(0)}`
     });
@@ -1309,4 +1312,124 @@ exports.getSystemVersion = async (req, res) => {
   };
   lastReleaseFetch = now;
   return res.json(cachedRelease);
+};
+
+// =========================================================================
+// AGENT STATUS & KILLSWITCH MANAGEMENT (Admin on/off with custom maintenance reason)
+// =========================================================================
+const agentsStatusPath = path.join(__dirname, '../data/agentsStatus.json');
+let inMemoryAgentsStatus = null;
+
+const DEFAULT_AGENTS = {
+  telegram: { id: 'telegram', name: 'Telegram Group Engage', icon: '✈️', enabled: true, reason: '' },
+  audience: { id: 'audience', name: 'Audience Builder', icon: '👥', enabled: true, reason: '' },
+  sorsa: { id: 'sorsa', name: 'Sorsa Score Booster', icon: '⚡', enabled: true, reason: '' },
+  followers: { id: 'followers', name: 'Followers Growth', icon: '📈', enabled: true, reason: '' },
+  replyback: { id: 'replyback', name: 'Reply Back Loop', icon: '🔄', enabled: true, reason: '' },
+  unfollow: { id: 'unfollow', name: 'Auto Clean & Unfollow', icon: '🧹', enabled: true, reason: '' },
+  creators: { id: 'creators', name: 'Favorite Creators Radar', icon: '⭐', enabled: true, reason: '' },
+  defaulter: { id: 'defaulter', name: 'Find Defaulter', icon: '🔍', enabled: true, reason: '' },
+  reciprocator: { id: 'reciprocator', name: 'Commenter Reciprocator', icon: '🤝', enabled: true, reason: '' },
+  feedengager: { id: 'feedengager', name: 'Home Feed Engager', icon: '🏠', enabled: true, reason: '' },
+  nicheengager: { id: 'nicheengager', name: 'Niche Search Engager', icon: '🎯', enabled: true, reason: '' },
+  tgliker: { id: 'tgliker', name: 'TG Liker (Raid & Repost)', icon: '⚡', enabled: true, reason: '' }
+};
+
+exports.getAgentStatus = async (req, res) => {
+  try {
+    if (inMemoryAgentsStatus && Object.keys(inMemoryAgentsStatus).length > 0) {
+      return res.json({ success: true, agents: inMemoryAgentsStatus });
+    }
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('plans')
+          .select('features')
+          .eq('id', 'system_agents_status')
+          .maybeSingle();
+
+        if (!error && data && data.features && typeof data.features === 'object' && Object.keys(data.features).length > 0) {
+          inMemoryAgentsStatus = { ...DEFAULT_AGENTS, ...data.features };
+          return res.json({ success: true, agents: inMemoryAgentsStatus });
+        }
+      } catch (dbErr) {
+        console.warn('⚠️ [Admin] Supabase getAgentStatus read warning:', dbErr.message);
+      }
+    }
+
+    if (fs.existsSync(agentsStatusPath)) {
+      const fileData = JSON.parse(fs.readFileSync(agentsStatusPath, 'utf8'));
+      inMemoryAgentsStatus = { ...DEFAULT_AGENTS, ...fileData };
+      return res.json({ success: true, agents: inMemoryAgentsStatus });
+    }
+
+    inMemoryAgentsStatus = { ...DEFAULT_AGENTS };
+    res.json({ success: true, agents: inMemoryAgentsStatus });
+  } catch (err) {
+    console.error('Failed to get agent status:', err);
+    res.status(500).json({ error: 'Failed to retrieve agent status: ' + err.message });
+  }
+};
+
+exports.saveAgentStatus = async (req, res) => {
+  try {
+    const { agentId, enabled, reason, agents } = req.body;
+    let current = inMemoryAgentsStatus || { ...DEFAULT_AGENTS };
+
+    if (fs.existsSync(agentsStatusPath)) {
+      try {
+        current = { ...DEFAULT_AGENTS, ...JSON.parse(fs.readFileSync(agentsStatusPath, 'utf8')) };
+      } catch (e) {}
+    }
+
+    if (agents && typeof agents === 'object') {
+      current = { ...current, ...agents };
+    } else if (agentId) {
+      if (!current[agentId]) {
+        current[agentId] = { id: agentId, name: agentId, icon: '🤖', enabled: true, reason: '' };
+      }
+      if (typeof enabled === 'boolean') {
+        current[agentId].enabled = enabled;
+      }
+      if (typeof reason === 'string') {
+        current[agentId].reason = reason.trim();
+      }
+      current[agentId].updatedAt = Date.now();
+    } else {
+      return res.status(400).json({ error: 'agentId or agents object required' });
+    }
+
+    inMemoryAgentsStatus = current;
+
+    try {
+      fs.writeFileSync(agentsStatusPath, JSON.stringify(current, null, 2), 'utf8');
+    } catch (fsErr) {
+      console.warn('⚠️ [Admin] Failed to write local agentsStatus.json:', fsErr.message);
+    }
+
+    if (supabase) {
+      try {
+        await supabase
+          .from('plans')
+          .upsert({
+            id: 'system_agents_status',
+            name: 'System Agent Status & Maintenance Config',
+            price: 0,
+            features: current
+          });
+      } catch (dbErr) {
+        console.warn('⚠️ [Admin] Failed to sync agent status to Supabase:', dbErr.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: '✓ Agent maintenance status updated successfully!',
+      agents: current
+    });
+  } catch (err) {
+    console.error('Failed to save agent status:', err);
+    res.status(500).json({ error: 'Failed to save agent status: ' + err.message });
+  }
 };

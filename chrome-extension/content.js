@@ -1901,22 +1901,25 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   // 1. On tweet status pages, check if inline reply box is already sitting under the tweet
   if (isStatusPage && isMainTarget) {
-    const inlineContainer = document.querySelector('div[data-testid="inline_reply"]');
     let inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
 
     // If placeholder "Post your reply" is present but tweetTextarea_0 isn't yet focused/mounted
-    if (!inlineBox && inlineContainer) {
-      const placeholder = inlineContainer.querySelector('div[role="button"], div[contenteditable="true"], div[data-testid="tweetTextarea_0"], span');
+    if (!inlineBox) {
+      const placeholder = document.querySelector('div[data-testid="inline_reply"], div[data-testid="tweetTextarea_0_placeholder"]') ||
+        Array.from(document.querySelectorAll('div[role="button"], div[contenteditable="true"], span, div')).find(el => {
+          const t = (el.innerText || el.textContent || '').trim();
+          return t === 'Post your reply' || t.startsWith('Post your reply');
+        });
       if (placeholder) {
         await humanScrollElementIntoView(placeholder, 'center');
-        await sleep(350);
+        await sleep(300);
         await performHumanClick(placeholder, {
           pulseColor: '#38BDF8',
           scroll: false,
-          hoverDwell: 380,
-          postPause: 400
+          hoverDwell: 300,
+          postPause: 300
         });
-        await sleep(350);
+        await sleep(400);
         inlineBox = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
       }
     }
@@ -1924,16 +1927,16 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
     if (inlineBox) {
       console.log('[ATOMX COMMENT ENGINE] Direct inline reply box detected, activating via virtual cursor...');
       await humanScrollElementIntoView(inlineBox, 'center');
-      await sleep(350);
+      await sleep(250);
       await performHumanClick(inlineBox, {
         pulseColor: '#38BDF8',
         scroll: false,
-        hoverDwell: 380,
-        postPause: 400
+        hoverDwell: 300,
+        postPause: 300
       });
       textarea = inlineBox;
       isDialog = false;
-      await sleep(250);
+      await sleep(200);
     }
   }
 
@@ -1946,26 +1949,25 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
     if (!replyBtn) {
       console.log('[ATOMX COMMENT ENGINE] Reply button not found on target article (might be ad, video, or restricted). Skipping.');
-      return { success: false, error: 'Reply button not found on post' };
+      return { success: false, skipped: true, commentsRestricted: true, error: 'Reply button not found on post' };
     }
 
     console.log('[ATOMX COMMENT ENGINE] Clicking Reply button on target tweet/comment...');
     await simulateHumanReplyClick(replyBtn);
     await sleep(400);
 
-    // Wait for the modal dialog to appear
-    dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 3500);
-    if (!dialog) {
-      console.log('[ATOMX COMMENT ENGINE] Modal dialog did not open after first click. Attempting direct authentic click retry...');
-      try {
-        const targetBtn = replyBtn.closest('button, [role="button"]') || replyBtn;
-        targetBtn.focus?.({ preventScroll: true });
-        dispatchEnhancedHumanEvents(targetBtn);
-        targetBtn.click();
-      } catch (e) {
-        try { replyBtn.click(); } catch (err) {}
+    // Wait up to 3.5s for EITHER dialog OR inline box to appear
+    const startWait = Date.now();
+    while (Date.now() - startWait < 3500) {
+      dialog = document.querySelector('div[role="dialog"], div[aria-modal="true"]');
+      if (dialog) break;
+      const inlineNow = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
+      if (inlineNow) {
+        textarea = inlineNow;
+        isDialog = false;
+        break;
       }
-      dialog = await waitForElement('div[role="dialog"], div[aria-modal="true"]', 3500);
+      await sleep(150);
     }
 
     if (dialog) {
@@ -1973,7 +1975,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
       // Check immediately if this is a "Who can reply?" restriction dialog
       const dialogText = (dialog.innerText || '').toLowerCase();
-      if (dialogText.includes('who can reply') || dialogText.includes('only some accounts can reply')) {
+      if (dialogText.includes('who can reply') || dialogText.includes('only some accounts can reply') || dialogText.includes('accounts mentioned')) {
         console.log('[ATOMX COMMENT ENGINE] "Who can reply?" restriction detected. Dismissing modal...');
         const gotItBtn = Array.from(dialog.querySelectorAll('button, div[role="button"]')).find(b => {
           const t = (b.innerText || '').trim().toLowerCase();
@@ -1992,7 +1994,7 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
         if (mask && !document.querySelector('div[role="dialog"] div[data-testid="tweetTextarea_0"]')) {
           try { mask.remove(); } catch (e) {}
         }
-        return { success: false, commentsRestricted: true, error: 'Who can reply restriction' };
+        return { success: false, skipped: true, commentsRestricted: true, error: 'Who can reply restriction' };
       }
 
       for (let w = 0; w < 10; w++) {
@@ -2000,16 +2002,16 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
         if (textarea) break;
         await sleep(150);
       }
-    } else {
-      // Check if clicking reply focused an inline reply composer (common on status pages / thread detail)
-      const inline = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"]');
+    } else if (!textarea) {
+      // Check if clicking reply focused an inline reply composer
+      const inline = document.querySelector('div[data-testid="inline_reply"] div[data-testid="tweetTextarea_0"], div[data-testid="tweetTextarea_0"][contenteditable="true"], div[data-testid="tweetTextarea_0"]');
       if (inline) {
         console.log('[ATOMX COMMENT ENGINE] Inline reply textarea detected after click!');
         textarea = inline;
         isDialog = false;
       } else {
-        console.log('[ATOMX COMMENT ENGINE] Reply modal dialog did not appear for this tweet (may be restricted or disabled). Skipping.');
-        return { success: false, error: 'Reply dialog modal did not open' };
+        console.log('[ATOMX COMMENT ENGINE] Reply modal or inline composer did not appear for this tweet (may be restricted or disabled). Skipping.');
+        return { success: false, skipped: true, commentsRestricted: true, error: 'Reply box not available (comments restricted or disabled by author)' };
       }
     }
   }
@@ -2287,16 +2289,43 @@ async function postCommentOnTargetArticle(targetArticle, commentText) {
 
   // Reply Delay (After Comment): Centralized Anti-Ban Safety pause before next action
   try {
-    let rMin = s.replyDelayMin !== undefined ? Number(s.replyDelayMin) : (s.replyDelay !== undefined ? Number(s.replyDelay) : 2);
-    let rMax = s.replyDelayMax !== undefined ? Number(s.replyDelayMax) : (s.replyDelay !== undefined ? Number(s.replyDelay) : 5);
-    if (isInstant || (rMin === 0 && rMax === 0) || s.replyDelay === 0) {
+    let rMin = s.replyDelayMin !== undefined ? Number(s.replyDelayMin) : (s.replyDelay !== undefined ? Math.max(0, Number(s.replyDelay) - 3) : 3);
+    let rMax = s.replyDelayMax !== undefined ? Number(s.replyDelayMax) : (s.replyDelay !== undefined ? Number(s.replyDelay) : 6);
+    if (isNaN(rMin)) rMin = 3;
+    if (isNaN(rMax)) rMax = 6;
+    if (rMin > rMax) [rMin, rMax] = [rMax, rMin];
+
+    if (isInstant || (rMin === 0 && rMax === 0)) {
       // Strictly 0s delay when user configured 0 or instant mode!
     } else {
-      if (rMin > rMax) [rMin, rMax] = [rMax, rMin];
       const waitSec = Math.floor(rMin + Math.random() * (rMax - rMin + 1));
       if (waitSec > 0) {
-        console.log(`[ATOMX COMMENT ENGINE] Reply Delay (After Comment): pausing ${waitSec}s...`);
-        await sleep(waitSec * 1000);
+        console.log(`[ATOMX COMMENT ENGINE] Reply Delay (After Comment): dynamically randomized ${waitSec}s from configured range [${rMin}s - ${rMax}s]...`);
+        for (let rSec = waitSec; rSec > 0 && !isWorkflowAborted; rSec--) {
+          const rTimeStr = `0:${String(rSec).padStart(2, '0')}`;
+          updateFloatingHud({
+            stateBadge: 'PACING',
+            statusText: `⏳ Reply Delay (After Comment): ${rSec}s remaining...`,
+            countdownText: `Reply Delay: ${rTimeStr}`,
+            nextAction: `Reply Delay: ${rTimeStr}`,
+            timerBadge: `⏱️ ${rTimeStr}`
+          });
+          try {
+            const curStored = await chrome.storage.local.get(['atomx_tg_raid', 'atomx_active_hud']).catch(() => ({}));
+            if (curStored?.atomx_tg_raid?.active) {
+              chrome.storage.local.set({
+                atomx_tg_raid: {
+                  ...curStored.atomx_tg_raid,
+                  stateBadge: 'PACING',
+                  statusText: `⏳ Reply Delay (After Comment): ${rSec}s remaining...`,
+                  countdownText: `Reply Delay: ${rTimeStr}`,
+                  timerBadge: `⏱️ ${rTimeStr}`
+                }
+              }).catch(() => null);
+            }
+          } catch (e) {}
+          await sleep(1000);
+        }
       }
     }
   } catch (e) {}
@@ -2983,10 +3012,12 @@ function updateFloatingHud(data = {}) {
       nextActionEl.textContent = 'Stopped by user';
     } else if (hudData.stateBadge === 'PAUSED' || isHudWorkflowPaused) {
       nextActionEl.textContent = 'Workflow Paused';
+    } else if (hudData.stateBadge === 'PACING' || hudData.stateBadge === 'BATCH_BREAK') {
+      nextActionEl.textContent = hudData.countdownText || hudData.nextAction || 'Pacing Delay...';
+    } else if (hudData.countdownText && (hudData.countdownText.includes('Next') || hudData.countdownText.includes('Delay') || hudData.countdownText.includes('Wait') || hudData.countdownText.includes('Break') || hudData.countdownText.includes('Pacing'))) {
+      nextActionEl.textContent = hudData.countdownText;
     } else if (hudData.nextAction && hudData.nextAction !== 'Completed') {
       nextActionEl.textContent = hudData.nextAction;
-    } else if (hudData.countdownText && (hudData.countdownText.includes('Next') || hudData.countdownText.includes('Delay') || hudData.countdownText.includes('Pacing'))) {
-      nextActionEl.textContent = hudData.countdownText;
     } else if (hudData.indicator) {
       nextActionEl.textContent = `Target ${hudData.indicator}`;
     }
@@ -3567,6 +3598,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  // TG Liker: Scroll Recorder & Stop Picker messages
+  if (message.type === 'recscroll') {
+    if (recRunning) { sendResponse({ ok: false, error: 'already scrolling' }); return true; }
+    recRunning = true; recAbort = false;
+    (async () => {
+      try {
+        if (typeof TgLikerNativeEngine !== 'undefined') TgLikerNativeEngine.removeCursor();
+        const tglCursor = document.getElementById('tgl-cursor');
+        if (tglCursor) tglCursor.remove();
+        await new Promise(r => setTimeout(r, 900));
+        const reached = await recScrollToTopSmooth(message.pace);
+        if (reached && !recAbort) await new Promise(r => setTimeout(r, 1800));
+        sendResponse({ ok: true, reachedTop: reached });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      } finally {
+        recRunning = false;
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'pickstop') {
+    startTweetStopPick();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message.type === 'recping') {
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message.type === 'recabort') {
+    recAbort = true;
+    sendResponse({ ok: true });
+    return true;
+  }
 });
 
 // Neutralize Twitter / X "Leave site? Changes you made may not be saved" prompt
@@ -3908,6 +3978,16 @@ async function executeAutonomousTweetWorkflow(params) {
       await sleep(300);
       if (window.location.href.includes(expectedTweetId)) break;
     }
+    if (!window.location.href.includes(expectedTweetId)) {
+      console.warn(`[ATOMX] Tab did not navigate to expected tweet ${expectedTweetId}. Aborting action on stale page.`);
+      return {
+        success: false,
+        skipped: true,
+        ignored: true,
+        reason: 'Page failed to navigate to target tweet (stale page prevented)',
+        performed
+      };
+    }
   }
 
   // Helper to persist engaged tweet ID to local storage immediately
@@ -3921,14 +4001,25 @@ async function executeAutonomousTweetWorkflow(params) {
     } catch (e) {}
   };
 
-  // Identify MAIN POST article (wait for tweet DOM hydration up to 5s)
-  let mainArticle = getMainPostArticle();
-  if (!mainArticle) {
-    for (let r = 0; r < 10; r++) {
-      await sleep(500);
-      mainArticle = getMainPostArticle();
-      if (mainArticle) break;
+  // Identify MAIN POST article (wait for tweet DOM hydration up to 6s)
+  let mainArticle = null;
+  for (let r = 0; r < 12; r++) {
+    const candidate = getMainPostArticle();
+    if (candidate) {
+      if (expectedTweetId) {
+        // Verify this candidate article is actually the target tweet, NOT a stale tweet left in DOM
+        const links = Array.from(candidate.querySelectorAll('a[href*="/status/"]'));
+        const matchesTarget = links.some(l => (l.getAttribute('href') || '').includes(expectedTweetId));
+        if (matchesTarget) {
+          mainArticle = candidate;
+          break;
+        }
+      } else {
+        mainArticle = candidate;
+        break;
+      }
     }
+    await sleep(500);
   }
 
   if (!mainArticle) {
@@ -3937,7 +4028,7 @@ async function executeAutonomousTweetWorkflow(params) {
       success: false,
       skipped: true,
       ignored: true,
-      reason: 'Focal tweet article could not be loaded or was unavailable',
+      reason: 'Post unavailable or could not be loaded',
       performed
     };
   }
@@ -4212,11 +4303,27 @@ async function executeAutonomousTweetWorkflow(params) {
       // Enforce client-side anti-bot sanitization (dynamic word limit if specified in prompt)
       commentToPost = sanitizeClientComment(commentToPost, extractMaxWordsFromPrompt(params.stylePrompt || params.style));
 
+      let lastCommentError = null;
       // Step B: Post comment via universal comment engine
       const commentRes = await postCommentOnTargetArticle(mainArticle, commentToPost);
       if (commentRes && commentRes.success) {
         performed.push(`Human Typed & Commented: "${commentToPost}" 💬`);
         await markTweetEngagedLocally();
+      } else if (commentRes?.commentsRestricted) {
+        const restrictReason = commentRes.error || 'Comments restricted by author';
+        console.log(`[ATOMX] Comment restricted: ${restrictReason}`);
+        return {
+          success: true,
+          skipped: true,
+          ignored: true,
+          reason: restrictReason,
+          commentSkipReason: restrictReason,
+          performed,
+          isAlreadyLiked,
+          isAlreadyCommented,
+          commentSkipped: true,
+          commentPosted: false
+        };
       } else if (commentRes?.skipped || commentRes?.aborted || isWorkflowItemSkipped || isWorkflowAborted) {
         console.log('[ATOMX] Comment skipped or aborted by user.');
         return {
@@ -4224,7 +4331,8 @@ async function executeAutonomousTweetWorkflow(params) {
           skipped: true,
           ignored: true,
           aborted: Boolean(commentRes?.aborted || isWorkflowAborted),
-          reason: 'Workflow was aborted or skipped by user',
+          reason: isWorkflowAborted ? 'Workflow aborted by user' : (isWorkflowItemSkipped ? 'Skipped by user' : (commentRes?.error || 'Workflow item skipped')),
+          commentSkipReason: commentRes?.error || 'Skipped by user',
           performed,
           isAlreadyLiked,
           isAlreadyCommented,
@@ -4232,7 +4340,9 @@ async function executeAutonomousTweetWorkflow(params) {
           commentPosted: false
         };
       } else {
-        console.warn('[ATOMX] Comment posting error:', commentRes?.error);
+        lastCommentError = commentRes?.error || 'Comment restricted or unavailable';
+        console.warn('[ATOMX] Comment posting error:', lastCommentError);
+        performed.push(`Comment Skipped (${lastCommentError})`);
       }
     } catch (e) {
       if (isWorkflowItemSkipped || isWorkflowAborted) {
@@ -4269,6 +4379,8 @@ async function executeAutonomousTweetWorkflow(params) {
   if (actions.repost) requestedActions.push('repost');
   if (actions.follow) requestedActions.push('follow');
 
+  const isCommentPosted = performed.some(p => p.includes('Commented:'));
+  const isCommentSkipped = actions.comment ? !isCommentPosted : false;
   const anyDone = performed.some(p => p.includes('Liked') || p.includes('Commented') || p.includes('Reposted') || p.includes('Followed'));
 
   // If actions were requested, but none could be completed (e.g. elements not found)
@@ -4281,7 +4393,9 @@ async function executeAutonomousTweetWorkflow(params) {
       reason: 'Could not complete requested actions on this post',
       performed,
       isAlreadyLiked,
-      isAlreadyCommented
+      isAlreadyCommented,
+      commentSkipped: isCommentSkipped,
+      commentPosted: false
     };
   }
 
@@ -4291,8 +4405,9 @@ async function executeAutonomousTweetWorkflow(params) {
     performed,
     isAlreadyLiked,
     isAlreadyCommented,
-    commentSkipped: isAlreadyCommented,
-    commentPosted: performed.some(p => p.includes('Commented:'))
+    commentSkipped: isCommentSkipped,
+    commentPosted: isCommentPosted,
+    commentSkipReason: isCommentSkipped ? (isAlreadyCommented ? 'Already commented previously' : (performed.find(p => p.includes('Comment Skipped')) || 'Comments restricted by author')) : null
   };
 }
 
@@ -6416,6 +6531,162 @@ async function executeHomeFeedEngagementStep(params = {}) {
 }
 
 // =========================================================================
+// TG LIKER: STOP AT POST & SCROLL RECORDER ENGINE
+// =========================================================================
+let tglStopCount = 0;
+const tglNormTxt = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+function getTweetArticleInfo(a) {
+  let handle = '';
+  const un = a.querySelector('[data-testid="User-Name"]');
+  if (un) { const m = (un.textContent || '').match(/@([A-Za-z0-9_]{1,15})/); if (m) handle = m[1]; }
+  const tt = a.querySelector('[data-testid="tweetText"]');
+  const timeLink = a.querySelector('a[href*="/status/"] time');
+  const link = (timeLink && timeLink.closest('a')) || a.querySelector('a[href*="/status/"]');
+  const href = (link && link.getAttribute('href')) || '';
+  const m = href.match(/\/status\/(\d+)/);
+  const id = m ? m[1] : null;
+  return { id, handle, text: tt ? (tt.textContent || '') : '' };
+}
+
+function matchesStopTarget(stop, a, id) {
+  if (!stop || (!stop.id && !stop.handle && !stop.text)) return false;
+  if (stop.id) return id === stop.id;
+  const info = getTweetArticleInfo(a);
+  if (stop.handle && info.handle.toLowerCase() !== String(stop.handle).toLowerCase()) return false;
+  const want = tglNormTxt(stop.text);
+  let hit;
+  if (!want) hit = !!stop.handle;
+  else { const have = tglNormTxt(info.text); hit = have.length >= 6 && (have.includes(want) || want.includes(have)); }
+  if (!hit) return false;
+  tglStopCount++;
+  return tglStopCount >= (stop.nth || 1);
+}
+
+// Visual Tweet Picker for "Stop at post"
+let pickOn = false;
+function startTweetStopPick() {
+  if (pickOn) return;
+  pickOn = true;
+  const bar = document.createElement('div');
+  bar.textContent = '📍 Jei post e thamte chao oi post e click koro  (Esc = cancel)';
+  bar.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#0e7490;color:#fff;padding:9px 16px;border-radius:999px;font:600 14px system-ui;box-shadow:0 4px 18px rgba(0,0,0,.5);pointer-events:none';
+  document.documentElement.appendChild(bar);
+  let hl = null;
+  const clearHl = () => { if (hl) { hl.style.outline = ''; hl.style.outlineOffset = ''; hl = null; } };
+  const artOf = (t) => (t && t.closest ? t.closest('article[data-testid="tweet"]') : null);
+  const over = (e) => { const a = artOf(e.target); if (a === hl) return; clearHl(); if (a) { hl = a; a.style.outline = '3px solid #22d3ee'; a.style.outlineOffset = '-3px'; } };
+  const finish = () => {
+    pickOn = false; clearHl(); bar.remove();
+    ['mouseover', 'click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'].forEach((n) => document.removeEventListener(n, n === 'mouseover' ? over : swallow, true));
+    document.removeEventListener('keydown', key, true);
+  };
+  const swallow = (e) => {
+    const a = artOf(e.target);
+    if (!a) return;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    if (e.type !== 'click') return;
+    const info = getTweetArticleInfo(a);
+    if (!info.id) { bar.textContent = '⚠ Ei post e id pawa jayni, onno post e click koro'; return; }
+    try { chrome.storage.local.set({ tgl_stoppick: { id: info.id, handle: info.handle, text: tglNormTxt(info.text).slice(0, 140), at: Date.now() } }); } catch (x) {}
+    finish();
+  };
+  const key = (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(); } };
+  document.addEventListener('mouseover', over, true);
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'].forEach((n) => document.addEventListener(n, swallow, true));
+  document.addEventListener('keydown', key, true);
+}
+
+// ── Standalone Scroll Recorder Engine ────────────────────────────────
+const REC_PACE = {
+  slow:   { burst: 1.0, pause: [380, 760], dist: [0.45, 0.8] },   // ~0.55 screen/s
+  normal: { burst: 1.6, pause: [160, 380], dist: [0.45, 0.8] },   // ~1 screen/s
+  fast:   { burst: 2.4, pause: [90, 200],  dist: [0.45, 0.8] },   // ~1.6 screen/s
+  faster: { burst: 4.5, pause: [40, 110],  dist: [0.8, 1.3] },    // ~3 screen/s
+  turbo:  { burst: 8,   pause: [15, 60],   dist: [1.2, 1.8] },    // ~5 screen/s
+  insane: { burst: 14,  pause: [0, 25],    dist: [1.8, 2.6] }     // ~9 screen/s
+};
+let recAbort = false;
+let recRunning = false;
+
+function findPageScroller() {
+  const se = document.scrollingElement || document.documentElement;
+  if (se && se.scrollHeight > se.clientHeight + 50) return se;
+  let best = null, bestH = 0;
+  document.querySelectorAll('main, [data-testid="primaryColumn"], [data-testid="primaryColumn"] *, body, body > div, #react-root, #react-root *').forEach((el) => {
+    if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) {
+      const oy = getComputedStyle(el).overflowY;
+      if ((oy === 'auto' || oy === 'scroll' || el === document.body) && el.clientHeight > bestH) { best = el; bestH = el.clientHeight; }
+    }
+  });
+  return best || se;
+}
+const isScrollerRoot = (el) => el === document.scrollingElement || el === document.documentElement || el === document.body;
+const getScrollerTop = (el) => (isScrollerRoot(el) ? (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0) : el.scrollTop);
+function setScrollerTop(el, y) {
+  y = Math.max(0, y);
+  if (isScrollerRoot(el)) {
+    window.scrollTo({ top: y, behavior: 'instant' });
+    if (Math.abs(getScrollerTop(el) - y) > 2) { document.documentElement.scrollTop = y; document.body.scrollTop = y; }
+  } else el.scrollTop = y;
+}
+
+function wheelViaCdpCall(dy) {
+  return new Promise((res) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'trusted', action: 'wheel', x: Math.round(window.innerWidth * 0.5), y: Math.round(window.innerHeight * 0.5), dy }, (r) => { void chrome.runtime.lastError; res(!!(r && r.ok)); });
+    } catch (e) { res(false); }
+  });
+}
+
+async function recGlideUp(el, dy, ms) {
+  if (Math.abs(dy) < 4) return 0;
+  const from = getScrollerTop(el);
+  const t0 = performance.now();
+  while (!recAbort) {
+    const t = Math.min(1, (performance.now() - t0) / ms);
+    const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    setScrollerTop(el, from + dy * e);
+    if (t >= 1) break;
+    await new Promise(r => { requestAnimationFrame(r); setTimeout(r, 50); });
+  }
+  return from - getScrollerTop(el);
+}
+
+async function recScrollToTopSmooth(pace) {
+  const P = REC_PACE[pace] || REC_PACE.normal;
+  const t0 = Date.now();
+  let stuck = 0, useWheel = false;
+  let el = findPageScroller();
+  const sleepFn = ms => new Promise(r => setTimeout(r, ms));
+  const randNum = (a, b) => a + Math.random() * (b - a);
+  const clampNum = (v, a, b) => Math.min(b, Math.max(a, v));
+
+  while (getScrollerTop(el) > 3 && !recAbort) {
+    if (Date.now() - t0 > 20 * 60 * 1000) break; // safety: max 20 min
+    const vh = window.innerHeight;
+    const before = getScrollerTop(el);
+    const d = Math.min(before, vh * randNum(P.dist[0], P.dist[1]));
+    const ms = clampNum((d / vh) / P.burst * 1000 * randNum(0.9, 1.1), 40, 1400);
+    if (!useWheel) await recGlideUp(el, -d, ms);
+    else {
+      const steps = Math.max(3, Math.round(ms / 40));
+      for (let i = 0; i < steps && !recAbort; i++) { await wheelViaCdpCall(-d / steps); await sleepFn(ms / steps); }
+    }
+    await sleepFn(40);
+    if (Math.abs(getScrollerTop(el) - before) < 2) {
+      stuck++;
+      if (stuck === 2) { el = findPageScroller(); }
+      else if (stuck === 3 && !useWheel) { useWheel = true; }
+      else if (stuck >= 6) { setScrollerTop(el, 0); break; }
+    } else stuck = 0;
+    await sleepFn(randNum(P.pause[0], P.pause[1]));
+  }
+  if (useWheel) { try { chrome.runtime.sendMessage({ type: 'trusted', action: 'detach' }, () => void chrome.runtime.lastError); } catch (e) {} }
+  return getScrollerTop(el) <= 3;
+}
+
+// =========================================================================
 // AGENT 16: TG LIKER — MASS RAID, REPOSTS & QUOTES ENGAGER
 // 100% Exact Port of Native Continuous In-Page Raid & Glide Engine
 // =========================================================================
@@ -6788,7 +7059,7 @@ const TgLikerNativeEngine = (() => {
   }
 
   async function raidPageInner(cfg, target) {
-    const delay = Number.isFinite(cfg.speedMs) ? cfg.speedMs : 2000;
+    const delay = Number.isFinite(cfg.speedMs) ? cfg.speedMs : 3500;
     const instant = delay < 1000;       // Turbo: instant jump + direct click
     const human = !instant;             // Human mode: smooth scroll + curved mouse cursor
     const A = cfg.actions || { like: true };
@@ -6807,6 +7078,7 @@ const TgLikerNativeEngine = (() => {
     const doneNoId = new WeakSet();
     let emptyScrolls = 0;
     let failStreak = 0;
+    tglStopCount = 0;
 
     const hasFresh = () => articlesNow().some((a) => {
       const id = articleId(a);
@@ -6885,6 +7157,7 @@ const TgLikerNativeEngine = (() => {
       const { a, id } = item;
       if (!id) { doneNoId.add(a); continue; }   // Skip ads / promoted
       done.add(id);
+      const stopHit = matchesStopTarget(cfg.stop, a, id);
 
       // All selected actions already satisfied -> skip scroll/click
       if (!needsWork(a)) {
@@ -6892,6 +7165,7 @@ const TgLikerNativeEngine = (() => {
         handled++;
         markSeen(id);
         S.total = (S.total || 0) + 1;
+        if (stopHit) { await save({ stats: S.stats, total: S.total }); return { stopReached: true }; }
         if (cfg.maxPosts && S.total >= cfg.maxPosts) {
           await save({ stats: S.stats, total: S.total });
           return { limitReached: true };
@@ -7009,6 +7283,9 @@ const TgLikerNativeEngine = (() => {
       await save({ stats: S.stats, sinceBreak: S.sinceBreak, sinceLong: S.sinceLong, total: S.total });
       status(`${instant ? '⚡ Turbo' : '🖱️ Running'} — ${S.total}${cfg.maxPosts ? '/' + cfg.maxPosts : ''} posts`);
 
+      // Stop point: user target post reached
+      if (stopHit) return { stopReached: true };
+
       // Max posts limit check
       if (cfg.maxPosts && S.total >= cfg.maxPosts) return { limitReached: true };
 
@@ -7057,6 +7334,14 @@ const TgLikerNativeEngine = (() => {
     const res = await raidPage(cfg, target);
     setTimeout(removeCursor, 1500);
 
+    if (res.stopReached) {
+      const s = S.stats || {};
+      await save({
+        phase: 'done',
+        status: `📍 Stop point reached (${S.total} posts, ${s.liked || 0} liked). Job finished.`
+      });
+      return;
+    }
     if (res.limitReached) {
       const s = S.stats || {};
       await save({
@@ -7943,6 +8228,8 @@ async function executeFollowersListCycle(params = {}) {
   const safety = stored?.atomx_safety_settings || {};
   let engagedCount = 0;
   let skippedCount = 0;
+  let lastBreakEngagedCount = 0;
+  let nextBreakInterval = 0;
   const processedTweetIds = new Set();
 
   console.log(`[ATOMX FOLLOWERS] Starting Followers Increase engine. Mode: ${sortPriority === 'active' ? 'Most Active' : 'Newest First'}, Target: ${targetCount}, Freshness: ${freshness}`);
@@ -8164,8 +8451,15 @@ async function executeFollowersListCycle(params = {}) {
     let bMin = curSafety.breakActionsMin !== undefined ? Number(curSafety.breakActionsMin) : (curSafety.breakActions || 35);
     let bMax = curSafety.breakActionsMax !== undefined ? Number(curSafety.breakActionsMax) : (curSafety.breakActions || 40);
     if (bMin > bMax) [bMin, bMax] = [bMax, bMin];
-    const breakAfter = Math.floor(bMin + Math.random() * (bMax - bMin + 1));
-    const isBatchBreak = (engagedCount > 0 && breakAfter > 0 && engagedCount % breakAfter === 0);
+    if (nextBreakInterval <= 0 && (bMin > 0 || bMax > 0)) {
+      nextBreakInterval = Math.floor(bMin + Math.random() * (bMax - bMin + 1));
+    }
+    const actionsSinceBreak = engagedCount - lastBreakEngagedCount;
+    const isBatchBreak = (bMin > 0 || bMax > 0) && (engagedCount > 0) && (nextBreakInterval > 0) && (actionsSinceBreak >= nextBreakInterval);
+    if (isBatchBreak) {
+      lastBreakEngagedCount = engagedCount;
+      nextBreakInterval = Math.floor(bMin + Math.random() * (bMax - bMin + 1));
+    }
 
     let waitSec = 0;
     if (isBatchBreak) {

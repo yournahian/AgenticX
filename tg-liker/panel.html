@@ -15,7 +15,7 @@
   .pill.brk { background:#2a2150; color:#a78bfa; } .pill.err { background:#4a1220; color:var(--red); }
   main { padding:12px 14px 14px; display:flex; flex-direction:column; gap:12px; }
   label.t { display:block; font-size:11px; font-weight:700; color:var(--mut); text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px; }
-  textarea, select, input[type=number] { width:100%; background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; outline:none; }
+  textarea, select, input[type=number], input[type=text] { width:100%; background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; outline:none; }
   textarea { min-height:58px; resize:vertical; }
   textarea:focus, select:focus, input:focus { border-color:var(--acc); }
   .row { display:flex; gap:8px; align-items:center; }
@@ -28,6 +28,7 @@
   .box { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; }
   .box h4 { margin:0 0 8px; font-size:12px; display:flex; align-items:center; justify-content:space-between; }
   .mini { display:flex; align-items:center; gap:6px; color:var(--mut); font-size:12px; margin-top:6px; flex-wrap:wrap; }
+  .mini input[type=text] { flex:1; min-width:0; padding:5px 8px; }
   .mini input[type=number] { width:62px; padding:5px 6px; text-align:center; }
   .sw { display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--mut); font-size:12px; }
   .btns { display:flex; gap:8px; }
@@ -57,13 +58,17 @@
   .pre { flex:1; padding:8px 0; border-radius:8px; background:var(--card); border:1px solid var(--line); color:var(--text); font-weight:700; }
   .pre.on { border-color:var(--acc); background:#14264a; }
   .nextinfo { font-size:11.5px; color:var(--mut); text-align:center; }
+  .rs { background:#334155; }
+  .warn { background:#3d2e0a; border:1px solid #7c5a10; color:#fcd34d; border-radius:9px; padding:8px 10px; font-size:12px; }
+  .lastline { font-size:12px; color:var(--mut); text-align:center; }
+  .lastline b.ok { color:var(--grn); } .lastline b.fail { color:var(--red); } .lastline b.skip { color:var(--amb); }
   .hide { display:none !important; }
 </style>
 </head>
 <body>
 <header>
   <div class="brand"><div class="dot">♥</div> TG LIKER</div>
-  <span id="pill" class="pill">Idle</span>
+  <div style="display:flex;gap:6px;align-items:center"><span id="clock" class="pill hide">⏱ 00:00</span><span id="pill" class="pill">Idle</span></div>
 </header>
 
 <main>
@@ -108,6 +113,9 @@
       <option value="6000">🖱️ Slow &amp; Natural — 6s</option>
     </select>
     <div class="mini" style="margin-top:9px">🎯 Max posts <input type="number" id="maxPosts" min="0" value="0"> <small class="note">(0 = unlimited. Like + skip mile eto post hole nijei stop)</small></div>
+    <div class="mini" style="margin-top:9px">📍 Stop at post <input type="text" id="stopText" placeholder="@username + post er lekha, ba tweet link"> <button id="btnPickStop" style="flex:0 0 auto;padding:6px 10px;background:#0e7490;font-size:12px">Pick</button></div>
+    <input type="hidden" id="stopPick" value="">
+    <div class="note" id="stopInfo">Pick chap -> X page e oi post e click koro. Ba nijei likho: <b>@username lekhar kichu ongsho</b>. Oi post porjonto giye (post shoho) auto stop hobe. Khali = stop point nai.</div>
     <label class="sw" style="margin-top:7px"><input type="checkbox" id="loop" checked> Continuous — list shesh hole refresh kore notun post dhoro</label>
   </div>
 
@@ -120,11 +128,13 @@
     <div class="mini" style="margin-top:9px"><label class="sw"><input type="checkbox" id="lbOn" checked> <b>🛑 Long break</b></label></div>
     <div class="mini">Every <input type="number" id="lbEvMin" min="1" value="100"> – <input type="number" id="lbEvMax" min="1" value="150"> posts</div>
     <div class="mini">take <input type="number" id="lbMinMin" min="1" value="5"> – <input type="number" id="lbMinMax" min="1" value="10"> minutes break</div>
+    <div class="mini" style="margin-top:9px">☕ Manual: <input type="number" id="bnMin" min="1" value="2"> min <button id="btnBreakNow" style="flex:0 0 auto;padding:6px 10px;background:#5b21b6;font-size:12px" disabled>Break now</button></div>
     <div class="mini" style="margin-top:9px">⏳ Hourly limit <input type="number" id="hourly" min="0" value="0"> posts/hr <small class="note">(0 = off)</small></div>
   </div>
 
   <div class="btns">
     <button class="go" id="btnStart">▶ Start</button>
+    <button class="rs" id="btnReset" style="flex:0 0 38%">🔄 Reset</button>
     <button class="pa hide" id="btnPause">⏸ Pause</button>
     <button class="re hide" id="btnResume">▶ Resume</button>
     <button class="st hide" id="btnStop">⏹ Stop</button>
@@ -146,11 +156,44 @@
     <small class="note">Ager same action (like/repost/bookmark), same break system. Ja ager e handle hoyeche seta skip kore ager jaygay giye notun post theke shuru hobe.</small>
   </div>
 
+  <div id="noteLine" class="warn hide"></div>
+  <div id="lastLine" class="lastline hide"></div>
+
   <div class="stats">
     <div class="stat"><b id="sLiked">0</b><i>Liked</i></div>
     <div class="stat"><b id="sReposted">0</b><i>Reposted</i></div>
     <div class="stat"><b id="sBook">0</b><i>Bookmarked</i></div>
     <div class="stat"><b id="sSkip">0</b><i>Skipped</i></div>
+  </div>
+
+  <div class="box" id="recBox">
+    <h4>🎥 Scroll Recorder <small class="note">(like job er theke alada)</small></h4>
+    <div class="mini" style="margin-top:0">X tab e jekhane achho sekhan theke record shuru hoye smooth uporer dike scroll korbe. Profile top e pouchhale nijei record bondho hoye save hobe.</div>
+    <div class="mini">Capture source
+      <select id="recSource" style="flex:1">
+        <option value="auto" selected>Auto — current X tab (picker lage na)</option>
+        <option value="ask">Ask — Chrome picker (tab/window/screen choose)</option>
+      </select>
+    </div>
+    <div class="mini">Scroll pace
+      <select id="recPace" style="flex:1">
+        <option value="slow">Slow (~0.5 screen/s)</option>
+        <option value="normal" selected>Normal (~1 screen/s, ref video moto)</option>
+        <option value="fast">Fast (~1.6 screen/s)</option>
+        <option value="faster">Faster (~3 screen/s)</option>
+        <option value="turbo">Turbo (~5 screen/s)</option>
+        <option value="insane">Insane (~9 screen/s)</option>
+      </select>
+    </div>
+    <div class="mini">Save folder
+      <input type="text" id="recFolder" value="TG-LIKER" placeholder="TG-LIKER" style="flex:1;min-width:0" spellcheck="false">
+    </div>
+    <div class="note" style="margin-top:3px">Downloads er vitore ei folder e auto save hobe (kono dialog ashbe na). Naam: username + shomoy.</div>
+    <div class="btns" style="margin-top:9px">
+      <button class="go" id="btnRecStart" style="background:#be123c">⏺ Record + Scroll Up</button>
+      <button class="st hide" id="btnRecStop">⏹ Stop &amp; Save</button>
+    </div>
+    <div id="recStatus" class="lastline" style="margin-top:8px">Chap dile current X tab nijei record hobe. Na hole picker ashbe — X tab select koro.</div>
   </div>
 
   <div id="statusLine">Ready.</div>

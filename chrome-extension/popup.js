@@ -170,7 +170,19 @@ async function safeParseApiResponse(res) {
 if (typeof window !== 'undefined') window.safeParseApiResponse = safeParseApiResponse;
 if (typeof globalThis !== 'undefined') globalThis.safeParseApiResponse = safeParseApiResponse;
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let state = {
+  agentStatusMap: null,
+  currentDetailAgentId: null,
   credits: 0,
   isAborted: false,
   isPaused: false,
@@ -813,6 +825,41 @@ function updateTelegramProgressUI(raidState) {
   if (tgColEl) tgColEl.textContent = String(total);
   if (tgSkipEl) tgSkipEl.textContent = String(skipped);
 
+  // Render Skipped Posts telemetry list
+  const skippedContainer = document.getElementById('tgSkippedPostsContainer');
+  const skippedBadgeCount = document.getElementById('tgSkippedBadgeCount');
+  const skippedListEl = document.getElementById('tgSkippedPostsList');
+  const skippedItems = Array.isArray(raidState.skippedItems) ? raidState.skippedItems : [];
+
+  if (skippedContainer && skippedBadgeCount && skippedListEl) {
+    if (skippedItems.length > 0) {
+      skippedContainer.style.display = 'block';
+      skippedBadgeCount.textContent = String(skippedItems.length);
+      skippedListEl.innerHTML = skippedItems.map((item, idx) => {
+        const urlStr = item.url || (item.tweetId ? `https://x.com/i/status/${item.tweetId}` : 'Unknown Tweet');
+        const shortUrl = urlStr.replace(/^https?:\/\/(www\.)?x\.com\//, '').replace(/^https?:\/\/(www\.)?twitter\.com\//, '');
+        const reason = item.reason || 'Comments restricted / unavailable';
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:4px 6px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:4px; font-size:10px;">
+            <div style="display:flex; align-items:center; gap:5px; overflow:hidden; flex:1;">
+              <span style="color:var(--text-muted); font-size:9.5px; font-weight:700;">#${idx + 1}</span>
+              <a href="${urlStr}" target="_blank" style="color:#60A5FA; text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;" title="${urlStr}">
+                ${shortUrl}
+              </a>
+            </div>
+            <span style="color:#F59E0B; font-size:9.5px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); padding:1px 5px; border-radius:3px; white-space:nowrap; font-weight:600;" title="${reason}">
+              ${reason}
+            </span>
+          </div>
+        `;
+      }).join('');
+    } else {
+      skippedContainer.style.display = 'none';
+      skippedListEl.innerHTML = '';
+      skippedBadgeCount.textContent = '0';
+    }
+  }
+
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   if (tgBar) tgBar.style.width = `${raidState.active ? Math.max(5, pct) : (done + skipped >= total ? 100 : pct)}%`;
 
@@ -1425,6 +1472,17 @@ function initBackgroundWorkflowSync() {
       }
       updateAgentWorkflowProgressUI(wf);
     }
+    if (changes.tgl_stoppick && changes.tgl_stoppick.newValue) {
+      const v = changes.tgl_stoppick.newValue;
+      const label = v.handle ? `@${v.handle}${v.text ? ' — ' + v.text.slice(0, 60) : ''}` : (v.text || v.id);
+      const pickInput = document.getElementById('tgLikerStopPick');
+      const stopInput = document.getElementById('tgLikerStopText');
+      const stopInfo = document.getElementById('tgLikerStopInfo');
+      if (pickInput) pickInput.value = JSON.stringify({ id: v.id, handle: v.handle, text: v.text, label });
+      if (stopInput) stopInput.value = label;
+      if (stopInfo) stopInfo.textContent = '✓ Stop point set: ' + label;
+      chrome.storage.local.set({ atomx_tgliker_stoppick: { id: v.id, handle: v.handle, text: v.text, label } });
+    }
   });
 }
 
@@ -1437,6 +1495,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTabs();
   initListeners();
   initAgentListeners();
+  initAgentStatusSystem();
   initBackgroundWorkflowSync();
 
   // Instant render path from cache (0 delay)
@@ -1957,34 +2016,115 @@ function initListeners() {
   document.getElementById('extFetchModelsBtn')?.addEventListener('click', fetchLiveModels);
 
   // Universal Centralized Safety Settings Sampling Helpers
+  function getResolvedSafetySettings(rawSafety = {}) {
+    const s = { ...rawSafety };
+
+    // 1. Reply Delay (seconds)
+    let rMin = s.replyDelayMin !== undefined ? Number(s.replyDelayMin) : (s.replyDelay !== undefined ? Math.max(0, Number(s.replyDelay) - 3) : 3);
+    let rMax = s.replyDelayMax !== undefined ? Number(s.replyDelayMax) : (s.replyDelay !== undefined ? Number(s.replyDelay) : 6);
+    if (isNaN(rMin)) rMin = 3;
+    if (isNaN(rMax)) rMax = 6;
+    if (rMin > rMax) [rMin, rMax] = [rMax, rMin];
+    s.replyDelayMin = rMin;
+    s.replyDelayMax = rMax;
+    s.replyDelay = rMax;
+
+    // 2. Profile Wait (seconds)
+    let pMin = s.profileWaitMin !== undefined ? Number(s.profileWaitMin) : (s.profileWait !== undefined ? Math.max(0, Number(s.profileWait) - 10) : 10);
+    let pMax = s.profileWaitMax !== undefined ? Number(s.profileWaitMax) : (s.profileWait !== undefined ? Number(s.profileWait) : 20);
+    if (isNaN(pMin)) pMin = 10;
+    if (isNaN(pMax)) pMax = 20;
+    if (pMin > pMax) [pMin, pMax] = [pMax, pMin];
+    s.profileWaitMin = pMin;
+    s.profileWaitMax = pMax;
+    s.profileWait = pMax;
+
+    // 3. Break Actions (actions count)
+    let bMin = s.breakActionsMin !== undefined ? Number(s.breakActionsMin) : (s.breakActions !== undefined ? Math.max(0, Number(s.breakActions) - 5) : 10);
+    let bMax = s.breakActionsMax !== undefined ? Number(s.breakActionsMax) : (s.breakActions !== undefined ? Number(s.breakActions) : 15);
+    if (isNaN(bMin)) bMin = 10;
+    if (isNaN(bMax)) bMax = 15;
+    if (bMin > bMax) [bMin, bMax] = [bMax, bMin];
+    s.breakActionsMin = bMin;
+    s.breakActionsMax = bMax;
+    s.breakActions = bMax;
+
+    // 4. Rest Duration (minutes)
+    let rdMin = s.restDurationMin !== undefined ? Number(s.restDurationMin) : (s.restDuration !== undefined ? Math.max(0, Number(s.restDuration) - 1) : 1);
+    let rdMax = s.restDurationMax !== undefined ? Number(s.restDurationMax) : (s.restDuration !== undefined ? Number(s.restDuration) : 3);
+    if (isNaN(rdMin)) rdMin = 1;
+    if (isNaN(rdMax)) rdMax = 3;
+    if (rdMin > rdMax) [rdMin, rdMax] = [rdMax, rdMin];
+    s.restDurationMin = rdMin;
+    s.restDurationMax = rdMax;
+    s.restDuration = rdMax;
+
+    return s;
+  }
+
+  // Universal Centralized Safety Settings Sampling Helpers
   function getSafetyPacingDelay(safety, type = 'replyDelay', fallbackMin = 3, fallbackMax = 8) {
-    if (!safety) return Math.floor(fallbackMin + Math.random() * (fallbackMax - fallbackMin + 1));
+    const resolved = getResolvedSafetySettings(safety);
     const minKey = `${type}Min`;
     const maxKey = `${type}Max`;
-    let min = safety[minKey] !== undefined ? Number(safety[minKey]) : (safety[type] !== undefined ? Number(safety[type]) : fallbackMin);
-    let max = safety[maxKey] !== undefined ? Number(safety[maxKey]) : (safety[type] !== undefined ? Number(safety[type]) : fallbackMax);
-    if (min === 0 && max === 0) return 0; // Strictly respect 0s delay when user configured 0
-    if (min > max) [min, max] = [max, min];
-    return Math.floor(min + Math.random() * (max - min + 1));
+    const min = resolved[minKey] !== undefined ? resolved[minKey] : fallbackMin;
+    const max = resolved[maxKey] !== undefined ? resolved[maxKey] : fallbackMax;
+    if (min === 0 && max === 0) return 0;
+    const low = Math.min(min, max);
+    const high = Math.max(min, max);
+    return Math.floor(low + Math.random() * (high - low + 1));
   }
 
   function getSafetyBatchBreakActions(safety, fallbackMin = 10, fallbackMax = 15) {
-    if (!safety) return fallbackMax;
-    let min = safety.breakActionsMin !== undefined ? Number(safety.breakActionsMin) : (safety.breakActions !== undefined ? Number(safety.breakActions) : fallbackMin);
-    let max = safety.breakActionsMax !== undefined ? Number(safety.breakActionsMax) : (safety.breakActions !== undefined ? Number(safety.breakActions) : fallbackMax);
-    if (min === 0 && max === 0) return 0; // 0 means Take Break After is completely DISABLED!
-    if (min > max) [min, max] = [max, min];
-    const chosen = Math.floor(min + Math.random() * (max - min + 1));
-    return chosen <= 0 ? 0 : chosen;
+    const resolved = getResolvedSafetySettings(safety);
+    const min = resolved.breakActionsMin !== undefined ? resolved.breakActionsMin : fallbackMin;
+    const max = resolved.breakActionsMax !== undefined ? resolved.breakActionsMax : fallbackMax;
+    if (min === 0 && max === 0) return 0;
+    const low = Math.min(min, max);
+    const high = Math.max(min, max);
+    return Math.floor(low + Math.random() * (high - low + 1));
+  }
+
+  function shouldTakeSafetyBatchBreak(currentSuccessCount, stateObj, safety, fallbackMin = 10, fallbackMax = 15) {
+    const resolved = getResolvedSafetySettings(safety);
+    const min = resolved.breakActionsMin !== undefined ? resolved.breakActionsMin : fallbackMin;
+    const max = resolved.breakActionsMax !== undefined ? resolved.breakActionsMax : fallbackMax;
+    if (min === 0 && max === 0) return false;
+
+    if (!stateObj || typeof stateObj !== 'object') return false;
+
+    const low = Math.min(min, max);
+    const high = Math.max(min, max);
+
+    // Initialize or re-randomize nextBreakInterval if not yet set
+    if (!stateObj.nextBreakInterval || stateObj.nextBreakInterval <= 0) {
+      stateObj.nextBreakInterval = Math.floor(low + Math.random() * (high - low + 1));
+    }
+
+    const lastBreak = Number(stateObj.lastBreakSuccessCount || 0);
+    const actionsSinceBreak = currentSuccessCount - lastBreak;
+
+    if (currentSuccessCount > 0 && actionsSinceBreak >= stateObj.nextBreakInterval) {
+      stateObj.lastBreakSuccessCount = currentSuccessCount;
+      stateObj.nextBreakInterval = Math.floor(low + Math.random() * (high - low + 1));
+      return true;
+    }
+
+    return false;
   }
 
   function getSafetyRestDurationSec(safety, fallbackMinMin = 1, fallbackMaxMin = 3) {
-    if (!safety) return 60;
-    let min = safety.restDurationMin !== undefined ? Number(safety.restDurationMin) : (safety.restDuration !== undefined ? Number(safety.restDuration) : fallbackMinMin);
-    let max = safety.restDurationMax !== undefined ? Number(safety.restDurationMax) : (safety.restDuration !== undefined ? Number(safety.restDuration) : fallbackMinMin);
-    if (min > max) [min, max] = [max, min];
-    const chosenMin = min + Math.random() * (max - min);
-    return Math.max(5, Math.round(chosenMin * 60));
+    const resolved = getResolvedSafetySettings(safety);
+    let minMin = resolved.restDurationMin !== undefined ? resolved.restDurationMin : fallbackMinMin;
+    let maxMin = resolved.restDurationMax !== undefined ? resolved.restDurationMax : fallbackMaxMin;
+    if (minMin === 0 && maxMin === 0) return 0;
+    if (minMin > maxMin) [minMin, maxMin] = [maxMin, minMin];
+
+    const minSec = Math.round(minMin * 60);
+    const maxSec = Math.round(maxMin * 60);
+
+    const chosenSec = Math.floor(minSec + Math.random() * (maxSec - minSec + 1));
+    return Math.max(5, chosenSec);
   }
 
   // Centralized Anti-Ban Safety Controls (Dual Thumb Ranges + Cursor/Typing Controls)
@@ -2088,13 +2228,17 @@ function initListeners() {
 
   // Restore saved safety settings
   chrome.storage.local.get(['atomx_safety_settings'], res => {
-    const s = res?.atomx_safety_settings || {};
+    const raw = res?.atomx_safety_settings || {};
+    const s = getResolvedSafetySettings(raw);
+
+    // Guarantee that dual-range min/max keys are written into storage
+    chrome.storage.local.set({ atomx_safety_settings: s });
 
     // Restore Reply Delay (min - max)
     const replyMinEl = document.getElementById('extReplyDelayMin');
     const replyMaxEl = document.getElementById('extReplyDelayMax');
-    const rMin = s.replyDelayMin !== undefined ? s.replyDelayMin : (s.replyDelay ? Math.max(0, s.replyDelay - 3) : 3);
-    const rMax = s.replyDelayMax !== undefined ? s.replyDelayMax : (s.replyDelay || 6);
+    const rMin = s.replyDelayMin;
+    const rMax = s.replyDelayMax;
     if (replyMinEl) replyMinEl.value = rMin;
     if (replyMaxEl) replyMaxEl.value = rMax;
     initDualRange('extReplyDelayMin', 'extReplyDelayMax', 'highlightReplyDelay', 'valExtReplyDelay', 'sec', 'replyDelayMin', 'replyDelayMax', 3, 6);
@@ -2102,8 +2246,8 @@ function initListeners() {
     // Restore Profile Wait (min - max)
     const profMinEl = document.getElementById('extProfileWaitMin');
     const profMaxEl = document.getElementById('extProfileWaitMax');
-    const pMin = s.profileWaitMin !== undefined ? s.profileWaitMin : (s.profileWait ? Math.max(0, s.profileWait - 5) : 10);
-    const pMax = s.profileWaitMax !== undefined ? s.profileWaitMax : (s.profileWait || 20);
+    const pMin = s.profileWaitMin;
+    const pMax = s.profileWaitMax;
     if (profMinEl) profMinEl.value = pMin;
     if (profMaxEl) profMaxEl.value = pMax;
     initDualRange('extProfileWaitMin', 'extProfileWaitMax', 'highlightProfileWait', 'valExtProfileWait', 'sec', 'profileWaitMin', 'profileWaitMax', 10, 20);
@@ -2111,8 +2255,8 @@ function initListeners() {
     // Restore Break Actions (min - max)
     const brkMinEl = document.getElementById('extBreakActionsMin');
     const brkMaxEl = document.getElementById('extBreakActionsMax');
-    const bMin = s.breakActionsMin !== undefined ? s.breakActionsMin : (s.breakActions ? Math.max(0, s.breakActions - 5) : 10);
-    const bMax = s.breakActionsMax !== undefined ? s.breakActionsMax : (s.breakActions || 15);
+    const bMin = s.breakActionsMin;
+    const bMax = s.breakActionsMax;
     if (brkMinEl) brkMinEl.value = bMin;
     if (brkMaxEl) brkMaxEl.value = bMax;
     initDualRange('extBreakActionsMin', 'extBreakActionsMax', 'highlightBreakActions', 'valExtBreakActions', 'actions', 'breakActionsMin', 'breakActionsMax', 10, 15);
@@ -2120,8 +2264,8 @@ function initListeners() {
     // Restore Rest Duration (min - max)
     const restMinEl = document.getElementById('extRestDurationMin');
     const restMaxEl = document.getElementById('extRestDurationMax');
-    const rdMin = s.restDurationMin !== undefined ? s.restDurationMin : (s.restDuration ? Math.max(0, Math.floor(s.restDuration / 2)) : 1);
-    const rdMax = s.restDurationMax !== undefined ? s.restDurationMax : (s.restDuration || 3);
+    const rdMin = s.restDurationMin;
+    const rdMax = s.restDurationMax;
     if (restMinEl) restMinEl.value = rdMin;
     if (restMaxEl) restMaxEl.value = rdMax;
     initDualRange('extRestDurationMin', 'extRestDurationMax', 'highlightRestDuration', 'valExtRestDuration', 'min', 'restDurationMin', 'restDurationMax', 1, 3);
@@ -2426,6 +2570,7 @@ function initAgentListeners() {
   });
 
   document.getElementById('runTgEngageBtn')?.addEventListener('click', async () => {
+    if (!ensureAgentEnabledOrBlock('telegram')) return;
     if (!(await ensureVerifiedAccountOrBlock())) return;
 
     const input = document.getElementById('tgLinksInput')?.value.trim();
@@ -2590,6 +2735,7 @@ function initAgentListeners() {
   });
 
   document.getElementById('runAudienceBuilderBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('audience')) return;
     startAudienceBuilderWorkflow();
   });
 
@@ -2799,7 +2945,10 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   });
 
   // Home Feed Engager Launch & Reset Buttons
-  document.getElementById('runFeedEngagerBtn')?.addEventListener('click', startHomeFeedEngagerWorkflow);
+  document.getElementById('runFeedEngagerBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('feedengager')) return;
+    startHomeFeedEngagerWorkflow();
+  });
   document.getElementById('resetFeedEngagerBtn')?.addEventListener('click', () => {
     const doneEl = document.getElementById('feedEngagerCountDone');
     const queueEl = document.getElementById('feedEngagerCountQueue');
@@ -2834,7 +2983,10 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   });
 
   // Niche Search Engager Launch & Reset Buttons
-  document.getElementById('runNicheEngagerBtn')?.addEventListener('click', startNicheSearchEngagerWorkflow);
+  document.getElementById('runNicheEngagerBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('nicheengager')) return;
+    startNicheSearchEngagerWorkflow();
+  });
   document.getElementById('resetNicheEngagerBtn')?.addEventListener('click', () => {
     const doneEl = document.getElementById('nicheEngagerCountDone');
     const queueEl = document.getElementById('nicheEngagerCountQueue');
@@ -2908,11 +3060,15 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   });
 
   document.getElementById('btnTgLikerContinue')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('tgliker')) return;
     startTgLikerWorkflow(true, tgLikerSelectedAddCount);
   });
 
   // TG Liker Launch & Reset Buttons
-  document.getElementById('runTgLikerBtn')?.addEventListener('click', () => startTgLikerWorkflow(false, 0));
+  document.getElementById('runTgLikerBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('tgliker')) return;
+    startTgLikerWorkflow(false, 0);
+  });
   document.getElementById('resetTgLikerBtn')?.addEventListener('click', () => {
     chrome.storage.local.remove(['atomx_tgliker_seen', 'atomx_tgliker_last_stats'], () => {
       const doneEl = document.getElementById('tgLikerCountLiked');
@@ -2948,9 +3104,24 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
       if (stopBtn) stopBtn.style.display = 'none';
       if (pauseBtn) pauseBtn.style.display = 'none';
       if (skipBtn) skipBtn.style.display = 'none';
+      const stopInput = document.getElementById('tgLikerStopText');
+      const pickInput = document.getElementById('tgLikerStopPick');
+      const stopInfo = document.getElementById('tgLikerStopInfo');
+      if (stopInput) stopInput.value = '';
+      if (pickInput) pickInput.value = '';
+      if (stopInfo) stopInfo.textContent = 'Pick chap -> X page e oi post e click koro. Ba nijei likho: @username lekhar kichu ongsho. Oi post porjonto giye (post shoho) auto stop hobe. Khali = stop point nai.';
       showExtToast('TG Liker Reset', '🔄');
     });
   });
+
+  // TG Liker: Stop Pick & Scroll Recorder Event Listeners
+  document.getElementById('tgLikerBtnPickStop')?.addEventListener('click', pickTgLikerStop);
+  document.getElementById('tgLikerBtnRecStart')?.addEventListener('click', tglRecStart);
+  document.getElementById('tgLikerBtnRecStop')?.addEventListener('click', () => tglRecFinalize('manually stop'));
+  document.getElementById('tgLikerRecPace')?.addEventListener('change', tglRecSavePrefs);
+  document.getElementById('tgLikerRecSource')?.addEventListener('change', tglRecSavePrefs);
+  document.getElementById('tgLikerRecFolder')?.addEventListener('input', tglRecSavePrefs);
+  tglRecLoad();
 
   // Telegram Engage Reset Button
   document.getElementById('resetTelegramQueueBtn')?.addEventListener('click', () => {
@@ -2963,6 +3134,10 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
       const status = document.getElementById('tgLiveStatusText');
       const badge = document.getElementById('tgStateBadge');
       const countdown = document.getElementById('tgCountdownText');
+      const skippedContainer = document.getElementById('tgSkippedPostsContainer');
+      const skippedListEl = document.getElementById('tgSkippedPostsList');
+      const skippedBadgeCount = document.getElementById('tgSkippedBadgeCount');
+
       if (doneEl) doneEl.textContent = '0';
       if (colEl) colEl.textContent = '0';
       if (skipEl) skipEl.textContent = '0';
@@ -2971,9 +3146,22 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
       if (status) status.textContent = 'Telegram raid queue and active counters reset.';
       if (badge) badge.textContent = 'IDLE';
       if (countdown) countdown.style.display = 'none';
+      if (skippedContainer) skippedContainer.style.display = 'none';
+      if (skippedListEl) skippedListEl.innerHTML = '';
+      if (skippedBadgeCount) skippedBadgeCount.textContent = '0';
       updateTgParseSummaryUI?.();
       showExtToast('Telegram Queue Reset', '🔄');
     });
+  });
+
+  // Telegram Engage Skipped Posts List Toggle
+  document.getElementById('tgSkippedPostsHeader')?.addEventListener('click', () => {
+    const list = document.getElementById('tgSkippedPostsList');
+    const icon = document.getElementById('tgSkippedToggleIcon');
+    if (!list) return;
+    const isHidden = list.style.display === 'none';
+    list.style.display = isHidden ? 'flex' : 'none';
+    if (icon) icon.textContent = isHidden ? '▼' : '▶';
   });
 
   // Audience Builder Reset Button
@@ -3292,6 +3480,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   });
 
   document.getElementById('runSorsaBoosterBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('sorsa')) return;
     startSorsaScoreBoosterWorkflow();
   });
   document.getElementById('stopSorsaBoosterBtn')?.addEventListener('click', () => {
@@ -3322,6 +3511,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
 
   // Agent 4: Followers Increase
   document.getElementById('runFollowerIncreaseBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('followers')) return;
     startFollowersIncreaseWorkflow();
   });
   document.getElementById('stopFollowerIncreaseBtn')?.addEventListener('click', () => {
@@ -3378,6 +3568,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   });
 
   document.getElementById('runReplyBackBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('replyback')) return;
     startReplyBackLoopWorkflow();
   });
 
@@ -3409,6 +3600,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
 
   // Agent 7: Auto Unfollow (A7, Standalone Safety Optimizer)
   document.getElementById('runAutoUnfollowBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('unfollow')) return;
     startAutoUnfollowWorkflow();
   });
 
@@ -3458,6 +3650,7 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
   });
 
   document.getElementById('runCreatorRadarBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('creators')) return;
     updateAgentConsole('Radar Active', `Monitoring ${state.creators.length} creators for early engagement.`);
     alert(`⚡ Creators Radar Active!\nMonitoring ${state.creators.length} VIP accounts.\nThe bot will scan for new posts and notify or comment immediately.`);
   });
@@ -3506,7 +3699,10 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     if (countBadge) countBadge.textContent = `${handles.length} Members`;
   });
 
-  document.getElementById('startDefaulterAuditBtn')?.addEventListener('click', startDefaulterAuditWorkflow);
+  document.getElementById('startDefaulterAuditBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('defaulter')) return;
+    startDefaulterAuditWorkflow();
+  });
   document.getElementById('stopDefaulterAuditBtn')?.addEventListener('click', stopDefaulterAuditWorkflow);
   // Agent 13: Commenter Reciprocator Listeners
   document.getElementById('reciprocatorUseCurrentTabBtn')?.addEventListener('click', async () => {
@@ -3532,7 +3728,10 @@ async function broadcastAbortToAllTabsAndStorage(agentTitle = 'AtomX') {
     } catch (e) { }
   });
 
-  document.getElementById('runReciprocatorBtn')?.addEventListener('click', startCommenterReciprocatorWorkflow);
+  document.getElementById('runReciprocatorBtn')?.addEventListener('click', () => {
+    if (!ensureAgentEnabledOrBlock('reciprocator')) return;
+    startCommenterReciprocatorWorkflow();
+  });
   document.getElementById('stopReciprocatorBtn')?.addEventListener('click', () => {
     broadcastAbortToAllTabsAndStorage('Commenter Reciprocator');
     if (reciprocatorWorkingTabId) {
@@ -4196,6 +4395,327 @@ function buildTgLikerTarget(t, section) {
   return { url: `${base}/quotes`, label: 'Quotes' };
 }
 
+// =========================================================================
+// TG LIKER: STOP AT POST & SCROLL RECORDER LOGIC
+// =========================================================================
+
+function buildTgLikerStop() {
+  const stopInput = document.getElementById('tgLikerStopText');
+  const pickInput = document.getElementById('tgLikerStopPick');
+  const raw = (stopInput?.value || '').trim();
+  if (!raw) return null;
+  try {
+    const pk = JSON.parse(pickInput?.value || 'null');
+    if (pk && pk.label === raw && (pk.id || pk.handle)) {
+      return { id: pk.id || null, handle: pk.handle || '', text: pk.text || '' };
+    }
+  } catch (e) {}
+  const ms = raw.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{5,25})/i);
+  if (ms) return { id: ms[2], handle: ms[1], text: '' };
+  let nth = 1, body = raw;
+  const mn = body.match(/\s#(\d{1,2})\s*$/);
+  if (mn) { nth = Math.max(1, parseInt(mn[1], 10)); body = body.slice(0, mn.index).trim(); }
+  const mh = body.match(/^@([A-Za-z0-9_]{1,15})\s*(.*)$/s);
+  if (mh) return { id: null, handle: mh[1], text: mh[2].replace(/^[\s\-\u2013\u2014|:\u00b7]+/, '').trim(), nth };
+  return { id: null, handle: '', text: body, nth };
+}
+
+async function pickTgLikerStop() {
+  const stopInfo = document.getElementById('tgLikerStopInfo');
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const t = tabs && tabs[0];
+  if (!t || !/^https:\/\/(x|twitter)\.com\//i.test(t.url || '')) {
+    if (stopInfo) stopInfo.textContent = '⚠ Age X tab e jao (jekhane post ta dekha jay), tarpor Pick chapo.';
+    return;
+  }
+  chrome.tabs.sendMessage(t.id, { type: 'pickstop' }, (r) => {
+    if (chrome.runtime.lastError || !r) {
+      if (stopInfo) stopInfo.textContent = '⚠ Page e extension load hoyni — X tab ta F5 diye abar Pick chapo.';
+      return;
+    }
+    if (stopInfo) stopInfo.textContent = '👆 X page e jei post e thamte chao oi post e click koro (Esc = cancel).';
+  });
+}
+
+// ── Scroll Recorder (Screen capture, audio context, smooth scroll up & auto save) ──
+const TGL_RK = 'atomx_tgl_rec';
+const tglRec = { active: false, stream: null, castStop: null, actx: null, mr: null, chunks: [], mime: '', ext: 'webm', tabId: null, t0: 0, timer: null, stopping: false };
+const TGL_MIMES = [
+  ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'mp4'],
+  ['video/mp4;codecs=avc1,mp4a.40.2', 'mp4'],
+  ['video/webm;codecs=vp9,opus', 'webm'],
+  ['video/webm;codecs=vp8,opus', 'webm'],
+  ['video/mp4;codecs=avc1.640028', 'mp4'],
+  ['video/mp4;codecs=avc1', 'mp4'],
+  ['video/mp4', 'mp4'],
+  ['video/webm;codecs=vp9', 'webm'],
+  ['video/webm;codecs=vp8', 'webm'],
+  ['video/webm', 'webm']
+];
+
+function tglRecStatus(t) {
+  const el = document.getElementById('tgLikerRecStatus');
+  if (el) el.textContent = t;
+}
+
+function tglRecUI() {
+  const startBtn = document.getElementById('tgLikerBtnRecStart');
+  const stopBtn = document.getElementById('tgLikerBtnRecStop');
+  const pace = document.getElementById('tgLikerRecPace');
+  const source = document.getElementById('tgLikerRecSource');
+  const folder = document.getElementById('tgLikerRecFolder');
+  if (startBtn) startBtn.style.display = tglRec.active ? 'none' : 'flex';
+  if (stopBtn) stopBtn.style.display = tglRec.active ? 'flex' : 'none';
+  if (pace) pace.disabled = tglRec.active;
+  if (source) source.disabled = tglRec.active;
+  if (folder) folder.disabled = tglRec.active;
+}
+
+async function tglRecLoad() {
+  const d = await chrome.storage.local.get([TGL_RK, 'atomx_tgliker_stoppick']).catch(() => ({}));
+  const f = d[TGL_RK];
+  if (f) {
+    if (f.pace && document.getElementById('tgLikerRecPace')) document.getElementById('tgLikerRecPace').value = f.pace;
+    if (f.source && document.getElementById('tgLikerRecSource')) document.getElementById('tgLikerRecSource').value = f.source;
+    if (f.folder && document.getElementById('tgLikerRecFolder')) document.getElementById('tgLikerRecFolder').value = f.folder;
+  }
+  const pk = d.atomx_tgliker_stoppick;
+  if (pk) {
+    const pickInput = document.getElementById('tgLikerStopPick');
+    const stopInput = document.getElementById('tgLikerStopText');
+    const stopInfo = document.getElementById('tgLikerStopInfo');
+    if (pickInput) pickInput.value = JSON.stringify(pk);
+    if (stopInput && !stopInput.value) stopInput.value = pk.label || '';
+    if (stopInfo && pk.label) stopInfo.textContent = '✓ Stop point set: ' + pk.label;
+  }
+}
+
+function tglRecSavePrefs() {
+  const pace = document.getElementById('tgLikerRecPace')?.value || 'normal';
+  const source = document.getElementById('tgLikerRecSource')?.value || 'auto';
+  const folder = document.getElementById('tgLikerRecFolder')?.value || 'TG-LIKER';
+  chrome.storage.local.set({ [TGL_RK]: { pace, source, folder } });
+}
+
+function tglRecFinalize(reason) {
+  if (!tglRec.active || tglRec.stopping) return;
+  tglRec.stopping = true;
+  clearInterval(tglRec.timer);
+  if (tglRec.tabId != null) {
+    chrome.tabs.sendMessage(tglRec.tabId, { type: 'recabort' }, () => void chrome.runtime.lastError);
+  }
+  tglRecStatus('💾 Video save hochche...');
+  const mr = tglRec.mr;
+  if (mr && mr.state !== 'inactive') {
+    try { mr.requestData(); } catch (e) {}
+    try { mr.stop(); } catch (e) {}
+  } else {
+    tglRecSave(reason);
+  }
+}
+
+async function tglRecSave(reason) {
+  try {
+    if (tglRec.stream) {
+      if (tglRec.castStop) { tglRec.castStop(); tglRec.castStop = null; }
+      tglRec.stream.getTracks().forEach((t) => t.stop());
+    }
+  } catch (e) {}
+  try {
+    if (tglRec.actx) tglRec.actx.close();
+    tglRec.actx = null;
+  } catch (e) {}
+
+  const blob = new Blob(tglRec.chunks, { type: tglRec.mime.split(';')[0] || 'video/webm' });
+  const ext = tglRec.ext;
+  tglRec.chunks = [];
+  tglRec.active = false;
+  tglRec.stopping = false;
+  tglRec.stream = null;
+  tglRec.mr = null;
+  tglRec.tabId = null;
+  tglRecUI();
+
+  if (!blob.size) {
+    tglRecStatus('⚠ Video khali — save hoyni.');
+    return;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const d = new Date();
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const h12 = d.getHours() % 12 || 12, mm = String(d.getMinutes()).padStart(2, '0'), ap = d.getHours() >= 12 ? 'PM' : 'AM';
+  const stamp = `${h12}.${mm} ${ap} ${d.getDate()} ${MON[d.getMonth()]}`;
+  const who = (tglRec.who || 'x').replace(/[^A-Za-z0-9_]/g, '') || 'x';
+  const folderInput = document.getElementById('tgLikerRecFolder')?.value || 'TG-LIKER';
+  const folder = folderInput.replace(/\\/g, '/').split('/').map((s) => s.replace(/[<>:"|?*\x00-\x1f]/g, '').trim()).filter((s) => s && s !== '.' && s !== '..').join('/') || 'TG-LIKER';
+  const filename = `${folder}/${who} ${stamp}.${ext}`;
+  const mb = (blob.size / 1048576).toFixed(1);
+
+  try {
+    await chrome.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' });
+    tglRecStatus(`✓ Video saved (${mb} MB) — Downloads/${folder} e${reason ? ' • ' + reason : ''}`);
+  } catch (e) {
+    try {
+      await chrome.downloads.download({ url, filename, saveAs: false, conflictAction: 'uniquify' });
+      tglRecStatus(`✓ Video saved (${mb} MB) — Downloads/${folder} e${reason ? ' • ' + reason : ''}`);
+    } catch (e2) {
+      tglRecStatus('⚠ Save fail: ' + ((e2 && e2.message) || e2));
+      return;
+    }
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 15 * 60 * 1000);
+}
+
+// Screencast stream from background debugger
+async function tglScreencastStream(tabId) {
+  return new Promise((resolve, reject) => {
+    const port = chrome.runtime.connect({ name: 'screencast' });
+    const cv = document.createElement('canvas');
+    const ctx = cv.getContext('2d', { alpha: false });
+    let last = null, sized = false, done = false, timer = null;
+    const fail = (err) => { if (done) return; done = true; try { port.disconnect(); } catch (e) {} reject(new Error(err)); };
+    const failT = setTimeout(() => fail('Screencast frame ashe nai (DevTools khola thakle bondho koro)'), 6000);
+    port.onMessage.addListener(async (m) => {
+      if (m.type === 'error') { clearTimeout(failT); fail(m.error); return; }
+      if (m.type !== 'frame') return;
+      try {
+        const bin = atob(m.data); const u8 = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+        const bmp = await createImageBitmap(new Blob([u8], { type: 'image/jpeg' }));
+        if (!sized) {
+          cv.width = bmp.width - (bmp.width % 2); cv.height = bmp.height - (bmp.height % 2);
+          sized = true;
+          timer = setInterval(() => { if (last) ctx.drawImage(last, 0, 0, cv.width, cv.height); }, 1000 / 30);
+          const stream = cv.captureStream(30);
+          stream.__tglStop = () => { clearInterval(timer); try { port.postMessage({ cmd: 'stop' }); } catch (e) {} try { port.disconnect(); } catch (e) {} };
+          clearTimeout(failT);
+          if (!done) { done = true; resolve(stream); }
+        }
+        if (last && last.close) { try { last.close(); } catch (e) {} }
+        last = bmp;
+        ctx.drawImage(bmp, 0, 0, cv.width, cv.height);
+      } catch (e) {}
+    });
+    port.onDisconnect.addListener(() => { if (!done) fail('Screencast disconnect holo'); });
+    port.postMessage({ cmd: 'start', tabId });
+  });
+}
+
+function tglFmtTime(sec) {
+  sec = Math.max(0, Math.ceil(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+async function tglRecStart() {
+  if (tglRec.active) return;
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  const tab = tabs && tabs[0];
+  if (!tab || !/^https:\/\/(x|twitter)\.com\//i.test(tab.url || '')) {
+    tglRecStatus('⚠ Age X (x.com) tab e jao, jekhan theke scroll shuru korbe sekhane thako, tarpor abar chap.');
+    return;
+  }
+  let stream = null, direct = false, castStop = null;
+  const sourceMode = document.getElementById('tgLikerRecSource')?.value || 'auto';
+  const askMode = sourceMode === 'ask';
+
+  // 0) Auto mode: debugger screencast
+  if (!askMode) {
+    try {
+      stream = await tglScreencastStream(tab.id);
+      castStop = stream.__tglStop;
+      direct = true;
+    } catch (e) {
+      stream = null;
+      tglRecStatus('Screencast hoyni (' + ((e && e.message) || e) + ') — tabCapture try hochche...');
+    }
+  }
+
+  // 1) Fallback: tabCapture
+  if (!stream && !askMode) {
+    try {
+      const idr = await chrome.runtime.sendMessage({ type: 'tabstream', tabId: tab.id });
+      if (idr && idr.ok && idr.id) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: idr.id, maxFrameRate: 60 } }
+        });
+        direct = true;
+      }
+    } catch (e) { stream = null; }
+  }
+
+  // 2) Chrome picker
+  if (!stream) {
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 60, max: 60 }, displaySurface: 'browser' },
+        audio: false,
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'include',
+        preferCurrentTab: false
+      });
+    } catch (e) {
+      tglRecStatus('⚠ Record shuru hoyni: ' + ((e && e.message) || e));
+      return;
+    }
+  }
+
+  // Silent audio track for Telegram real video support
+  let actx = null;
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = actx.createOscillator(), gain = actx.createGain(), dest = actx.createMediaStreamDestination();
+    gain.gain.value = 0; osc.connect(gain); gain.connect(dest); osc.start();
+    stream = new MediaStream([...stream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  } catch (e) { actx = null; }
+
+  let ext = 'webm', mime = '';
+  for (const [m, e] of TGL_MIMES) {
+    if (MediaRecorder.isTypeSupported(m)) { mime = m; ext = e; break; }
+  }
+
+  const mr = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 8000000 });
+  let who = '';
+  try {
+    const rawTarget = document.getElementById('tgLikerTargetInput')?.value || '';
+    const a = parseTgLikerTargets(rawTarget).find((t) => t.handle) || parseTgLikerTargets(tab.url).find((t) => t.handle);
+    who = a ? a.handle : '';
+  } catch (e) {}
+
+  Object.assign(tglRec, { who, active: true, stream, castStop, actx, mr, chunks: [], mime, ext, tabId: tab.id, t0: Date.now(), stopping: false });
+  mr.ondataavailable = (e) => { if (e.data && e.data.size) tglRec.chunks.push(e.data); };
+  mr.onstop = () => tglRecSave('');
+  stream.getVideoTracks()[0].addEventListener('ended', () => tglRecFinalize('sharing bondho kora hoyechilo'));
+  mr.start(1000);
+  tglRecUI();
+
+  tglRec.timer = setInterval(() => {
+    tglRecStatus(`🔴 Recording${direct ? ' (current tab)' : ''} ${tglFmtTime((Date.now() - tglRec.t0) / 1000)} — scroll hochche...`);
+  }, 500);
+
+  await new Promise((r) => setTimeout(r, 700));
+  const send = () => new Promise((resolve) => {
+    const paceVal = document.getElementById('tgLikerRecPace')?.value || 'normal';
+    chrome.tabs.sendMessage(tab.id, { type: 'recscroll', pace: paceVal }, (r) => {
+      if (chrome.runtime.lastError) resolve(null); else resolve(r || { ok: false });
+    });
+  });
+  let r = await send();
+  if (!r) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      await new Promise((x) => setTimeout(x, 400));
+      r = await send();
+    } catch (e) {}
+  }
+  if (!r) { tglRecFinalize(''); tglRecStatus('⚠ X tab e script load hoyni — X tab refresh (F5) kore abar try koro.'); return; }
+  if (!r.ok) { tglRecFinalize(''); tglRecStatus('⚠ Scroll hoyni: ' + (r.error || 'unknown')); return; }
+  tglRecFinalize(r.reachedTop ? 'profile top e pouchhechhe' : 'scroll theme gese');
+}
+
 let isStartingTgLikerWorkflow = false;
 async function startTgLikerWorkflow(continueMode = false, addMoreCount = 0) {
   if (isStartingTgLikerWorkflow) return;
@@ -4214,7 +4734,7 @@ async function startTgLikerWorkflow(continueMode = false, addMoreCount = 0) {
   const optLike = document.getElementById('tgLikerOptLike')?.checked ?? true;
   const optRepost = document.getElementById('tgLikerOptRepost')?.checked ?? false;
   const optBookmark = document.getElementById('tgLikerOptBookmark')?.checked ?? false;
-  const speedMs = Number(document.getElementById('tgLikerSpeedSelect')?.value ?? 2000);
+  const speedMs = Number(document.getElementById('tgLikerSpeedSelect')?.value ?? 3500);
   let targetCount = Number(document.getElementById('tgLikerTargetCountInput')?.value ?? 20);
   const continuousLoop = document.getElementById('tgLikerContinuousLoop')?.checked ?? true;
 
@@ -4344,6 +4864,7 @@ async function startTgLikerWorkflow(continueMode = false, addMoreCount = 0) {
     actions: { like: optLike, repost: optRepost, bookmark: optBookmark },
     speedMs,
     loop: continuousLoop,
+    stop: buildTgLikerStop(),
     breaks: { enabled: breakOn, everyMin: evMin, everyMax: evMax, secMin: bsMin, secMax: bsMax },
     longBreak: { enabled: lbOn, everyMin: lbEvMin, everyMax: lbEvMax, minMin: lbMinMin, minMax: lbMinMax },
     hourlyMax: hourly,
@@ -6098,7 +6619,184 @@ async function startAutoUnfollowWorkflow() {
   });
 }
 
+// =============================================================
+// AGENT STATUS, KILLSWITCH & MAINTENANCE CONTROLS
+// =============================================================
+
+async function initAgentStatusSystem() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const stored = await chrome.storage.local.get(['atomx_agent_status_map']).catch(() => ({}));
+      if (stored?.atomx_agent_status_map) {
+        state.agentStatusMap = stored.atomx_agent_status_map;
+        applyAgentStatusToBentoUI(state.agentStatusMap);
+      }
+    }
+  } catch (e) {}
+
+  // Fetch immediately in background
+  refreshAgentStatusFromBackend().catch(console.warn);
+
+  // Poll status every 20 seconds while popup is active
+  setInterval(() => {
+    refreshAgentStatusFromBackend().catch(() => null);
+  }, 20000);
+}
+
+async function refreshAgentStatusFromBackend() {
+  try {
+    const backendUrl = await getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/agents/status?_t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data && data.agents) {
+        state.agentStatusMap = data.agents;
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          await chrome.storage.local.set({ atomx_agent_status_map: data.agents }).catch(() => null);
+        }
+        applyAgentStatusToBentoUI(data.agents);
+        if (state.currentDetailAgentId) {
+          updateDetailViewMaintenanceBanner(state.currentDetailAgentId);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[AgentStatus] Sync error:', e);
+  }
+}
+
+function applyAgentStatusToBentoUI(statusMap) {
+  if (!statusMap || typeof statusMap !== 'object') return;
+
+  document.querySelectorAll('.bento-card[data-agent-id]').forEach(card => {
+    const agentId = card.dataset.agentId;
+    const info = statusMap[agentId];
+    const isOff = info && info.enabled === false;
+
+    let badge = card.querySelector('.bento-top .badge-mini');
+    let actionEl = card.querySelector('.bento-action');
+
+    if (isOff) {
+      card.setAttribute('data-admin-disabled', 'true');
+      card.style.borderColor = 'rgba(239, 68, 68, 0.45)';
+      card.style.background = 'linear-gradient(180deg, rgba(239,68,68,0.06) 0%, rgba(15,23,42,0.6) 100%)';
+      
+      if (badge) {
+        if (!badge.dataset.originalBadgeText) {
+          badge.dataset.originalBadgeText = badge.textContent;
+          badge.dataset.originalBadgeClass = badge.className;
+        }
+        badge.textContent = 'OFFLINE';
+        badge.className = 'badge-mini';
+        badge.style.background = '#EF4444';
+        badge.style.color = '#FFFFFF';
+        badge.style.fontWeight = '700';
+      }
+
+      if (actionEl) {
+        if (!actionEl.dataset.originalActionText) {
+          actionEl.dataset.originalActionText = actionEl.textContent;
+        }
+        actionEl.innerHTML = `<span style="color:#EF4444; font-weight:700;">🛑 Maintenance Notice ➔</span>`;
+      }
+    } else {
+      card.removeAttribute('data-admin-disabled');
+      card.style.borderColor = '';
+      card.style.background = '';
+
+      if (badge && badge.dataset.originalBadgeText) {
+        badge.textContent = badge.dataset.originalBadgeText;
+        badge.className = badge.dataset.originalBadgeClass || 'badge-mini';
+        badge.style.background = '';
+        badge.style.color = '';
+        badge.style.fontWeight = '';
+      }
+
+      if (actionEl && actionEl.dataset.originalActionText) {
+        actionEl.textContent = actionEl.dataset.originalActionText;
+      }
+    }
+  });
+}
+
+function updateDetailViewMaintenanceBanner(agentId) {
+  if (!agentId) return;
+  const statusInfo = state.agentStatusMap ? state.agentStatusMap[agentId] : null;
+  const banner = document.getElementById('agentMaintenanceBanner');
+  const reasonEl = document.getElementById('agentMaintenanceReason');
+  const isOff = statusInfo && statusInfo.enabled === false;
+
+  const launchBtnMap = {
+    telegram: 'runTgEngageBtn',
+    audience: 'runAudienceBuilderBtn',
+    sorsa: 'runSorsaBoosterBtn',
+    followers: 'runFollowerIncreaseBtn',
+    replyback: 'runReplyBackBtn',
+    unfollow: 'runAutoUnfollowBtn',
+    creators: 'runCreatorRadarBtn',
+    defaulter: 'startDefaulterAuditBtn',
+    reciprocator: 'runReciprocatorBtn',
+    feedengager: 'runFeedEngagerBtn',
+    nicheengager: 'runNicheEngagerBtn',
+    tgliker: 'runTgLikerBtn'
+  };
+
+  const btnId = launchBtnMap[agentId];
+  const btn = btnId ? document.getElementById(btnId) : null;
+
+  if (isOff) {
+    const rawReason = (statusInfo.reason && typeof statusInfo.reason === 'string') ? statusInfo.reason.trim() : '';
+    const reasonText = rawReason || 'This agent is currently paused by administrator for scheduled maintenance or algorithmic updates. Please check back soon.';
+
+    if (banner) {
+      banner.style.display = 'block';
+    }
+    if (reasonEl) {
+      reasonEl.innerHTML = `<strong>Reason:</strong> ${escapeHtml(reasonText)}`;
+    }
+
+    if (btn) {
+      if (!btn.dataset.originalHtml) {
+        btn.dataset.originalHtml = btn.innerHTML;
+      }
+      btn.disabled = true;
+      btn.style.opacity = '0.55';
+      btn.style.cursor = 'not-allowed';
+      btn.title = `Disabled by Admin: ${reasonText}`;
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> 🔒 Offline (Admin Disabled)`;
+    }
+
+    updateAgentConsole('Agent Offline (Disabled)', `🛑 Admin Notice: ${reasonText}`);
+  } else {
+    if (banner) {
+      banner.style.display = 'none';
+    }
+    if (btn) {
+      if (btn.disabled && btn.dataset.originalHtml) {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        btn.title = '';
+        btn.innerHTML = btn.dataset.originalHtml;
+      }
+    }
+  }
+}
+
+function ensureAgentEnabledOrBlock(agentId) {
+  if (!agentId) return true;
+  const statusInfo = state.agentStatusMap ? state.agentStatusMap[agentId] : null;
+  if (statusInfo && statusInfo.enabled === false) {
+    const rawReason = (statusInfo.reason && typeof statusInfo.reason === 'string') ? statusInfo.reason.trim() : '';
+    const reasonText = rawReason || 'This agent is currently paused by administrator for scheduled maintenance.';
+    alert(`🛑 Agent Temporarily Offline\n\nAgent: ${statusInfo.name || agentId}\nStatus: Disabled by Administrator\nReason: ${reasonText}\n\nPlease check back later.`);
+    return false;
+  }
+  return true;
+}
+
 function openAgentDetailView(agentId) {
+  state.currentDetailAgentId = agentId;
   const meta = AGENT_META[agentId] || { title: agentId, icon: '⚡', badge: 'AUTO', desc: '' };
   const titleEl = document.getElementById('detailAgentTitle');
   const iconEl = document.getElementById('detailAgentIcon');
@@ -6136,9 +6834,13 @@ function openAgentDetailView(agentId) {
   }
 
   updateAgentConsole('Ready to Launch', `Workspace loaded for ${meta.title}. Set parameters above.`);
+
+  // Update maintenance banner and button lock based on admin status
+  updateDetailViewMaintenanceBanner(agentId);
 }
 
 function closeAgentDetailView() {
+  state.currentDetailAgentId = null;
   const bentoView = document.getElementById('agentsBentoView');
   const detailView = document.getElementById('agentDetailView');
   if (detailView) detailView.style.display = 'none';
@@ -8066,8 +8768,21 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
 
           // Cache so future raids skip this tweet locally
           state.engagedTweetIds = Array.from(new Set([...(state.engagedTweetIds || []), t.tweetId]));
-          if (chrome.storage?.local) chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
-
+          state.skippedItems = state.skippedItems || [];
+          state.skippedItems.push({
+            url: t.canonicalUrl,
+            handle: t.handle,
+            tweetId: t.tweetId,
+            reason: reasonStr
+          });
+          if (chrome.storage?.local) {
+            chrome.storage.local.set({ engagedTweetIds: state.engagedTweetIds });
+            chrome.storage.local.get(['atomx_tg_raid'], (r) => {
+              if (r?.atomx_tg_raid) {
+                chrome.storage.local.set({ atomx_tg_raid: { ...r.atomx_tg_raid, skippedItems: state.skippedItems } });
+              }
+            });
+          }
 
           await chrome.storage?.local?.set({ atomx_skip_current: false }).catch(() => null);
           syncFloatingHud(tgWorkingTabId, {
@@ -8077,6 +8792,15 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
             progressPercent: Math.round(((i + 1) / total) * 100),
             statusText: `${indexStr} Skipped @${t.handle || 'user'} (already done)`
           });
+          if (i < total - 1 && !state.isAborted) {
+            if (tgCountdown) tgCountdown.style.display = 'block';
+            for (let sec = 3; sec > 0; sec--) {
+              if (state.isAborted) break;
+              if (tgCountdown) tgCountdown.textContent = `Next tweet in 0:0${sec}`;
+              await sleep(1000);
+            }
+            if (tgCountdown) tgCountdown.style.display = 'none';
+          }
           continue;
         }
 
@@ -8116,8 +8840,7 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
         if (i < total - 1 && !state.isAborted) {
           const safetyRes = await chrome.storage.local.get(['atomx_safety_settings']).catch(() => ({}));
           const safety = safetyRes?.atomx_safety_settings || {};
-          const breakAfter = getSafetyBatchBreakActions(safety, 10, 15);
-          const isBatchBreak = breakAfter > 0 && successCount > 0 && successCount % breakAfter === 0;
+          const isBatchBreak = shouldTakeSafetyBatchBreak(successCount, state, safety, 10, 15);
 
           const waitDurationSec = isBatchBreak
             ? getSafetyRestDurationSec(safety, 1, 3)
@@ -8134,11 +8857,16 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
 
             if (isBatchBreak) {
               if (tgStatus) tgStatus.textContent = `☕ Safety Batch Break: Resting ${timeStr} after ${successCount} tweets...`;
-              if (tgCountdown) tgCountdown.textContent = `☕ Break: ${timeStr} remaining...`;
+              if (tgCountdown) tgCountdown.textContent = `☕ Batch Rest: ${timeStr}`;
             } else {
-              if (tgStatus) tgStatus.textContent = `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`;
-              if (tgCountdown) tgCountdown.textContent = `Next tweet in ${timeStr}`;
+              if (tgStatus) tgStatus.textContent = `⏳ Profile Wait (Between Accounts): ${sec}s before tweet ${i + 2}/${total}...`;
+              if (tgCountdown) tgCountdown.textContent = `Profile Wait: ${timeStr}`;
             }
+
+            const countdownLabel = isBatchBreak ? `☕ Batch Rest: ${timeStr}` : `Profile Wait: ${timeStr}`;
+            const statusMsg = isBatchBreak
+              ? `☕ Safety Batch Break: Resting ${timeStr} after ${successCount} tweets...`
+              : `⏳ Profile Wait (Between Accounts): ${sec}s before tweet ${i + 2}/${total}...`;
 
             syncFloatingHud(null, {
               title: 'Telegram Group Engage',
@@ -8148,11 +8876,12 @@ async function executeAutonomousRaidWorkflow(tweets, actions, logCallback = null
               collected: total,
               skipped: ignoredCount,
               progressPercent: donePercent,
-              statusText: isBatchBreak
-                ? `☕ Safety Batch Break: Resting ${timeStr} after ${successCount} tweets...`
-                : `Anti-ban delay: ${sec}s before tweet ${i + 2}/${total}...`
+              statusText: statusMsg,
+              countdownText: countdownLabel,
+              nextAction: countdownLabel,
+              timerBadge: `⏱️ ${timeStr}`
             });
-            logger(isBatchBreak ? 'Safety Batch Rest' : `Pacing Safety Delay (${indexStr})`, `Waiting ${timeStr} before next post...`, `${i + 1}/${total}`);
+            logger(isBatchBreak ? 'Safety Batch Rest' : `Profile Wait (${indexStr})`, `Waiting ${timeStr} before next post...`, `${i + 1}/${total}`);
             await sleep(1000);
           }
           if (tgCountdown) tgCountdown.style.display = 'none';

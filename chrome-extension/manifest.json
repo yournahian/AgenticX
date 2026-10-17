@@ -54,7 +54,9 @@
     "scripting",
     "sidePanel",
     "alarms",
-    "debugger"
+    "debugger",
+    "downloads",
+    "tabCapture"
   ],
   "host_permissions": [
     "*://twitter.com/*",

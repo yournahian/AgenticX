@@ -297,13 +297,24 @@ module.exports = {
 
   async getAllLedger() {
     if (!supabase) return [];
-    const { data } = await supabase
-      .from('credits_ledger')
-      .select('*, users(full_name, email, handle)')
-      .order('created_at', { ascending: false })
-      .limit(10000);
+    let allRecords = [];
+    const pageSize = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('credits_ledger')
+        .select('*, users(full_name, email, handle)')
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
 
-    return (data || []).map(l => {
+      if (error || !data || data.length === 0) break;
+      allRecords = allRecords.concat(data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+      if (allRecords.length >= 100000) break;
+    }
+
+    return allRecords.map(l => {
       const handleMatch = (l.reason || '').match(/for\s+(@?[\w_]+)/i);
       const userHandle = l.users?.handle || (handleMatch ? handleMatch[1] : null);
       return {
@@ -313,6 +324,26 @@ module.exports = {
         user_handle: userHandle ? (userHandle.startsWith('@') ? userHandle : `@${userHandle}`) : null
       };
     });
+  },
+
+  async getLedgerCount() {
+    if (!supabase) return 0;
+    try {
+      const { count } = await supabase.from('credits_ledger').select('*', { count: 'exact', head: true });
+      return count || 0;
+    } catch (e) {
+      return 0;
+    }
+  },
+
+  async getAiGenerationsCount() {
+    if (!supabase) return 0;
+    try {
+      const { count } = await supabase.from('credits_ledger').select('*', { count: 'exact', head: true }).lt('amount', 0);
+      return count || 0;
+    } catch (e) {
+      return 0;
+    }
   },
 
   // Access Requests & Approval
