@@ -909,7 +909,7 @@ function renderAdminPasswordGate(container, targetScreenId = '12') {
         <div class="auth-logo" style="text-align:center; margin-bottom:20px;">
           <div class="atomx-brand" style="font-size:24px; justify-content:center; display:inline-flex; align-items:center; gap:8px;">
             <div class="atomx-logo-icon" style="width:28px; height:28px;"></div>
-            <span class="atomx-brand-main" style="font-weight:800;">ATOMX</span>
+            <span class="atomx-brand-main" style="font-weight:800;">Twixor</span>
             <span class="badge-admin-tag" style="background:var(--blue-primary); color:#fff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px;">ADMIN</span>
           </div>
         </div>
@@ -946,7 +946,7 @@ function renderAdminPasswordGate(container, targetScreenId = '12') {
         </form>
 
         <div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border-subtle); text-align:center; font-size:12px; color:var(--text-secondary);">
-          ATOMX ENGAGE &bull; Admin Security Control Center
+          Twixor &bull; Admin Security Control Center
         </div>
       </div>
     </div>
@@ -1216,12 +1216,11 @@ function renderRequestAccess(container) {
         <div class="auth-logo">
           <div class="atomx-brand" style="font-size: 24px;">
             <div class="atomx-logo-icon" style="width: 26px; height: 26px;"></div>
-            <span class="atomx-brand-main">ATOMX</span>
-            <span class="atomx-brand-sub">ENGAGE</span>
+            <span class="atomx-brand-main">Twixor</span>
           </div>
         </div>
         <h1 class="auth-title">Request Access</h1>
-        <p class="auth-desc">Create your ATOMX ENGAGE account.</p>
+        <p class="auth-desc">Create your Twixor account.</p>
 
         <form onsubmit="handleRequestAccessSubmit(event)">
           <div class="form-group">
@@ -1308,8 +1307,7 @@ function renderPendingApproval(container) {
         <div class="auth-logo">
           <div class="atomx-brand" style="font-size: 22px;">
             <div class="atomx-logo-icon" style="width: 24px; height: 24px;"></div>
-            <span class="atomx-brand-main">ATOMX</span>
-            <span class="atomx-brand-sub">ENGAGE</span>
+            <span class="atomx-brand-main">Twixor</span>
           </div>
         </div>
         
@@ -2160,7 +2158,7 @@ function renderCreditsPlans(container) {
         <div class="workspace-header">
           <div>
             <h1 class="page-title">Credits</h1>
-            <p class="page-subtitle">Manage your ATOMX usage and subscription tiers.</p>
+            <p class="page-subtitle">Manage your Twixor usage and subscription tiers.</p>
           </div>
         </div>
 
@@ -2468,14 +2466,14 @@ function copyUserRefLink() {
 
 function shareRefLink(platform) {
   const handle = (AtomXState.currentUser.handle || 'user').replace('@','');
-  const refUrl = `https://atomxengage.com/ref/${handle}`;
-  const text = `Join ATOMX ENGAGE for autonomous AI Twitter growth! Use my referral link to get 150 bonus credits: ${refUrl}`;
+  const refUrl = `https://twixor.io/ref/${handle}`;
+  const text = `Join Twixor for autonomous AI Twitter growth! Use my referral link to get 150 bonus credits: ${refUrl}`;
   
   let url = '';
   if (platform === 'x') {
     url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
   } else if (platform === 'tg') {
-    url = `https://t.me/share/url?url=${encodeURIComponent(refUrl)}&text=${encodeURIComponent('Join ATOMX ENGAGE & get 150 bonus credits!')}`;
+    url = `https://t.me/share/url?url=${encodeURIComponent(refUrl)}&text=${encodeURIComponent('Join Twixor & get 150 bonus credits!')}`;
   } else if (platform === 'wa') {
     url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
   } else if (platform === 'fb') {
@@ -6876,8 +6874,7 @@ function renderSuspended(container) {
         <div class="auth-logo">
           <div class="atomx-brand" style="font-size: 22px;">
             <div class="atomx-logo-icon" style="width: 24px; height: 24px; background:var(--status-error);"></div>
-            <span class="atomx-brand-main">ATOMX</span>
-            <span class="atomx-brand-sub">ENGAGE</span>
+            <span class="atomx-brand-main">Twixor</span>
           </div>
         </div>
 
@@ -6886,7 +6883,7 @@ function renderSuspended(container) {
         </div>
 
         <h1 class="auth-title">Your access has been suspended.</h1>
-        <p class="auth-desc">Your account currently does not have access to ATOMX ENGAGE. Please reach out to customer support to appeal or resolve this issue.</p>
+        <p class="auth-desc">Your account currently does not have access to Twixor. Please reach out to customer support to appeal or resolve this issue.</p>
 
         <div style="margin: 18px 0;">
           <span class="badge badge-error" style="font-size: 13px; padding: 6px 14px;">SUSPENDED</span>
@@ -6992,7 +6989,7 @@ function renderSystemArchitecture(container) {
               <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:12px; font-weight:600; margin-bottom:14px;">
                 <span class="badge badge-neutral" style="padding:8px 12px;">User Requests Reply</span>
                 <span>→</span>
-                <span class="badge badge-info" style="padding:8px 12px;">ATOMX Backend Validates Credits (≥ 1)</span>
+                <span class="badge badge-info" style="padding:8px 12px;">Twixor Backend Validates Credits (≥ 1)</span>
                 <span>→</span>
                 <span class="badge badge-neutral" style="padding:8px 12px;">Backend Calls OpenAI API (Secret Key Server-Side)</span>
                 <span>→</span>
@@ -7403,7 +7400,7 @@ function renderMobileHeaderHTML() {
     <div class="mobile-header-bar">
       <div class="atomx-brand" style="font-size:16px;">
         <div class="atomx-logo-icon" style="width:18px; height:18px;"></div>
-        <span class="atomx-brand-main">ATOMX</span>
+        <span class="atomx-brand-main">Twixor</span>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
         <button class="sidebar-theme-toggle" onclick="toggleTheme()" style="padding:4px 8px; border-radius:6px; font-size:13px;" title="Toggle Dark/Light Mode">
