@@ -9,7 +9,7 @@ const path = require('path');
 const os = require('os');
 
 const SYSTEM_PROMPT_TEMPLATE = `
-You are ATOMX ENGAGE, an elite AI content engagement strategist.
+You are Twixor, an elite AI content engagement strategist.
 Your mission is to generate authentic, high-value, highly-engaging replies to Twitter/X posts.
 
 CORE MISSION RULES:
@@ -408,8 +408,8 @@ async function fetchLiveModels(provider, customApiKey = null, customBaseUrl = nu
 
       case 'openrouter': {
         const headers = {
-          'HTTP-Referer': 'https://atomx.io',
-          'X-Title': 'ATOMX ENGAGE'
+          'HTTP-Referer': 'https://twixor.io',
+          'X-Title': 'Twixor'
         };
         if (apiKey) {
           headers['Authorization'] = `Bearer ${apiKey}`;
@@ -845,8 +845,8 @@ async function executeProviderCall({
         endpoint = 'https://api.groq.com/openai/v1/chat/completions';
       } else if (normProv === 'openrouter') {
         endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-        headers['HTTP-Referer'] = 'https://atomx.io';
-        headers['X-Title'] = 'ATOMX ENGAGE';
+        headers['HTTP-Referer'] = 'https://twixor.io';
+        headers['X-Title'] = 'Twixor';
       }
 
       const response = await fetch(endpoint, {

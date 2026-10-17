@@ -1,7 +1,7 @@
 {
-  "name": "atomx-engage",
+  "name": "twixor",
   "version": "1.0.0",
-  "description": "ATOMX ENGAGE — Premium AI Engagement Platform & Chrome Extension",
+  "description": "Twixor — Premium AI Engagement Platform & Chrome Extension",
   "main": "api/index.js",
   "scripts": {
     "start": "node backend/server.js",

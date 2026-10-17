@@ -876,7 +876,7 @@ async function handleStartTgRaid(request, sendResponse) {
     const tgStatus = statusRes?.atomx_agent_status_map?.['telegram'];
     if (tgStatus && tgStatus.enabled === false) {
       const reason = tgStatus.reason ? ` Reason: ${tgStatus.reason}` : '';
-      sendResponse({ ok: false, error: `Telegram Group Engage is disabled by administrator.${reason}` });
+      sendResponse({ ok: false, error: `TG Pulse is disabled by administrator.${reason}` });
       return;
     }
   } catch (e) {}
@@ -1294,7 +1294,7 @@ async function finishTgRaid(raid) {
 
   await chrome.storage.local.set({
     atomx_active_hud: {
-      title: 'Telegram Group Engage',
+      title: 'TG Pulse',
       stateBadge: 'DONE',
       indicator: `${total}/${total}`,
       done: successCount,
@@ -1323,7 +1323,7 @@ async function abortTgRaid() {
     await chrome.storage.local.set({
       atomx_tg_raid: { ...raid, active: false, stateBadge: 'STOPPED', statusText: 'Workflow stopped by user.', countdownText: '', nextAction: 'Stopped', timerBadge: '⏹️ Stopped' },
       atomx_active_hud: {
-        title: 'Telegram Group Engage',
+        title: 'TG Pulse',
         stateBadge: 'STOPPED',
         done: raid.successCount || 0,
         collected: raid.total || 0,

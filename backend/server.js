@@ -79,7 +79,7 @@ app.use('/api/', generalLimiter);
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
-    service: 'ATOMX ENGAGE API',
+    service: 'Twixor API',
     version: '1.0.0',
     timestamp: new Date().toISOString()
   });
@@ -108,7 +108,7 @@ app.get('*', (req, res, next) => {
   if (fs.existsSync(indexPath)) {
     return res.sendFile(indexPath);
   }
-  res.send('<!DOCTYPE html><html><head><title>ATOMX ENGAGE</title></head><body style="background:#0b0f19;color:#fff;font-family:sans-serif;padding:40px;"><h2>ATOMX ENGAGE</h2><p>API & Backend Active.</p></body></html>');
+  res.send('<!DOCTYPE html><html><head><title>Twixor</title></head><body style="background:#0b0f19;color:#fff;font-family:sans-serif;padding:40px;"><h2>Twixor</h2><p>API & Backend Active.</p></body></html>');
 });
 
 // Global Error Handler
@@ -124,7 +124,7 @@ app.use((err, req, res, next) => {
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`\n======================================================`);
-    console.log(`  ⚡ ATOMX ENGAGE BACKEND SERVER RUNNING ON PORT ${PORT}`);
+    console.log(`  ⚡ TWIXOR BACKEND SERVER RUNNING ON PORT ${PORT}`);
     console.log(`  🔗 Local API URL:    http://localhost:${PORT}/api`);
     console.log(`  🌐 Web App / SPA:    http://localhost:${PORT}`);
     console.log(`  🔒 Security Rules:   1 Credit = 1 AI Reply | Server Truth`);

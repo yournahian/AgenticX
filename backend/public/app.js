@@ -2032,15 +2032,15 @@ async function approveAndDeductCredit() {
 // -------------------------------------------------------------
 function renderAgents(container) {
   const agentsList = [
-    { id: 'telegram', title: 'TELEGRAM GROUP ENGAGE', desc: 'Paste Telegram engagement/raid links. Bot auto-visits, likes, comments, and replies automatically.', icon: '✈️', badge: 'POPULAR' },
-    { id: 'audience', title: 'AUDIENCE BUILDER', desc: 'Target specific audiences & influencers. Premium includes 2 free curated lists for auto-follow & engagement.', icon: '👥', badge: 'GROWTH' },
-    { id: 'sorsa', title: 'INCREASE SORSA SCORE', desc: 'Target high-tier crypto accounts & influencers to maximize your Sorsa Score for airdrops and promotions.', icon: '⚡', badge: 'HIGH ROI' },
-    { id: 'followers', title: 'FOLLOWERS INCREASE', desc: 'Target highly active users from specific lists with smart replies to trigger maximum follow-backs.', icon: '📈', badge: 'VIRAL' },
+    { id: 'telegram', title: 'TG PULSE', desc: 'Paste Telegram engagement/raid links. Bot auto-visits, likes, comments, and replies automatically.', icon: '✈️', badge: 'POPULAR' },
+    { id: 'audience', title: 'CROWDFI', desc: 'Target specific audiences & influencers. Premium includes 2 free curated lists for auto-follow & engagement.', icon: '👥', badge: 'GROWTH' },
+    { id: 'sorsa', title: 'SCORE ACCELERATOR', desc: 'Target high-tier crypto accounts & influencers to maximize your Score for airdrops and promotions.', icon: '⚡', badge: 'HIGH ROI' },
+    { id: 'followers', title: 'GROWTHFI', desc: 'Target highly active users from specific lists with smart replies to trigger maximum follow-backs.', icon: '📈', badge: 'VIRAL' },
     { id: 'postgen', title: 'POST GENERATOR', desc: 'Turn raw notes, shower thoughts, or links into polished Medium, Long, or viral Thread posts.', icon: '✍️', badge: 'READY' },
-    { id: 'replyback', title: 'REPLY BACK', desc: 'Paste your tweet URL. Bot automatically likes and contextually replies to all incoming comments.', icon: '🔄', badge: 'AUTO' },
+    { id: 'replyback', title: 'REPLYWAVE', desc: 'Paste your tweet URL. Bot automatically likes and contextually replies to all incoming comments.', icon: '🔄', badge: 'AUTO' },
     { id: 'unfollow', title: 'AUTO UNFOLLOW', desc: 'Safely detect & unfollow non-followers or low Walchain score accounts with custom anti-ban delay.', icon: '🧹', badge: 'SAFETY' },
     { id: 'match', title: 'PICTURE & VOICE MATCH', desc: 'Generate custom AI images and match your authentic writing style and persona voice.', icon: '🎨', badge: 'AI MODEL' },
-    { id: 'creators', title: 'FAVORITE CREATORS', desc: 'Save favorite creator handles (@handles) to track their tweets and engage instantly when they post.', icon: '⭐', badge: 'SAVED' },
+    { id: 'creators', title: 'CREATORX', desc: 'Save favorite creator handles (@handles) to track their tweets and engage instantly when they post.', icon: '⭐', badge: 'SAVED' },
     { id: 'reply', title: 'AI REPLY ASSISTANT', desc: 'Contextual split-view reply studio powered by OpenAI, Gemini, Groq, and OpenRouter.', icon: '💬', badge: 'MULTI-LLM' }
   ];
 
@@ -3969,14 +3969,179 @@ function renderAdminAIEngine(container) {
 // -------------------------------------------------------------
 // SCREEN 14: UNIFIED USERS & ACCESS MANAGEMENT (ADMIN)
 // -------------------------------------------------------------
-function setAdminUserFilter(filter) {
-  AtomXState.userFilter = filter;
-  renderAdminUsers(document.getElementById('mainContentArea'));
-}
-
+let _adminSearchDebounce = null;
 function setAdminUserSearch(query) {
   AtomXState.userSearchQuery = query;
-  renderAdminUsers(document.getElementById('mainContentArea'));
+  clearTimeout(_adminSearchDebounce);
+  _adminSearchDebounce = setTimeout(() => {
+    updateAdminUsersTableDOM();
+  }, 100);
+}
+
+function setAdminUserFilter(filter) {
+  AtomXState.userFilter = filter;
+  updateAdminUsersTableDOM();
+}
+
+function renderAdminUsersRowsHTML(displayed, pwdReqs, activeFilter) {
+  if (!displayed || displayed.length === 0) {
+    return `
+      <tr>
+        <td colspan="9" style="text-align:center; padding:36px; color:var(--text-muted);">
+          <div style="font-size:24px; margin-bottom:6px;">👥</div>
+          <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:2px;">No Accounts in "${activeFilter || 'All'}"</div>
+          <div style="font-size:12px;">Try switching filter tabs or clear your search query.</div>
+        </td>
+      </tr>
+    `;
+  }
+  return displayed.map(u => {
+    const s = u.rawStatus;
+    const isPending = s === 'PENDING';
+    const isSuspended = s === 'SUSPENDED';
+    const isRejected = s === 'REJECTED';
+    const isActive = s === 'ACTIVE';
+
+    const cleanUHandle = (u.handle || '').toLowerCase().replace(/^@/, '');
+    const cleanUEmail = (u.email || '').toLowerCase();
+    const hasPwdReq = (pwdReqs || []).some(pr => {
+      const prHandle = (pr.handle || pr.user || '').toLowerCase().replace(/^@/, '');
+      const prEmail = (pr.email || '').toLowerCase();
+      const prReason = (pr.reason || '').toLowerCase();
+      return (cleanUHandle && (prHandle === cleanUHandle || prReason.includes(cleanUHandle))) ||
+             (cleanUEmail && (prEmail === cleanUEmail || prReason.includes(cleanUEmail)));
+    });
+
+    const cleanHandle = (u.handle || '@user').replace(/^@/, '');
+    const handleLink = `<a href="https://x.com/${cleanHandle}" target="_blank" onclick="event.stopPropagation();" style="color:var(--blue-primary); text-decoration:none; font-weight:700;">@${cleanHandle}</a>`;
+
+    return `
+    <tr onclick="openAdminUserProfileModal('${u.id}')" style="cursor:pointer;" class="clickable-user-row" title="Click to view full user profile & settings">
+      <td style="font-weight:600;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div class="user-avatar" style="width:28px; height:28px; font-size:11px; background:var(--border-subtle); color:var(--text-primary);">
+            ${(u.name || 'U').slice(0, 2).toUpperCase()}
+          </div>
+          <div>
+            <span>${u.name}</span>
+            ${hasPwdReq ? `<span class="badge badge-warning" style="font-size:9.5px; padding:1px 4px; margin-left:4px;" title="User requested password reset">🔑 Reset Req</span>` : ''}
+          </div>
+        </div>
+      </td>
+      <td>${handleLink}</td>
+      <td style="color:var(--text-secondary);">
+        <div>${u.email}</div>
+        ${u.telegram ? `<div style="font-size:11px; color:#229ED9; font-weight:600; margin-top:2px;">✈️ ${u.telegram}</div>` : ''}
+      </td>
+      <td>
+        <span class="badge badge-neutral" style="font-size:11px;">${u.plan || 'Free'}</span>
+      </td>
+      <td style="font-weight:700; color:var(--text-primary); font-size:12px;">
+        ${(u.credits || 0).toLocaleString()}
+      </td>
+      <td>
+        <span class="badge ${isPending ? 'badge-warning' : isSuspended ? 'badge-error' : isRejected ? 'badge-error' : 'badge-success'}">
+          ${s}
+        </span>
+      </td>
+      <td>
+        ${u.referredBy && u.referredBy !== 'Direct / —' ? 
+          `<span style="color:#229ED9; font-weight:700; font-family:monospace; font-size:12px;">${u.referredBy}</span>` : 
+          `<span style="color:var(--text-muted); font-size:12px;">Direct / —</span>`}
+      </td>
+      <td style="color:var(--text-muted); font-size:11px;">${u.dateDisplay}</td>
+      <td style="text-align:right;" onclick="event.stopPropagation();">
+        <div style="display:inline-flex; gap:6px; justify-content:flex-end; align-items:center;">
+          ${isPending ? `
+            <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')">Approve</button>
+            <button class="btn btn-danger btn-sm" onclick="rejectUserRequest('${u.id}')">Reject</button>
+          ` : isRejected ? `
+            <span class="badge badge-error" style="font-size:11px; font-weight:700;">Rejected</span>
+            <button class="btn btn-secondary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')" style="margin-left:4px;">Re-Approve</button>
+          ` : isSuspended ? `
+            <span class="badge badge-error" style="font-size:11px; font-weight:700;">Suspended</span>
+            <button class="btn btn-secondary btn-sm" onclick="openAdminUserProfileModal('${u.id}')" style="margin-left:4px;">Profile</button>
+          ` : `
+            <span class="badge badge-success" style="font-size:11px; font-weight:700;">Approved</span>
+            <button class="btn btn-secondary btn-sm" onclick="openAdminUserProfileModal('${u.id}')" style="margin-left:4px;">Profile</button>
+          `}
+        </div>
+      </td>
+    </tr>
+    `;
+  }).join('');
+}
+
+function updateAdminUsersTableDOM() {
+  const tbody = document.getElementById('adminUsersTbody');
+  if (!tbody) {
+    renderAdminUsers(document.getElementById('mainContentArea'));
+    return;
+  }
+  const activeFilter = AtomXState.userFilter || 'All';
+  const searchQuery = (AtomXState.userSearchQuery || '').toLowerCase().trim();
+
+  const registeredUsers = (AtomXState.adminUsers || []).map(u => ({
+    ...u,
+    type: 'user',
+    handle: u.handle || '@user',
+    referredBy: u.referredBy || u.referred_by || 'Direct / —',
+    rawStatus: (u.status || 'ACTIVE').toUpperCase(),
+    dateDisplay: u.lastActive || 'Active'
+  }));
+
+  const accessReqs = (AtomXState.accessRequests || []).map(r => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    telegram: r.telegram || '',
+    handle: r.handle || '@user',
+    plan: 'Pending Tier',
+    credits: 0,
+    type: 'request',
+    referredBy: r.referredBy || r.referred_by || 'Direct / —',
+    rawStatus: (r.status || 'PENDING').toUpperCase(),
+    dateDisplay: r.requestedDate || 'Recent'
+  }));
+
+  const registeredEmails = new Set(registeredUsers.map(u => (u.email || '').toLowerCase()));
+  const pendingOrUniqueReqs = accessReqs.filter(r => {
+    if (r.rawStatus === 'PENDING') return true;
+    if (r.rawStatus === 'REJECTED') return true;
+    return !registeredEmails.has((r.email || '').toLowerCase());
+  });
+
+  const allAccounts = [...pendingOrUniqueReqs.filter(r => r.rawStatus === 'PENDING'), ...registeredUsers, ...pendingOrUniqueReqs.filter(r => r.rawStatus !== 'PENDING')];
+  const pwdReqs = AtomXState.passwordRequests || [];
+
+  let displayed = allAccounts.filter(acc => {
+    if (activeFilter === 'Pending') return acc.rawStatus === 'PENDING';
+    if (activeFilter === 'Active') return acc.rawStatus === 'ACTIVE';
+    if (activeFilter === 'Suspended') return acc.rawStatus === 'SUSPENDED';
+    if (activeFilter === 'Rejected') return acc.rawStatus === 'REJECTED';
+    return true;
+  });
+
+  if (searchQuery) {
+    displayed = displayed.filter(acc => {
+      const n = (acc.name || '').toLowerCase();
+      const e = (acc.email || '').toLowerCase();
+      const h = (acc.handle || '').toLowerCase();
+      return n.includes(searchQuery) || e.includes(searchQuery) || h.includes(searchQuery);
+    });
+  }
+
+  // Update pills active status
+  document.querySelectorAll('.style-pills .style-pill').forEach(pill => {
+    const text = (pill.textContent || '').trim();
+    if (text.startsWith(activeFilter) || (activeFilter === 'All' && text.startsWith('All'))) {
+      pill.classList.add('active');
+    } else {
+      pill.classList.remove('active');
+    }
+  });
+
+  tbody.innerHTML = renderAdminUsersRowsHTML(displayed, pwdReqs, activeFilter);
 }
 
 function renderAdminAccessRequests(container) {
@@ -4111,90 +4276,8 @@ function renderAdminUsers(container) {
                   <th style="text-align:right;">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                ${displayed.length === 0 ? `
-                  <tr>
-                    <td colspan="9" style="text-align:center; padding:36px; color:var(--text-muted);">
-                      <div style="font-size:24px; margin-bottom:6px;">👥</div>
-                      <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:2px;">No Accounts in "${activeFilter}"</div>
-                      <div style="font-size:12px;">Try switching filter tabs or clear your search query.</div>
-                    </td>
-                  </tr>
-                ` : displayed.map(u => {
-                  const s = u.rawStatus;
-                  const isPending = s === 'PENDING';
-                  const isSuspended = s === 'SUSPENDED';
-                  const isRejected = s === 'REJECTED';
-                  const isActive = s === 'ACTIVE';
-
-                  const cleanUHandle = (u.handle || '').toLowerCase().replace(/^@/, '');
-                  const cleanUEmail = (u.email || '').toLowerCase();
-                  const hasPwdReq = pwdReqs.some(pr => {
-                    const prHandle = (pr.handle || pr.user || '').toLowerCase().replace(/^@/, '');
-                    const prEmail = (pr.email || '').toLowerCase();
-                    const prReason = (pr.reason || '').toLowerCase();
-                    return (cleanUHandle && (prHandle === cleanUHandle || prReason.includes(cleanUHandle))) ||
-                           (cleanUEmail && (prEmail === cleanUEmail || prReason.includes(cleanUEmail)));
-                  });
-
-                  const cleanHandle = (u.handle || '@user').replace(/^@/, '');
-                  const handleLink = `<a href="https://x.com/${cleanHandle}" target="_blank" onclick="event.stopPropagation();" style="color:var(--blue-primary); text-decoration:none; font-weight:700;">@${cleanHandle}</a>`;
-
-                  return `
-                  <tr onclick="openAdminUserProfileModal('${u.id}')" style="cursor:pointer;" class="clickable-user-row" title="Click to view full user profile & settings">
-                    <td style="font-weight:600;">
-                      <div style="display:flex; align-items:center; gap:8px;">
-                        <div class="user-avatar" style="width:28px; height:28px; font-size:11px; background:var(--border-subtle); color:var(--text-primary);">
-                          ${(u.name || 'U').slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <span>${u.name}</span>
-                          ${hasPwdReq ? `<span class="badge badge-warning" style="font-size:9.5px; padding:1px 4px; margin-left:4px;" title="User requested password reset">🔑 Reset Req</span>` : ''}
-                        </div>
-                      </div>
-                    </td>
-                    <td>${handleLink}</td>
-                    <td style="color:var(--text-secondary);">
-                      <div>${u.email}</div>
-                      ${u.telegram ? `<div style="font-size:11px; color:#229ED9; font-weight:600; margin-top:2px;">✈️ ${u.telegram}</div>` : ''}
-                    </td>
-                    <td>
-                      <span class="badge badge-neutral" style="font-size:11px;">${u.plan || 'Free'}</span>
-                    </td>
-                    <td style="font-weight:700; color:var(--text-primary); font-size:12px;">
-                      ${(u.credits || 0).toLocaleString()}
-                    </td>
-                    <td>
-                      <span class="badge ${isPending ? 'badge-warning' : isSuspended ? 'badge-error' : isRejected ? 'badge-error' : 'badge-success'}">
-                        ${s}
-                      </span>
-                    </td>
-                    <td>
-                      ${u.referredBy && u.referredBy !== 'Direct / —' ? 
-                        `<span style="color:#229ED9; font-weight:700; font-family:monospace; font-size:12px;">${u.referredBy}</span>` : 
-                        `<span style="color:var(--text-muted); font-size:12px;">Direct / —</span>`}
-                    </td>
-                    <td style="color:var(--text-muted); font-size:11px;">${u.dateDisplay}</td>
-                    <td style="text-align:right;" onclick="event.stopPropagation();">
-                      <div style="display:inline-flex; gap:6px; justify-content:flex-end; align-items:center;">
-                        ${isPending ? `
-                          <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')">Approve</button>
-                          <button class="btn btn-danger btn-sm" onclick="rejectUserRequest('${u.id}')">Reject</button>
-                        ` : isRejected ? `
-                          <span class="badge badge-error" style="font-size:11px; font-weight:700;">Rejected</span>
-                          <button class="btn btn-secondary btn-sm" onclick="openApprovalModal('${u.name}', '${u.email}', '${u.handle}', '${u.id}', '${u.telegram || ''}')" style="margin-left:4px;">Re-Approve</button>
-                        ` : isSuspended ? `
-                          <span class="badge badge-error" style="font-size:11px; font-weight:700;">Suspended</span>
-                          <button class="btn btn-secondary btn-sm" onclick="openAdminUserProfileModal('${u.id}')" style="margin-left:4px;">Profile</button>
-                        ` : `
-                          <span class="badge badge-success" style="font-size:11px; font-weight:700;">Approved</span>
-                          <button class="btn btn-secondary btn-sm" onclick="openAdminUserProfileModal('${u.id}')" style="margin-left:4px;">Profile</button>
-                        `}
-                      </div>
-                    </td>
-                  </tr>
-                  `;
-                }).join('')}
+              <tbody id="adminUsersTbody">
+                ${renderAdminUsersRowsHTML(displayed, pwdReqs, activeFilter)}
               </tbody>
             </table>
           </div>
@@ -5582,8 +5665,8 @@ async function renderAdminCuratedLists(container) {
       <div class="app-workspace">
         <div class="workspace-header">
           <div>
-            <h1 class="page-title">Curated Lists & Sorsa Targets</h1>
-            <p class="page-subtitle">Manage, update, and broadcast curated influencer accounts and live Twitter list URLs for Audience Builder and Sorsa Score agents.</p>
+            <h1 class="page-title">Curated Lists & Score Targets</h1>
+            <p class="page-subtitle">Manage, update, and broadcast curated influencer accounts and live Twitter list URLs for CrowdFi and Score Accelerator agents.</p>
           </div>
           <div style="display:flex; gap:10px;">
             <button class="btn btn-secondary btn-sm" onclick="promptAddNewCustomList()">+ Add New List</button>
@@ -5607,7 +5690,7 @@ async function renderAdminCuratedLists(container) {
             </div>
             <div class="stat-card">
               <div class="stat-label">INTEGRATED AGENTS</div>
-              <div class="stat-value">${new Set(listKeys.map(k => lists[k].category || 'Audience Builder')).size}</div>
+              <div class="stat-value">${new Set(listKeys.map(k => lists[k].category || 'CrowdFi')).size}</div>
               <div class="stat-trend" style="color:var(--blue-primary);">Active in Curated Feeds</div>
             </div>
           </div>
@@ -5635,9 +5718,9 @@ async function renderAdminCuratedLists(container) {
                       <div>
                         <label style="font-size:9.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:2px;">ASSIGNED AGENT:</label>
                         <select id="listcat-${k}" onchange="updateListCategory('${k}', this.value)" class="form-input" style="font-size:11px; padding:3px 4px; width:100%;">
-                          <option value="Audience Builder" ${l.category === 'Audience Builder' ? 'selected' : ''}>Audience Builder</option>
-                          <option value="Increase Sorsa Score" ${l.category === 'Increase Sorsa Score' ? 'selected' : ''}>Sorsa Score</option>
-                          <option value="Followers Increase" ${l.category === 'Followers Increase' ? 'selected' : ''}>Followers Growth</option>
+                          <option value="Audience Builder" ${l.category === 'Audience Builder' || l.category === 'CrowdFi' ? 'selected' : ''}>CrowdFi</option>
+                          <option value="Increase Sorsa Score" ${l.category === 'Increase Sorsa Score' || l.category === 'Score Accelerator' ? 'selected' : ''}>Score Accelerator</option>
+                          <option value="Followers Increase" ${l.category === 'Followers Increase' || l.category === 'GrowthFi' ? 'selected' : ''}>GrowthFi</option>
                         </select>
                       </div>
                       <div>
@@ -5659,10 +5742,10 @@ async function renderAdminCuratedLists(container) {
                     <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.4;">${l.description}</p>
 
                     ${(() => {
-                      const isListUrlOnly = l.category === 'Audience Builder' || l.category === 'Followers Increase';
+                      const isListUrlOnly = l.category === 'Audience Builder' || l.category === 'CrowdFi' || l.category === 'Followers Increase' || l.category === 'GrowthFi';
                       if (isListUrlOnly) {
                         return `
-                          <!-- Twitter List URL Input (STRICTLY REQUIRED FOR AUDIENCE BUILDER & FOLLOWERS GROWTH) -->
+                          <!-- Twitter List URL Input (STRICTLY REQUIRED FOR CROWDFI & GROWTHFI) -->
                           <div style="background:var(--bg-canvas); border:1px solid rgba(56, 189, 248, 0.35); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:14px;">
                             <label class="form-label" style="font-size:11px; font-weight:700; color:var(--blue-primary); margin-bottom:4px; display:flex; justify-content:space-between;">
                               <span>🔗 TWITTER / X LIST URL:</span>
@@ -5681,12 +5764,12 @@ async function renderAdminCuratedLists(container) {
                           </div>
                         `;
                       } else {
-                        // Increase Sorsa Score (Handles / CSV only)
+                        // Increase Sorsa Score / Score Accelerator (Handles / CSV only)
                         return `
-                          <!-- Notice: Twitter List URLs not supported for Sorsa Score -->
+                          <!-- Notice: Twitter List URLs not supported for Score Accelerator -->
                           <div style="background:rgba(239, 68, 68, 0.06); border:1px solid rgba(239, 68, 68, 0.25); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:12px; font-size:11px; line-height:1.4;">
                             <div style="font-weight:700; color:#EF4444; margin-bottom:2px;">🚫 Twitter List URLs Not Supported</div>
-                            <div style="color:var(--text-secondary);">Increase Sorsa Score strictly uses target handles / CSV lists. Admin cannot assign Twitter List URLs to this agent.</div>
+                            <div style="color:var(--text-secondary);">Score Accelerator strictly uses target handles / CSV lists. Admin cannot assign Twitter List URLs to this agent.</div>
                           </div>
 
                           <!-- Target Chips & Count Control -->
@@ -5776,8 +5859,8 @@ function removeTargetFromList(listKey, index) {
 function promptAddNewCustomList() {
   const name = prompt('Enter List Name (e.g., "Web3 Founders Alpha"):');
   if (!name || !name.trim()) return;
-  const cat = prompt('Enter Agent Category:\n1 = Audience Builder (Twitter List URL only)\n2 = Increase Sorsa Score (Usernames / CSV only)\n3 = Followers Increase (Twitter List URL only)', '1');
-  let category = 'Audience Builder';
+  const cat = prompt('Enter Agent Category:\n1 = CrowdFi (Twitter List URL only)\n2 = Score Accelerator (Usernames / CSV only)\n3 = GrowthFi (Twitter List URL only)', '1');
+  let category = 'CrowdFi';
   let listUrl = '';
   let targets = [];
 
@@ -5787,7 +5870,7 @@ function promptAddNewCustomList() {
   } else {
     if (cat === '3') category = 'Followers Increase';
     else category = 'Audience Builder';
-    const enteredUrl = prompt(`Enter Twitter/X List URL for ${category} (e.g. https://x.com/i/lists/...):`, '');
+    const enteredUrl = prompt(`Enter Twitter/X List URL for ${category === 'Audience Builder' ? 'CrowdFi' : 'GrowthFi'} (e.g. https://x.com/i/lists/...):`, '');
     listUrl = (enteredUrl || '').trim();
     targets = [];
   }
@@ -5855,16 +5938,16 @@ async function saveCuratedListsToServer() {
     const item = AtomXState.curatedLists[k];
     if (!item) continue;
     const cat = item.category || 'Audience Builder';
-    if (cat === 'Audience Builder' || cat === 'Followers Increase') {
-      item.targets = []; // Strictly no username targets for Audience Builder or Followers Increase
+    if (cat === 'Audience Builder' || cat === 'CrowdFi' || cat === 'Followers Increase' || cat === 'GrowthFi') {
+      item.targets = []; // Strictly no username targets for CrowdFi or GrowthFi
       const trimmedUrl = (item.listUrl || '').trim();
       const isValidList = trimmedUrl.includes('x.com/i/lists/') || trimmedUrl.includes('twitter.com/i/lists/') || /^\d{10,25}$/.test(trimmedUrl);
       if (!isValidList) {
         alert(`⚠️ Cannot Save: "${item.name}" is assigned to ${cat}.\n\nThis agent ONLY supports Twitter List URLs (e.g. https://x.com/i/lists/...). CSV and username handles are not allowed.\n\nPlease enter a valid Twitter List URL.`);
         return false;
       }
-    } else if (cat === 'Increase Sorsa Score') {
-      item.listUrl = ''; // Strictly no Twitter List URLs for Increase Sorsa Score
+    } else if (cat === 'Increase Sorsa Score' || cat === 'Score Accelerator') {
+      item.listUrl = ''; // Strictly no Twitter List URLs for Score Accelerator
     }
   }
 
@@ -5904,15 +5987,15 @@ async function saveCuratedListsToServer() {
 function updateListCategory(listKey, newCategory) {
   if (AtomXState.curatedLists[listKey]) {
     AtomXState.curatedLists[listKey].category = newCategory;
-    if (newCategory === 'Audience Builder' || newCategory === 'Followers Increase') {
+    if (newCategory === 'Audience Builder' || newCategory === 'CrowdFi' || newCategory === 'Followers Increase' || newCategory === 'GrowthFi') {
       AtomXState.curatedLists[listKey].targets = [];
       if (!AtomXState.curatedLists[listKey].listUrl || !AtomXState.curatedLists[listKey].listUrl.includes('x.com/i/lists/')) {
         AtomXState.curatedLists[listKey].listUrl = '';
       }
       showToast(`✓ Set to ${newCategory}: Live Twitter List URL only (CSV/usernames disabled)`);
-    } else if (newCategory === 'Increase Sorsa Score') {
+    } else if (newCategory === 'Increase Sorsa Score' || newCategory === 'Score Accelerator') {
       AtomXState.curatedLists[listKey].listUrl = '';
-      showToast(`✓ Set to Sorsa Score: Usernames & CSV only (Twitter List URLs disabled)`);
+      showToast(`✓ Set to Score Accelerator: Usernames & CSV only (Twitter List URLs disabled)`);
     }
     renderAdminCuratedLists(document.getElementById('mainContentArea'));
   }
@@ -6082,10 +6165,10 @@ function openImportGoogleSheetModal() {
           <div>
             <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">3. Target Agent:</label>
             <select id="importTargetAgentSelect" class="form-input" style="font-size:11.5px; padding:6px 8px; width:100%;" disabled>
-              <option value="Increase Sorsa Score" selected>Increase Sorsa Score</option>
+              <option value="Increase Sorsa Score" selected>Score Accelerator</option>
             </select>
             <div style="font-size:9.5px; color:var(--text-secondary); margin-top:2px;">
-              Audience & Followers only support Twitter List URLs.
+              CrowdFi & GrowthFi only support Twitter List URLs.
             </div>
           </div>
           <div>
@@ -7150,8 +7233,7 @@ function renderSidebarHTML(activeId) {
       <div class="sidebar-header">
         <a href="javascript:void(0)" onclick="navigateToScreen('04')" class="atomx-brand">
           <div class="atomx-logo-icon"></div>
-          <span class="atomx-brand-main">ATOMX</span>
-          <span class="atomx-brand-sub">ENGAGE</span>
+          <span class="atomx-brand-main">Twixor</span>
         </a>
       </div>
 
@@ -7230,7 +7312,7 @@ function renderAdminSidebarHTML(activeId) {
       <div class="sidebar-header">
         <a href="javascript:void(0)" onclick="navigateToScreen('12')" class="atomx-brand">
           <div class="atomx-logo-icon"></div>
-          <span class="atomx-brand-main">ATOMX</span>
+          <span class="atomx-brand-main">Twixor</span>
           <span class="badge-admin-tag">ADMIN</span>
         </a>
       </div>
@@ -7576,7 +7658,42 @@ async function loadAdminServerData(preserveScroll = true) {
       return;
     }
 
-    if (!isUserTyping && activeAdminScreens.includes(AtomXState.currentScreen)) {
+    if (preserveScroll) {
+      // In-place updates for Screen 12 (Overview)
+      if (AtomXState.currentScreen === '12') {
+        const users = AtomXState.adminUsers || [];
+        const reqs = AtomXState.accessRequests || [];
+        const ledger = AtomXState.creditLedger || [];
+        const totalUsers = users.length;
+        const activeUsers = users.filter(u => (u.status || '').toUpperCase() === 'ACTIVE').length;
+        const pendingCount = reqs.filter(r => (r.status || '').toUpperCase() === 'PENDING').length;
+        const circulatingCredits = users.reduce((acc, u) => acc + (u.credits || 0), 0);
+        const totalAIGenerations = Math.max(ledger.length, AtomXState.adminStats?.totalAIGenerations || 0);
+
+        const elU = document.getElementById('adminTotalUsersVal');
+        if (elU) elU.textContent = totalUsers;
+        const elA = document.getElementById('adminActiveUsersVal');
+        if (elA) elA.textContent = activeUsers;
+        const elP = document.getElementById('adminPendingReqsVal');
+        if (elP) elP.textContent = pendingCount;
+        const elC = document.getElementById('adminCreditsCircVal');
+        if (elC) elC.textContent = circulatingCredits.toLocaleString();
+        const elAi = document.getElementById('adminAIActionsVal');
+        if (elAi) elAi.textContent = totalAIGenerations.toLocaleString();
+        return;
+      }
+
+      // In-place updates for Screen 14 (Users)
+      if (AtomXState.currentScreen === '14' || AtomXState.currentScreen === '13') {
+        if (!isUserTyping && typeof updateAdminUsersTableDOM === 'function') {
+          updateAdminUsersTableDOM();
+        }
+        return;
+      }
+    }
+
+    const isModalOpen = !!document.querySelector('.modal-backdrop');
+    if (!isUserTyping && !isModalOpen && activeAdminScreens.includes(AtomXState.currentScreen)) {
       navigateToScreen(AtomXState.currentScreen, preserveScroll);
     }
   } catch (err) {
@@ -7595,12 +7712,13 @@ function initAtomXApp() {
       loadAdminServerData(false);
     }
 
-    // Fast background sync every 10 seconds only when authenticated without jumping scroll
+    // High-efficiency background sync every 25 seconds only when authenticated and tab is active
     setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       if (AtomXState.isAdminAuthenticated && ['12', '13', '14', '15', '16', '17', '20', '21', '22', '23'].includes(AtomXState.currentScreen)) {
         loadAdminServerData(true);
       }
-    }, 10000);
+    }, 25000);
 
     window.addEventListener('hashchange', () => {
       const currentHash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';

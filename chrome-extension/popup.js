@@ -253,7 +253,7 @@ let followerWorkingTabId = null;
 let replyBackWorkingTabId = null;
 let autoUnfollowWorkingTabId = null;
 let reciprocatorWorkingTabId = null;
-let tgWorkingTabId = null; // Telegram Group Engage working tab
+let tgWorkingTabId = null; // TG Pulse working tab
 
 function isValidTwitterHandle(handle) {
   if (!handle || typeof handle !== 'string') return false;
@@ -5596,7 +5596,7 @@ function populateAudienceSelect() {
   keys.forEach((k) => {
     const item = lists[k];
     const isPublished = (item.status || 'published') === 'published' || (item.status || '').toLowerCase() === 'live';
-    const isAudience = item.category === 'Audience Builder' || /audience/i.test(item.category || '');
+    const isAudience = item.category === 'Audience Builder' || item.category === 'CrowdFi' || /audience|crowdfi/i.test(item.category || '');
     const validListUrl = item.listUrl && extractTwitterListUrl(item.listUrl);
     // STRICT RULE: Audience Builder ONLY accepts Twitter List URLs (no handles or CSV)
     if (isAudience && isPublished && validListUrl) {
@@ -5788,7 +5788,7 @@ function initSorsaScoreSystem() {
   keys.forEach((k) => {
     const item = lists[k];
     const isPublished = (item.status || 'published') === 'published' || (item.status || '').toLowerCase() === 'live';
-    const isSorsa = item.category === 'Increase Sorsa Score' || item.category === 'Sorsa Score' || /sorsa/i.test(item.category || '');
+    const isSorsa = item.category === 'Increase Sorsa Score' || item.category === 'Sorsa Score' || item.category === 'Score Accelerator' || /sorsa|score/i.test(item.category || '');
     const hasTargets = Array.isArray(item.targets) && item.targets.length > 0;
     const hasNoListUrl = !item.listUrl || !extractTwitterListUrl(item.listUrl);
     // STRICT RULE: Increase Sorsa Score ONLY accepts username targets / CSV (NO Twitter List URLs)
@@ -5833,7 +5833,7 @@ function initFollowersListsSystem() {
   Object.keys(lists).forEach((k) => {
     const item = lists[k];
     const isPublished = (item.status || 'published') === 'published' || (item.status || '').toLowerCase() === 'live';
-    const isFollowers = item.category === 'Followers Increase' || item.category === 'Followers Growth' || /follower/i.test(item.category || '');
+    const isFollowers = item.category === 'Followers Increase' || item.category === 'Followers Growth' || item.category === 'GrowthFi' || /follower|growthfi/i.test(item.category || '');
     const validListUrl = item.listUrl && extractTwitterListUrl(item.listUrl);
     // STRICT RULE: Followers Increase ONLY accepts Twitter List URLs (no handles or CSV)
     if (isFollowers && isPublished && validListUrl) {

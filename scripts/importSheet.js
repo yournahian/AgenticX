@@ -112,9 +112,9 @@ function importSheet(filePath) {
   const toRank = parseInt(getCliArg('--to-rank', '0'), 10);
 
   const rawAgent = getCliArg('--agent', 'sorsa').toLowerCase();
-  let targetAgent = 'Increase Sorsa Score';
-  if (rawAgent.includes('aud')) targetAgent = 'Audience Builder';
-  else if (rawAgent.includes('follow')) targetAgent = 'Followers Increase';
+  let targetAgent = 'Score Accelerator';
+  if (rawAgent.includes('aud') || rawAgent.includes('crowd')) targetAgent = 'CrowdFi';
+  else if (rawAgent.includes('follow') || rawAgent.includes('growth')) targetAgent = 'GrowthFi';
 
   const rawAccess = getCliArg('--access', 'free').toLowerCase();
   const targetAccess = rawAccess.includes('paid') || rawAccess.includes('pro') ? 'paid' : 'free';

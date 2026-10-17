@@ -8,9 +8,36 @@ const os = require('os');
 const db = require('../config/db');
 const supabase = require('../config/supabase');
 
+// High-Performance In-Memory Cache for Admin Dashboard (10s TTL)
+const ADMIN_CACHE = {
+  users: { data: null, time: 0 },
+  requests: { data: null, time: 0 },
+  stats: { data: null, time: 0 },
+  transactions: { data: null, time: 0 },
+  passwordRequests: { data: null, time: 0 },
+  ledger: { data: null, time: 0 }
+};
+const CACHE_TTL_MS = 10000;
+
+function invalidateAdminCache() {
+  ADMIN_CACHE.users.data = null;
+  ADMIN_CACHE.requests.data = null;
+  ADMIN_CACHE.stats.data = null;
+  ADMIN_CACHE.transactions.data = null;
+  ADMIN_CACHE.passwordRequests.data = null;
+  ADMIN_CACHE.ledger.data = null;
+}
+
+exports.invalidateAdminCache = invalidateAdminCache;
+
 exports.getUsers = async (req, res) => {
   try {
+    const now = Date.now();
+    if (ADMIN_CACHE.users.data && (now - ADMIN_CACHE.users.time < CACHE_TTL_MS)) {
+      return res.json({ users: ADMIN_CACHE.users.data });
+    }
     const users = await db.getAllUsers();
+    ADMIN_CACHE.users = { data: users, time: now };
     res.json({ users });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -25,6 +52,7 @@ exports.toggleUserStatus = async (req, res) => {
 
   try {
     await db.updateUserStatus(userId, status);
+    invalidateAdminCache();
     res.json({ message: `User status updated to ${status}`, userId, status });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -33,7 +61,12 @@ exports.toggleUserStatus = async (req, res) => {
 
 exports.getAccessRequests = async (req, res) => {
   try {
+    const now = Date.now();
+    if (ADMIN_CACHE.requests.data && (now - ADMIN_CACHE.requests.time < CACHE_TTL_MS)) {
+      return res.json({ requests: ADMIN_CACHE.requests.data });
+    }
     const requests = await db.getAccessRequests();
+    ADMIN_CACHE.requests = { data: requests, time: now };
     res.json({ requests });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -50,6 +83,7 @@ exports.approveRequest = async (req, res) => {
     const credits = Number(initialCredits) || 100;
     const plan = planTier || 'Free Plan';
     const result = await db.approveAccessRequest(requestId, credits, plan);
+    invalidateAdminCache();
 
     if (plan && !plan.toLowerCase().includes('free')) {
       try {
@@ -87,6 +121,7 @@ exports.rejectRequest = async (req, res) => {
 
   try {
     await db.rejectAccessRequest(requestId);
+    invalidateAdminCache();
     res.json({
       success: true,
       message: 'Access request successfully rejected.'
@@ -106,6 +141,7 @@ exports.adjustCredits = async (req, res) => {
 
   try {
     const newBalance = await db.addCredits(targetId, amount, action, 'Admin Control Panel', reason);
+    invalidateAdminCache();
     res.json({
       message: 'Credit adjustment successful',
       userId: targetId,
@@ -125,6 +161,7 @@ exports.setUserPassword = async (req, res) => {
 
   try {
     const updated = await db.updateUserPassword(targetId, String(password).trim());
+    invalidateAdminCache();
     res.json({
       message: 'Password successfully updated for user',
       user: { id: updated.id, email: updated.email, handle: updated.handle }
@@ -142,6 +179,7 @@ exports.updateUserPlan = async (req, res) => {
   }
   try {
     const updated = await db.updateUserPlan(targetId, plan);
+    invalidateAdminCache();
 
     if (plan && !plan.toLowerCase().includes('free')) {
       try {
@@ -176,6 +214,7 @@ exports.deleteUser = async (req, res) => {
   }
   try {
     const result = await db.deleteUser(targetId);
+    invalidateAdminCache();
     res.json({
       success: true,
       message: 'User account and associated data permanently deleted from database.',
@@ -188,7 +227,15 @@ exports.deleteUser = async (req, res) => {
 
 exports.getPasswordRequests = async (req, res) => {
   try {
-    const ledger = await db.getAllLedger();
+    const now = Date.now();
+    if (ADMIN_CACHE.passwordRequests.data && (now - ADMIN_CACHE.passwordRequests.time < CACHE_TTL_MS)) {
+      return res.json({ requests: ADMIN_CACHE.passwordRequests.data });
+    }
+    const ledger = (ADMIN_CACHE.ledger.data && (now - ADMIN_CACHE.ledger.time < CACHE_TTL_MS))
+      ? ADMIN_CACHE.ledger.data
+      : await db.getAllLedger();
+    ADMIN_CACHE.ledger = { data: ledger, time: now };
+
     const requests = (ledger || []).filter(l => l.action === 'Forgot Password').map(l => {
       const handleMatch = (l.reason || '').match(/for\s+(@?[\w_]+)/i);
       const tgMatch = (l.reason || '').match(/TG:\s*(@?[\w_]+)/i);
@@ -203,6 +250,7 @@ exports.getPasswordRequests = async (req, res) => {
         telegram: tgMatch ? tgMatch[1] : ''
       };
     });
+    ADMIN_CACHE.passwordRequests = { data: requests, time: now };
     res.json({ requests });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -213,6 +261,7 @@ exports.resolvePasswordRequest = async (req, res) => {
   try {
     const { userId, handle } = req.body;
     await db.resolvePasswordReset(userId || handle);
+    invalidateAdminCache();
     res.json({ success: true, message: 'Password reset request marked as resolved.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -221,7 +270,12 @@ exports.resolvePasswordRequest = async (req, res) => {
 
 exports.getTransactions = async (req, res) => {
   try {
+    const now = Date.now();
+    if (ADMIN_CACHE.transactions.data && (now - ADMIN_CACHE.transactions.time < CACHE_TTL_MS)) {
+      return res.json({ success: true, transactions: ADMIN_CACHE.transactions.data });
+    }
     const transactions = await db.getTransactions();
+    ADMIN_CACHE.transactions = { data: transactions, time: now };
     res.json({ success: true, transactions });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -231,6 +285,7 @@ exports.getTransactions = async (req, res) => {
 exports.createTransaction = async (req, res) => {
   try {
     const tx = await db.recordTransaction(req.body);
+    invalidateAdminCache();
     res.json({ success: true, transaction: tx });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -340,7 +395,12 @@ exports.savePlans = async (req, res) => {
 
 exports.getGlobalLedger = async (req, res) => {
   try {
+    const now = Date.now();
+    if (ADMIN_CACHE.ledger.data && (now - ADMIN_CACHE.ledger.time < CACHE_TTL_MS)) {
+      return res.json({ ledger: ADMIN_CACHE.ledger.data });
+    }
     const ledger = await db.getAllLedger();
+    ADMIN_CACHE.ledger = { data: ledger, time: now };
     res.json({ ledger });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -349,10 +409,29 @@ exports.getGlobalLedger = async (req, res) => {
 
 exports.getStats = async (req, res) => {
   try {
-    const users = await db.getAllUsers();
-    const requests = await db.getAccessRequests();
-    const ledger = await db.getAllLedger();
-    const transactions = await db.getTransactions();
+    const now = Date.now();
+    if (ADMIN_CACHE.stats.data && (now - ADMIN_CACHE.stats.time < CACHE_TTL_MS)) {
+      return res.json(ADMIN_CACHE.stats.data);
+    }
+    const users = (ADMIN_CACHE.users.data && (now - ADMIN_CACHE.users.time < CACHE_TTL_MS))
+      ? ADMIN_CACHE.users.data
+      : await db.getAllUsers();
+    ADMIN_CACHE.users = { data: users, time: now };
+
+    const requests = (ADMIN_CACHE.requests.data && (now - ADMIN_CACHE.requests.time < CACHE_TTL_MS))
+      ? ADMIN_CACHE.requests.data
+      : await db.getAccessRequests();
+    ADMIN_CACHE.requests = { data: requests, time: now };
+
+    const ledger = (ADMIN_CACHE.ledger.data && (now - ADMIN_CACHE.ledger.time < CACHE_TTL_MS))
+      ? ADMIN_CACHE.ledger.data
+      : await db.getAllLedger();
+    ADMIN_CACHE.ledger = { data: ledger, time: now };
+
+    const transactions = (ADMIN_CACHE.transactions.data && (now - ADMIN_CACHE.transactions.time < CACHE_TTL_MS))
+      ? ADMIN_CACHE.transactions.data
+      : await db.getTransactions();
+    ADMIN_CACHE.transactions = { data: transactions, time: now };
 
     // Calculate real MRR from active paid user plan tiers
     const mrrTotal = users.filter(u => u.status === 'ACTIVE' && u.plan_tier && !u.plan_tier.toLowerCase().includes('free')).reduce((sum, u) => {
@@ -376,7 +455,7 @@ exports.getStats = async (req, res) => {
     const totalAIGenCount = Math.max(ledgerDeductionsCount, logsSuccessCount, apiLogs.length, exactDbAiGens);
     const totalLedgerCount = Math.max(ledger.length, await db.getLedgerCount().catch(() => 0));
 
-    res.json({
+    const statsPayload = {
       totalUsers: users.length,
       activeUsers: users.filter(u => u.status === 'ACTIVE').length,
       suspendedUsers: users.filter(u => u.status === 'SUSPENDED').length,
@@ -386,7 +465,10 @@ exports.getStats = async (req, res) => {
       totalLedgerCount,
       mrr: `$${mrrTotal}`,
       revenue: `$${totalRevenue.toFixed(0)}`
-    });
+    };
+
+    ADMIN_CACHE.stats = { data: statsPayload, time: now };
+    res.json(statsPayload);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1178,6 +1260,7 @@ exports.testSingleKey = async (req, res) => {
 exports.wipeAllUsers = async (req, res) => {
   try {
     const result = await db.wipeAllUserData();
+    invalidateAdminCache();
     res.json({
       success: true,
       message: '✓ All user data, access requests, credits ledgers, and engaged tweets have been completely wiped fresh!',

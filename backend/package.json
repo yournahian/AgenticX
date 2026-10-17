@@ -1,7 +1,7 @@
 {
-  "name": "atomx-engage-backend",
+  "name": "twixor-backend",
   "version": "1.0.0",
-  "description": "ATOMX ENGAGE — Production API, server-controlled credits, and AI reply engine",
+  "description": "Twixor — Production API, server-controlled credits, and AI reply engine",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,12 +9,12 @@
     "test": "node test/api.test.js"
   },
   "keywords": [
-    "atomx",
+    "twixor",
     "ai",
     "credits",
     "saas"
   ],
-  "author": "ATOMX ENGAGE Team",
+  "author": "Twixor Team",
   "license": "MIT",
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

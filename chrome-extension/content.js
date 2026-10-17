@@ -53,15 +53,15 @@ function injectAtomXButtons() {
   actionBars.forEach(bar => {
     bar.setAttribute('data-atomx-injected', 'true');
 
-    // Create AtomX Quick Reply Button
+    // Create Twixor Quick Reply Button
     const btn = document.createElement('button');
     btn.className = 'atomx-inline-btn';
-    btn.title = 'Generate ATOMX AI Reply';
+    btn.title = 'Generate Twixor AI Reply';
     btn.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
       </svg>
-      <span>AtomX</span>
+      <span>Twixor</span>
     `;
 
     btn.addEventListener('click', async (e) => {
@@ -94,10 +94,10 @@ function injectAtomXButtons() {
         }, 500);
 
       } catch (err) {
-        console.error('Error generating AtomX inline reply:', err);
+        console.error('Error generating Twixor inline reply:', err);
       } finally {
         btn.classList.remove('loading');
-        btn.querySelector('span').textContent = 'AtomX';
+        btn.querySelector('span').textContent = 'Twixor';
       }
     });
 
@@ -786,7 +786,7 @@ function ensureVirtualCursorActive() {
       </svg>
       <div class="atomx-cursor-ripple"></div>
     </div>
-    <div class="atomx-cursor-badge">AtomX</div>
+    <div class="atomx-cursor-badge">Twixor</div>
   `;
 
   const initialX = Math.round(window.innerWidth * 0.6);
@@ -2583,7 +2583,7 @@ function ensureFloatingHud() {
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px;">
       <div style="display: flex; align-items: center; gap: 7px;">
         <span id="hud-badge" style="background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px;">RUNNING</span>
-        <strong id="hud-title" style="font-size: 13px; font-weight: 700; color: #FFFFFF;">AtomX Agent</strong>
+        <strong id="hud-title" style="font-size: 13px; font-weight: 700; color: #FFFFFF;">Twixor Agent</strong>
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
         <span id="hud-indicator" style="font-size: 11px; font-weight: 700; color: #60A5FA;">Active</span>
