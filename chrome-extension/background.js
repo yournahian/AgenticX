@@ -10,7 +10,7 @@
  *     State is persisted in chrome.storage.local and resumed via chrome.alarms.
  */
 
-const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
+const DEFAULT_BACKEND_URL = 'http://localhost:5000';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MODE B: CHROME DEVTOOLS PROTOCOL (CDP) DEBUGGER API INTEGRATION

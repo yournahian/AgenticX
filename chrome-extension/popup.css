@@ -69,11 +69,16 @@ body {
 .ext-logo-icon {
   width: 28px;
   height: 28px;
-  background: linear-gradient(135deg, #3157E6, #1A3499);
+  background: url("assets/logo-light.png") no-repeat center;
+  background-size: contain;
   border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .ext-logo-icon,
+body.dark .ext-logo-icon {
+  background-image: url("assets/logo-dark.png");
 }
 
 .brand-text {

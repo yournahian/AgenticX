@@ -80,7 +80,15 @@ Copy-Item $whiteTextTransparentPath -Destination (Join-Path $backendAssetsDir "l
 # Extension Assets
 $extAssetsDir = "c:\Users\user\Documents\VsCode\Next.js\PlayGround\Twixor\chrome-extension\assets"
 if (!(Test-Path $extAssetsDir)) { New-Item -ItemType Directory -Path $extAssetsDir -Force | Out-Null }
+Copy-Item $whiteTextTransparentPath -Destination (Join-Path $extAssetsDir "logo-dark.png") -Force
+Copy-Item $darkTextTransparentPath -Destination (Join-Path $extAssetsDir "logo-light.png") -Force
 Copy-Item $whiteTextTransparentPath -Destination (Join-Path $extAssetsDir "logo.png") -Force
+Resize-Image -InputPath $darkSquarePath -OutputPath (Join-Path $assetsDir "icon-dark.png") -Width 512 -Height 512
+Resize-Image -InputPath $lightSquarePath -OutputPath (Join-Path $assetsDir "icon-light.png") -Width 512 -Height 512
+Resize-Image -InputPath $darkSquarePath -OutputPath (Join-Path $backendAssetsDir "icon-dark.png") -Width 512 -Height 512
+Resize-Image -InputPath $lightSquarePath -OutputPath (Join-Path $backendAssetsDir "icon-light.png") -Width 512 -Height 512
+Copy-Item (Join-Path $assetsDir "icon-dark.png") -Destination (Join-Path $extAssetsDir "icon-dark.png") -Force
+Copy-Item (Join-Path $assetsDir "icon-light.png") -Destination (Join-Path $extAssetsDir "icon-light.png") -Force
 Copy-Item (Join-Path $extIconDir "icon128.png") -Destination (Join-Path $extAssetsDir "icon.png") -Force
 
 # Generate .ico files

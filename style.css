@@ -129,13 +129,18 @@ body {
 }
 
 .atomx-logo-icon {
-  width: 24px;
-  height: 24px;
-  background: url("assets/icon.png") no-repeat center;
+  width: 26px;
+  height: 26px;
+  background: url("assets/logo-light.png") no-repeat center;
   background-size: contain;
-  border-radius: 6px;
   display: inline-block;
   flex-shrink: 0;
+  vertical-align: middle;
+}
+
+[data-theme="dark"] .atomx-logo-icon,
+body.dark .atomx-logo-icon {
+  background-image: url("assets/logo-dark.png");
 }
 
 .atomx-brand-main {

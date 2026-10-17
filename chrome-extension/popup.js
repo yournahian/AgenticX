@@ -3,18 +3,20 @@
  * Full 10 Autonomous Agents Suite + Multi-Provider AI + Anti-Ban Pacing
  */
 
-const DEFAULT_BACKEND_URL = 'https://agenticx-two.vercel.app';
+const DEFAULT_BACKEND_URL = 'http://localhost:5000';
+const CLOUD_BACKEND_URL = 'https://agenticx-two.vercel.app';
 
 async function getBackendUrl() {
-  let url = DEFAULT_BACKEND_URL;
+  let url = '';
   try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const res = await Promise.race([
-        chrome.storage.local.get(['backendUrl']),
-        new Promise(r => setTimeout(() => r({}), 600))
+    if (typeof chrome !== 'undefined') {
+      const [localRes, syncRes] = await Promise.all([
+        chrome.storage?.local ? chrome.storage.local.get(['backendUrl']).catch(() => ({})) : {},
+        chrome.storage?.sync ? chrome.storage.sync.get(['backendUrl']).catch(() => ({})) : {}
       ]);
-      if (res?.backendUrl && typeof res.backendUrl === 'string' && !res.backendUrl.includes('localhost') && !res.backendUrl.includes('127.0.0.1') && res.backendUrl.startsWith('http')) {
-        url = res.backendUrl;
+      const stored = localRes?.backendUrl || syncRes?.backendUrl;
+      if (stored && typeof stored === 'string' && stored.startsWith('http')) {
+        url = stored;
       }
     }
   } catch(e) {}
@@ -22,25 +24,41 @@ async function getBackendUrl() {
 }
 
 /**
- * Robust network fetch with timeout and automatic background service worker relay.
- * Prevents mobile (Kiwi Browser / Android) popup network sandbox hangs and CORS drops.
+ * Robust network fetch with timeout, dual endpoint fallback (local <-> cloud),
+ * and automatic background service worker relay.
  */
 async function fetchApiWithFallback(endpoint, options = {}, timeoutMs = 12000) {
   const backendUrl = await getBackendUrl();
-  const fullUrl = endpoint.startsWith('http') ? endpoint : `${backendUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  
+  // Prioritize configured URL, then try alternative fallback
+  const endpointsToTry = [`${backendUrl}${cleanEndpoint}`];
+  if (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) {
+    endpointsToTry.push(`${CLOUD_BACKEND_URL}${cleanEndpoint}`);
+  } else {
+    endpointsToTry.push(`http://localhost:5000${cleanEndpoint}`);
+  }
 
-  // 1. Direct fetch with AbortController timeout
-  try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(fullUrl, {
-      ...options,
-      signal: controller.signal
-    });
-    clearTimeout(tid);
-    return res;
-  } catch (directErr) {
-    console.warn(`[ATOMX POPUP] Direct fetch to ${endpoint} failed or timed out (${directErr?.message}). Relaying through background service worker...`);
+  let lastResponse = null;
+
+  for (const fullUrl of endpointsToTry) {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(fullUrl, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(tid);
+
+      // If we got a valid response (not a 404 deployment error)
+      if (res.status !== 404 || !fullUrl.includes('vercel.app')) {
+        return res;
+      }
+      lastResponse = res;
+    } catch (directErr) {
+      console.warn(`[Twixor POPUP] Direct fetch to ${fullUrl} failed: ${directErr?.message}`);
+    }
   }
 
   // 2. Automatic Fallback: Relay through background service worker
@@ -74,8 +92,9 @@ async function fetchApiWithFallback(endpoint, options = {}, timeoutMs = 12000) {
     }
     throw new Error('Empty response from background relay');
   } catch (relayErr) {
-    console.error('[ATOMX POPUP] Background relay also failed:', relayErr);
-    throw new Error('Network connection failed. Please verify your connection to https://agenticx-two.vercel.app.');
+    console.error('[Twixor POPUP] Background relay failed:', relayErr);
+    if (lastResponse) return lastResponse;
+    throw new Error(`Cannot connect to backend server at ${backendUrl}. Please ensure your backend server (node backend/server.js) is running on port 5000.`);
   }
 }
 
@@ -569,7 +588,7 @@ function showExtNotification(message, options = {}) {
   }
 
   const str = String(message || '');
-  let title = options.title || 'ATOMX Notification';
+  let title = options.title || 'Twixor Notification';
   let icon = options.icon || '✨';
   let iconClass = '';
 
@@ -8133,7 +8152,11 @@ async function handleExtLogin() {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      throw new Error(data.error || data.message || 'Invalid credentials. Please request access if not registered.');
+      const serverErr = data.error || data.message;
+      if (serverErr) {
+        throw new Error(serverErr);
+      }
+      throw new Error(`Backend server unreachable or returned status ${res.status}. Please make sure backend is running (node backend/server.js).`);
     }
 
     state.user = data.user;

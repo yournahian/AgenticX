@@ -17,7 +17,10 @@ async function saveSettings() {
   const backendUrl = document.getElementById('backendUrlInput').value.trim() || 'http://localhost:5000';
   const defaultStyle = document.getElementById('defaultStyleSelect').value;
 
-  await chrome.storage.sync.set({ backendUrl, defaultStyle });
+  await Promise.all([
+    chrome.storage.sync.set({ backendUrl, defaultStyle }),
+    chrome.storage.local ? chrome.storage.local.set({ backendUrl, defaultStyle }) : Promise.resolve()
+  ]);
   showMessage('✓ Settings saved successfully!', '#22A06B');
 }
 
